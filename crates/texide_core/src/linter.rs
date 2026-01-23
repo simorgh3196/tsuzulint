@@ -286,4 +286,111 @@ mod tests {
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
+
+    #[test]
+    fn test_build_globset_invalid_pattern() {
+        let patterns = vec!["[invalid".to_string()];
+        let result = Linter::build_globset(&patterns);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_linter_with_cache_disabled() {
+        let mut config = LinterConfig::new();
+        config.cache = false;
+
+        let linter = Linter::new(config).unwrap();
+        // Verify linter was created successfully with cache disabled
+        assert!(linter.include_globs.is_none());
+    }
+
+    #[test]
+    fn test_linter_with_include_patterns() {
+        let mut config = LinterConfig::new();
+        config.include = vec!["**/*.md".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+        assert!(linter.include_globs.is_some());
+    }
+
+    #[test]
+    fn test_linter_with_exclude_patterns() {
+        let mut config = LinterConfig::new();
+        config.exclude = vec!["**/node_modules/**".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+        assert!(linter.exclude_globs.is_some());
+    }
+
+    #[test]
+    fn test_linter_select_parser_markdown() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        let parser = linter.select_parser("md");
+        assert_eq!(parser.name(), "markdown");
+
+        let parser = linter.select_parser("markdown");
+        assert_eq!(parser.name(), "markdown");
+    }
+
+    #[test]
+    fn test_linter_select_parser_text() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        let parser = linter.select_parser("txt");
+        assert_eq!(parser.name(), "text");
+
+        let parser = linter.select_parser("text");
+        assert_eq!(parser.name(), "text");
+    }
+
+    #[test]
+    fn test_linter_select_parser_unknown_defaults_to_text() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        let parser = linter.select_parser("unknown");
+        assert_eq!(parser.name(), "text");
+    }
+
+    #[test]
+    fn test_build_globset_multiple_patterns() {
+        let patterns = vec![
+            "**/*.md".to_string(),
+            "**/*.txt".to_string(),
+            "docs/**/*".to_string(),
+        ];
+        let result = Linter::build_globset(&patterns);
+        assert!(result.is_ok());
+
+        let globset = result.unwrap().unwrap();
+        assert!(globset.is_match("file.md"));
+        assert!(globset.is_match("dir/file.txt"));
+        assert!(globset.is_match("docs/readme.md"));
+    }
+
+    #[test]
+    fn test_linter_ast_to_json() {
+        use texide_ast::{AstArena, NodeType, Span, TxtNode};
+
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        let arena = AstArena::new();
+        let text_node = arena.alloc(TxtNode::new_text(
+            NodeType::Str,
+            Span::new(0, 5),
+            "hello",
+        ));
+        let children = arena.alloc_slice_copy(&[*text_node]);
+        let doc = TxtNode::new_parent(NodeType::Document, Span::new(0, 5), children);
+
+        let json = linter.ast_to_json(&doc, "hello");
+
+        assert_eq!(json["type"], "Document");
+        assert!(json["range"].is_array());
+        assert!(json["children"].is_array());
+    }
 }

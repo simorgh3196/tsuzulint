@@ -148,4 +148,133 @@ mod tests {
         assert_eq!(fix.span.end, 15);
         assert!(fix.text.is_empty());
     }
+
+    #[test]
+    fn test_diagnostic_with_severity() {
+        let diag = Diagnostic::new("rule", "message", Span::new(0, 5))
+            .with_severity(Severity::Warning);
+
+        assert_eq!(diag.severity, Severity::Warning);
+    }
+
+    #[test]
+    fn test_diagnostic_with_location() {
+        use texide_ast::Position;
+        let loc = Location::new(Position::new(1, 1), Position::new(1, 10));
+        let diag = Diagnostic::new("rule", "message", Span::new(0, 10))
+            .with_location(loc);
+
+        assert!(diag.loc.is_some());
+        let location = diag.loc.unwrap();
+        assert_eq!(location.start.line, 1);
+        assert_eq!(location.start.column, 1);
+        assert_eq!(location.end.line, 1);
+        assert_eq!(location.end.column, 10);
+    }
+
+    #[test]
+    fn test_severity_default() {
+        let severity = Severity::default();
+        assert_eq!(severity, Severity::Error);
+    }
+
+    #[test]
+    fn test_severity_equality() {
+        assert_eq!(Severity::Error, Severity::Error);
+        assert_eq!(Severity::Warning, Severity::Warning);
+        assert_eq!(Severity::Info, Severity::Info);
+        assert_ne!(Severity::Error, Severity::Warning);
+    }
+
+    #[test]
+    fn test_diagnostic_builder_chain() {
+        use texide_ast::Position;
+        let fix = Fix::new(Span::new(0, 4), "fixed");
+        let loc = Location::new(Position::new(1, 1), Position::new(1, 5));
+
+        let diag = Diagnostic::new("rule-id", "Error message", Span::new(0, 4))
+            .with_severity(Severity::Warning)
+            .with_location(loc)
+            .with_fix(fix);
+
+        assert_eq!(diag.rule_id, "rule-id");
+        assert_eq!(diag.message, "Error message");
+        assert_eq!(diag.severity, Severity::Warning);
+        assert!(diag.loc.is_some());
+        assert!(diag.fix.is_some());
+    }
+
+    #[test]
+    fn test_fix_replace() {
+        let fix = Fix::new(Span::new(5, 10), "replacement");
+
+        assert_eq!(fix.span.start, 5);
+        assert_eq!(fix.span.end, 10);
+        assert_eq!(fix.text, "replacement");
+    }
+
+    #[test]
+    fn test_fix_insert_at_beginning() {
+        let fix = Fix::insert(0, "prefix");
+
+        assert_eq!(fix.span.start, 0);
+        assert_eq!(fix.span.end, 0);
+        assert_eq!(fix.text, "prefix");
+    }
+
+    #[test]
+    fn test_diagnostic_serialization() {
+        let diag = Diagnostic::new("no-todo", "Found TODO", Span::new(10, 14));
+        let json = serde_json::to_string(&diag).unwrap();
+
+        assert!(json.contains("no-todo"));
+        assert!(json.contains("Found TODO"));
+    }
+
+    #[test]
+    fn test_diagnostic_deserialization() {
+        let json = r#"{
+            "rule_id": "no-todo",
+            "message": "Found TODO",
+            "span": { "start": 0, "end": 4 }
+        }"#;
+
+        let diag: Diagnostic = serde_json::from_str(json).unwrap();
+
+        assert_eq!(diag.rule_id, "no-todo");
+        assert_eq!(diag.message, "Found TODO");
+        assert_eq!(diag.span.start, 0);
+        assert_eq!(diag.span.end, 4);
+    }
+
+    #[test]
+    fn test_fix_serialization() {
+        let fix = Fix::new(Span::new(0, 5), "new text");
+        let json = serde_json::to_string(&fix).unwrap();
+
+        assert!(json.contains("new text"));
+    }
+
+    #[test]
+    fn test_diagnostic_clone() {
+        let original = Diagnostic::new("rule", "msg", Span::new(0, 5))
+            .with_severity(Severity::Warning);
+
+        let cloned = original.clone();
+
+        assert_eq!(original.rule_id, cloned.rule_id);
+        assert_eq!(original.message, cloned.message);
+        assert_eq!(original.severity, cloned.severity);
+    }
+
+    #[test]
+    fn test_all_severity_levels() {
+        let error = Diagnostic::new("r", "m", Span::new(0, 1)).with_severity(Severity::Error);
+        let warning = Diagnostic::new("r", "m", Span::new(0, 1)).with_severity(Severity::Warning);
+        let info = Diagnostic::new("r", "m", Span::new(0, 1)).with_severity(Severity::Info);
+
+        assert_eq!(error.severity, Severity::Error);
+        assert_eq!(warning.severity, Severity::Warning);
+        assert_eq!(info.severity, Severity::Info);
+    }
 }

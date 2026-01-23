@@ -234,4 +234,159 @@ mod tests {
         assert_eq!(data.url, Some("https://example.com"));
         assert_eq!(data.title, Some("Example"));
     }
+
+    #[test]
+    fn test_node_data_link_without_title() {
+        let data = NodeData::link("https://example.com", None);
+        assert_eq!(data.url, Some("https://example.com"));
+        assert!(data.title.is_none());
+    }
+
+    #[test]
+    fn test_node_data_code_block() {
+        let data = NodeData::code_block(Some("rust"));
+        assert_eq!(data.lang, Some("rust"));
+    }
+
+    #[test]
+    fn test_node_data_code_block_without_lang() {
+        let data = NodeData::code_block(None);
+        assert!(data.lang.is_none());
+    }
+
+    #[test]
+    fn test_node_data_list_ordered() {
+        let data = NodeData::list(true);
+        assert_eq!(data.ordered, Some(true));
+    }
+
+    #[test]
+    fn test_node_data_list_unordered() {
+        let data = NodeData::list(false);
+        assert_eq!(data.ordered, Some(false));
+    }
+
+    #[test]
+    fn test_node_data_new_empty() {
+        let data = NodeData::new();
+        assert!(data.url.is_none());
+        assert!(data.title.is_none());
+        assert!(data.depth.is_none());
+        assert!(data.ordered.is_none());
+        assert!(data.lang.is_none());
+        assert!(data.identifier.is_none());
+        assert!(data.label.is_none());
+    }
+
+    #[test]
+    fn test_new_leaf() {
+        let node = TxtNode::new_leaf(NodeType::HorizontalRule, Span::new(0, 3));
+
+        assert_eq!(node.node_type, NodeType::HorizontalRule);
+        assert!(!node.is_text());
+        assert!(!node.has_children());
+        assert!(node.value.is_none());
+    }
+
+    #[test]
+    fn test_node_span() {
+        let node = TxtNode::new_leaf(NodeType::Break, Span::new(10, 20));
+
+        assert_eq!(node.span.start, 10);
+        assert_eq!(node.span.end, 20);
+    }
+
+    #[test]
+    fn test_node_with_multiple_children() {
+        let arena = AstArena::new();
+
+        let child1 = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello"));
+        let child2 = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(6, 11), "world"));
+        let child3 = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(12, 13), "!"));
+
+        let children = arena.alloc_slice_copy(&[*child1, *child2, *child3]);
+        let node = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 13), children);
+
+        assert_eq!(node.children.len(), 3);
+        assert_eq!(node.children[0].value, Some("hello"));
+        assert_eq!(node.children[1].value, Some("world"));
+        assert_eq!(node.children[2].value, Some("!"));
+    }
+
+    #[test]
+    fn test_nested_parent_nodes() {
+        let arena = AstArena::new();
+
+        // Create a text node
+        let text = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 4), "text"));
+        let text_children = arena.alloc_slice_copy(&[*text]);
+
+        // Create an emphasis containing the text
+        let emphasis = arena.alloc(TxtNode::new_parent(
+            NodeType::Emphasis,
+            Span::new(0, 6),
+            text_children,
+        ));
+        let emphasis_children = arena.alloc_slice_copy(&[*emphasis]);
+
+        // Create a paragraph containing the emphasis
+        let paragraph = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 6), emphasis_children);
+
+        assert_eq!(paragraph.node_type, NodeType::Paragraph);
+        assert_eq!(paragraph.children[0].node_type, NodeType::Emphasis);
+        assert_eq!(paragraph.children[0].children[0].value, Some("text"));
+    }
+
+    #[test]
+    fn test_node_text_method() {
+        let text_node = TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello");
+        let parent_node = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 5), &[]);
+
+        assert_eq!(text_node.text(), Some("hello"));
+        assert_eq!(parent_node.text(), None);
+    }
+
+    #[test]
+    fn test_header_depth_values() {
+        for depth in 1u8..=6 {
+            let data = NodeData::header(depth);
+            assert_eq!(data.depth, Some(depth));
+        }
+    }
+
+    #[test]
+    fn test_node_data_default() {
+        let data = NodeData::default();
+        assert!(data.url.is_none());
+        assert!(data.title.is_none());
+        assert!(data.depth.is_none());
+    }
+
+    #[test]
+    fn test_empty_children_slice() {
+        let node = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 0), &[]);
+
+        assert!(node.children.is_empty());
+        assert!(!node.has_children());
+    }
+
+    #[test]
+    fn test_code_node_is_text() {
+        let node = TxtNode::new_text(NodeType::Code, Span::new(0, 10), "console.log");
+
+        assert!(node.is_text());
+        assert_eq!(node.value, Some("console.log"));
+    }
+
+    #[test]
+    fn test_code_block_node() {
+        let arena = AstArena::new();
+        let code = "fn main() {}";
+        let mut node = TxtNode::new_text(NodeType::CodeBlock, Span::new(0, 12), arena.alloc_str(code));
+        node.data = NodeData::code_block(Some("rust"));
+
+        assert_eq!(node.node_type, NodeType::CodeBlock);
+        assert_eq!(node.data.lang, Some("rust"));
+        assert_eq!(node.value, Some(code));
+    }
 }

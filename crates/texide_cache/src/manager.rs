@@ -228,4 +228,171 @@ mod tests {
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
     }
+
+    #[test]
+    fn test_cache_manager_enable() {
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        manager.disable();
+        assert!(!manager.is_enabled());
+
+        manager.enable();
+        assert!(manager.is_enabled());
+    }
+
+    #[test]
+    fn test_cache_manager_remove() {
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            HashMap::new(),
+            vec![],
+        );
+
+        manager.set(path.clone(), entry);
+        assert_eq!(manager.len(), 1);
+
+        manager.remove(&path);
+        assert!(manager.is_empty());
+    }
+
+    #[test]
+    fn test_cache_manager_clear() {
+        let mut manager = CacheManager::new("/tmp/test-cache");
+
+        for i in 0..5 {
+            let path = PathBuf::from(format!("/test/file{}.md", i));
+            let entry = CacheEntry::new(
+                format!("hash{}", i),
+                "config".to_string(),
+                HashMap::new(),
+                vec![],
+            );
+            manager.set(path, entry);
+        }
+
+        assert_eq!(manager.len(), 5);
+
+        manager.clear();
+        assert!(manager.is_empty());
+    }
+
+    #[test]
+    fn test_cache_manager_get_when_disabled() {
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            HashMap::new(),
+            vec![],
+        );
+
+        manager.set(path.clone(), entry);
+        manager.disable();
+
+        // get should return None when disabled
+        assert!(manager.get(&path).is_none());
+    }
+
+    #[test]
+    fn test_cache_manager_is_valid_when_disabled() {
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+        let versions = HashMap::new();
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+        );
+
+        manager.set(path.clone(), entry);
+        manager.disable();
+
+        // is_valid should return false when disabled
+        assert!(!manager.is_valid(&path, "hash", "config", &versions));
+    }
+
+    #[test]
+    fn test_cache_manager_set_when_disabled() {
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        manager.disable();
+
+        let path = PathBuf::from("/test/file.md");
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            HashMap::new(),
+            vec![],
+        );
+
+        manager.set(path, entry);
+
+        // Entry should not be stored when cache is disabled
+        assert!(manager.is_empty());
+    }
+
+    #[test]
+    fn test_cache_manager_is_valid_missing_entry() {
+        let manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/nonexistent/file.md");
+        let versions = HashMap::new();
+
+        assert!(!manager.is_valid(&path, "hash", "config", &versions));
+    }
+
+    #[test]
+    fn test_cache_manager_default() {
+        let manager = CacheManager::default();
+        assert!(manager.is_enabled());
+        assert!(manager.is_empty());
+    }
+
+    #[test]
+    fn test_hash_content_empty() {
+        let hash = CacheManager::hash_content("");
+        // Empty string should still produce a valid hash
+        assert!(!hash.is_empty());
+        assert_eq!(hash.len(), 64); // BLAKE3 produces 256-bit (64 hex chars) hash
+    }
+
+    #[test]
+    fn test_hash_content_unicode() {
+        let hash1 = CacheManager::hash_content("日本語");
+        let hash2 = CacheManager::hash_content("日本語");
+        let hash3 = CacheManager::hash_content("中文");
+
+        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_cache_manager_multiple_files() {
+        let mut manager = CacheManager::new("/tmp/test-cache");
+
+        let files = vec![
+            ("/path/a.md", "hash_a"),
+            ("/path/b.md", "hash_b"),
+            ("/path/c.txt", "hash_c"),
+        ];
+
+        for (path, hash) in &files {
+            let entry = CacheEntry::new(
+                hash.to_string(),
+                "config".to_string(),
+                HashMap::new(),
+                vec![],
+            );
+            manager.set(PathBuf::from(path), entry);
+        }
+
+        assert_eq!(manager.len(), 3);
+
+        let versions = HashMap::new();
+        assert!(manager.is_valid(&PathBuf::from("/path/a.md"), "hash_a", "config", &versions));
+        assert!(manager.is_valid(&PathBuf::from("/path/b.md"), "hash_b", "config", &versions));
+        assert!(manager.is_valid(&PathBuf::from("/path/c.txt"), "hash_c", "config", &versions));
+    }
 }

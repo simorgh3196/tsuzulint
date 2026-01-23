@@ -344,4 +344,265 @@ mod tests {
         assert!(parser.can_parse("MD"));
         assert!(!parser.can_parse("txt"));
     }
+
+    #[test]
+    fn test_parse_empty_document() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.node_type, NodeType::Document);
+        assert!(ast.children.is_empty());
+    }
+
+    #[test]
+    fn test_parse_emphasis() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "*italic* and **bold**";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        // Document > Paragraph > [Emphasis, Str, Strong]
+        let paragraph = &ast.children[0];
+        assert_eq!(paragraph.node_type, NodeType::Paragraph);
+
+        let has_emphasis = paragraph
+            .children
+            .iter()
+            .any(|c| c.node_type == NodeType::Emphasis);
+        let has_strong = paragraph
+            .children
+            .iter()
+            .any(|c| c.node_type == NodeType::Strong);
+
+        assert!(has_emphasis);
+        assert!(has_strong);
+    }
+
+    #[test]
+    fn test_parse_code_block() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "```rust\nfn main() {}\n```";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let code_block = &ast.children[0];
+        assert_eq!(code_block.node_type, NodeType::CodeBlock);
+        assert_eq!(code_block.data.lang, Some("rust"));
+        assert!(code_block.value.is_some());
+    }
+
+    #[test]
+    fn test_parse_code_block_no_language() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "```\nplain code\n```";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let code_block = &ast.children[0];
+        assert_eq!(code_block.node_type, NodeType::CodeBlock);
+        assert!(code_block.data.lang.is_none());
+    }
+
+    #[test]
+    fn test_parse_inline_code() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "Use `code` here";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let paragraph = &ast.children[0];
+        let has_code = paragraph.children.iter().any(|c| c.node_type == NodeType::Code);
+
+        assert!(has_code);
+    }
+
+    #[test]
+    fn test_parse_blockquote() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "> This is a quote";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.children[0].node_type, NodeType::BlockQuote);
+    }
+
+    #[test]
+    fn test_parse_unordered_list() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "- Item 1\n- Item 2\n- Item 3";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let list = &ast.children[0];
+        assert_eq!(list.node_type, NodeType::List);
+        assert_eq!(list.data.ordered, Some(false));
+        assert_eq!(list.children.len(), 3);
+
+        for item in list.children.iter() {
+            assert_eq!(item.node_type, NodeType::ListItem);
+        }
+    }
+
+    #[test]
+    fn test_parse_ordered_list() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "1. First\n2. Second\n3. Third";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let list = &ast.children[0];
+        assert_eq!(list.node_type, NodeType::List);
+        assert_eq!(list.data.ordered, Some(true));
+    }
+
+    #[test]
+    fn test_parse_horizontal_rule() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "---";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.children[0].node_type, NodeType::HorizontalRule);
+    }
+
+    #[test]
+    fn test_parse_image() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "![Alt text](image.png \"Title\")";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let paragraph = &ast.children[0];
+        let image = &paragraph.children[0];
+
+        assert_eq!(image.node_type, NodeType::Image);
+        assert_eq!(image.data.url, Some("image.png"));
+        assert_eq!(image.data.title, Some("Title"));
+    }
+
+    #[test]
+    fn test_parse_link_with_title() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "[Link](https://example.com \"Example Title\")";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let paragraph = &ast.children[0];
+        let link = &paragraph.children[0];
+
+        assert_eq!(link.node_type, NodeType::Link);
+        assert_eq!(link.data.url, Some("https://example.com"));
+        assert_eq!(link.data.title, Some("Example Title"));
+    }
+
+    #[test]
+    fn test_parse_strikethrough() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "~~deleted text~~";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let paragraph = &ast.children[0];
+        let has_delete = paragraph
+            .children
+            .iter()
+            .any(|c| c.node_type == NodeType::Delete);
+
+        assert!(has_delete);
+    }
+
+    #[test]
+    fn test_parse_table() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let table = &ast.children[0];
+        assert_eq!(table.node_type, NodeType::Table);
+        assert!(!table.children.is_empty());
+
+        let first_row = &table.children[0];
+        assert_eq!(first_row.node_type, NodeType::TableRow);
+    }
+
+    #[test]
+    fn test_parse_html_inline() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "<div>HTML content</div>";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let has_html = ast.children.iter().any(|c| c.node_type == NodeType::Html);
+        assert!(has_html);
+    }
+
+    #[test]
+    fn test_parse_multiple_headings() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.children.len(), 6);
+
+        for (i, child) in ast.children.iter().enumerate() {
+            assert_eq!(child.node_type, NodeType::Header);
+            assert_eq!(child.data.depth, Some((i + 1) as u8));
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_emphasis() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "***bold and italic***";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        // Should have nested Strong and Emphasis
+        let paragraph = &ast.children[0];
+        assert!(!paragraph.children.is_empty());
+    }
+
+    #[test]
+    fn test_parser_name() {
+        let parser = MarkdownParser::new();
+        assert_eq!(parser.name(), "markdown");
+    }
+
+    #[test]
+    fn test_parser_default() {
+        let parser = MarkdownParser::default();
+        assert_eq!(parser.name(), "markdown");
+    }
+
+    #[test]
+    fn test_span_positions() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "Hello";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.span.start, 0);
+        assert_eq!(ast.span.end, 5);
+    }
 }

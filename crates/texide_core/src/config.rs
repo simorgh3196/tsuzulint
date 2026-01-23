@@ -180,4 +180,98 @@ mod tests {
 
         assert_eq!(enabled.len(), 2);
     }
+
+    #[test]
+    fn test_config_default() {
+        let config = LinterConfig::default();
+        assert!(config.rules.is_empty());
+        assert!(config.plugins.is_empty());
+        assert!(config.include.is_empty());
+        assert!(config.exclude.is_empty());
+        assert!(config.cache);
+        assert_eq!(config.cache_dir, ".texide-cache");
+    }
+
+    #[test]
+    fn test_config_from_json_with_include_exclude() {
+        let json = r#"{
+            "include": ["**/*.md"],
+            "exclude": ["**/node_modules/**"]
+        }"#;
+
+        let config = LinterConfig::from_json(json).unwrap();
+        assert_eq!(config.include, vec!["**/*.md"]);
+        assert_eq!(config.exclude, vec!["**/node_modules/**"]);
+    }
+
+    #[test]
+    fn test_config_from_json_with_cache_disabled() {
+        let json = r#"{
+            "cache": false,
+            "cache_dir": "/tmp/custom-cache"
+        }"#;
+
+        let config = LinterConfig::from_json(json).unwrap();
+        assert!(!config.cache);
+        assert_eq!(config.cache_dir, "/tmp/custom-cache");
+    }
+
+    #[test]
+    fn test_config_from_json_invalid() {
+        let json = "{ invalid json }";
+        let result = LinterConfig::from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rule_config_options() {
+        let options = RuleConfig::Options(serde_json::json!({"max": 100}));
+        let enabled = RuleConfig::Enabled(true);
+        let severity = RuleConfig::Severity("error".to_string());
+
+        assert!(options.is_enabled());
+        let opts = options.options();
+        assert_eq!(opts["max"], 100);
+
+        assert_eq!(enabled.options(), serde_json::Value::Null);
+        assert_eq!(severity.options(), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_config_hash_deterministic() {
+        let config1 = LinterConfig::new();
+        let config2 = LinterConfig::new();
+
+        assert_eq!(config1.hash(), config2.hash());
+    }
+
+    #[test]
+    fn test_config_hash_changes_with_rules() {
+        let mut config1 = LinterConfig::new();
+        let config2 = LinterConfig::new();
+
+        config1.rules.insert("no-todo".to_string(), RuleConfig::Enabled(true));
+
+        assert_ne!(config1.hash(), config2.hash());
+    }
+
+    #[test]
+    fn test_config_with_plugins() {
+        let json = r#"{
+            "plugins": ["plugin-a", "plugin-b"]
+        }"#;
+
+        let config = LinterConfig::from_json(json).unwrap();
+        assert_eq!(config.plugins.len(), 2);
+        assert_eq!(config.plugins[0], "plugin-a");
+    }
+
+    #[test]
+    fn test_rule_config_severity_warn() {
+        let warn = RuleConfig::Severity("warn".to_string());
+        let warning = RuleConfig::Severity("warning".to_string());
+
+        assert!(warn.is_enabled());
+        assert!(warning.is_enabled());
+    }
 }

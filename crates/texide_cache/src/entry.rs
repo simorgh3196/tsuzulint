@@ -138,4 +138,166 @@ mod tests {
 
         assert!(!entry.is_valid("abc123", "config456", &versions2));
     }
+
+    #[test]
+    fn test_cache_entry_invalid_rule_count_mismatch() {
+        let mut versions1 = HashMap::new();
+        versions1.insert("rule1".to_string(), "1.0.0".to_string());
+
+        let mut versions2 = HashMap::new();
+        versions2.insert("rule1".to_string(), "1.0.0".to_string());
+        versions2.insert("rule2".to_string(), "1.0.0".to_string());
+
+        let entry = CacheEntry::new(
+            "abc123".to_string(),
+            "config456".to_string(),
+            versions1,
+            vec![],
+        );
+
+        // Different number of rules should invalidate
+        assert!(!entry.is_valid("abc123", "config456", &versions2));
+    }
+
+    #[test]
+    fn test_cache_entry_invalid_missing_rule() {
+        let mut versions1 = HashMap::new();
+        versions1.insert("rule1".to_string(), "1.0.0".to_string());
+
+        let mut versions2 = HashMap::new();
+        versions2.insert("rule2".to_string(), "1.0.0".to_string());
+
+        let entry = CacheEntry::new(
+            "abc123".to_string(),
+            "config456".to_string(),
+            versions1,
+            vec![],
+        );
+
+        // Different rule names should invalidate
+        assert!(!entry.is_valid("abc123", "config456", &versions2));
+    }
+
+    #[test]
+    fn test_cache_entry_with_diagnostics() {
+        use texide_ast::Span;
+        let versions = HashMap::new();
+        let diagnostics = vec![
+            Diagnostic::new("rule1", "Error 1", Span::new(0, 5)),
+            Diagnostic::new("rule2", "Error 2", Span::new(10, 15)),
+        ];
+
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            diagnostics,
+        );
+
+        assert_eq!(entry.diagnostics.len(), 2);
+        assert!(entry.is_valid("hash", "config", &versions));
+    }
+
+    #[test]
+    fn test_cache_entry_created_at() {
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            HashMap::new(),
+            vec![],
+        );
+
+        // created_at should be a reasonable Unix timestamp (after 2020)
+        assert!(entry.created_at > 1577836800);
+    }
+
+    #[test]
+    fn test_cache_entry_serialization() {
+        let mut versions = HashMap::new();
+        versions.insert("rule1".to_string(), "1.0.0".to_string());
+
+        let entry = CacheEntry::new(
+            "abc123".to_string(),
+            "config456".to_string(),
+            versions,
+            vec![],
+        );
+
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("abc123"));
+        assert!(json.contains("config456"));
+        assert!(json.contains("rule1"));
+    }
+
+    #[test]
+    fn test_cache_entry_deserialization() {
+        let json = r#"{
+            "content_hash": "hash123",
+            "config_hash": "config456",
+            "rule_versions": {},
+            "diagnostics": [],
+            "created_at": 1700000000
+        }"#;
+
+        let entry: CacheEntry = serde_json::from_str(json).unwrap();
+
+        assert_eq!(entry.content_hash, "hash123");
+        assert_eq!(entry.config_hash, "config456");
+        assert_eq!(entry.created_at, 1700000000);
+    }
+
+    #[test]
+    fn test_cache_entry_clone() {
+        let mut versions = HashMap::new();
+        versions.insert("rule1".to_string(), "1.0.0".to_string());
+
+        let original = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+        );
+
+        let cloned = original.clone();
+
+        assert_eq!(original.content_hash, cloned.content_hash);
+        assert_eq!(original.config_hash, cloned.config_hash);
+        assert_eq!(original.rule_versions, cloned.rule_versions);
+    }
+
+    #[test]
+    fn test_cache_entry_empty_versions_valid() {
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            HashMap::new(),
+            vec![],
+        );
+
+        let empty_versions = HashMap::new();
+        assert!(entry.is_valid("hash", "config", &empty_versions));
+    }
+
+    #[test]
+    fn test_cache_entry_multiple_rules() {
+        let mut versions = HashMap::new();
+        versions.insert("rule1".to_string(), "1.0.0".to_string());
+        versions.insert("rule2".to_string(), "2.0.0".to_string());
+        versions.insert("rule3".to_string(), "3.0.0".to_string());
+
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+        );
+
+        assert!(entry.is_valid("hash", "config", &versions));
+
+        // Update one rule version
+        let mut updated_versions = versions.clone();
+        updated_versions.insert("rule2".to_string(), "2.1.0".to_string());
+
+        assert!(!entry.is_valid("hash", "config", &updated_versions));
+    }
 }

@@ -119,4 +119,79 @@ mod tests {
         assert_eq!(summary.total_diagnostics, 1);
         assert_eq!(summary.files_with_errors, 1);
     }
+
+    #[test]
+    fn test_lint_result_with_diagnostics() {
+        let diagnostics = vec![
+            Diagnostic::new("rule1", "First error", Span::new(0, 10)),
+            Diagnostic::new("rule2", "Second error", Span::new(20, 30)),
+        ];
+        let result = LintResult::new(PathBuf::from("test.md"), diagnostics);
+
+        assert!(result.has_errors());
+        assert_eq!(result.error_count(), 2);
+    }
+
+    #[test]
+    fn test_lint_result_path() {
+        let result = LintResult::new(PathBuf::from("/path/to/file.md"), vec![]);
+        assert_eq!(result.path, PathBuf::from("/path/to/file.md"));
+    }
+
+    #[test]
+    fn test_lint_summary_empty() {
+        let results: Vec<LintResult> = vec![];
+        let summary = LintSummary::from_results(&results);
+
+        assert_eq!(summary.files_checked, 0);
+        assert_eq!(summary.files_from_cache, 0);
+        assert_eq!(summary.total_diagnostics, 0);
+        assert_eq!(summary.files_with_errors, 0);
+    }
+
+    #[test]
+    fn test_lint_summary_all_cached() {
+        let results = vec![
+            LintResult::cached(PathBuf::from("a.md"), vec![]),
+            LintResult::cached(PathBuf::from("b.md"), vec![]),
+            LintResult::cached(PathBuf::from("c.md"), vec![]),
+        ];
+
+        let summary = LintSummary::from_results(&results);
+
+        assert_eq!(summary.files_checked, 3);
+        assert_eq!(summary.files_from_cache, 3);
+    }
+
+    #[test]
+    fn test_lint_summary_multiple_diagnostics() {
+        let results = vec![
+            LintResult::new(
+                PathBuf::from("a.md"),
+                vec![
+                    Diagnostic::new("rule1", "Error 1", Span::new(0, 5)),
+                    Diagnostic::new("rule1", "Error 2", Span::new(10, 15)),
+                ],
+            ),
+            LintResult::new(
+                PathBuf::from("b.md"),
+                vec![Diagnostic::new("rule2", "Error 3", Span::new(0, 3))],
+            ),
+        ];
+
+        let summary = LintSummary::from_results(&results);
+
+        assert_eq!(summary.total_diagnostics, 3);
+        assert_eq!(summary.files_with_errors, 2);
+    }
+
+    #[test]
+    fn test_lint_summary_default() {
+        let summary = LintSummary::default();
+
+        assert_eq!(summary.files_checked, 0);
+        assert_eq!(summary.files_from_cache, 0);
+        assert_eq!(summary.total_diagnostics, 0);
+        assert_eq!(summary.files_with_errors, 0);
+    }
 }

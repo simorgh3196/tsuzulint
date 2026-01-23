@@ -134,4 +134,154 @@ mod tests {
         assert!(span.is_empty());
         assert_eq!(span.len(), 0);
     }
+
+    #[test]
+    fn test_location() {
+        let start = Position::new(1, 0);
+        let end = Position::new(1, 10);
+        let loc = Location::new(start, end);
+
+        assert_eq!(loc.start.line, 1);
+        assert_eq!(loc.start.column, 0);
+        assert_eq!(loc.end.line, 1);
+        assert_eq!(loc.end.column, 10);
+    }
+
+    #[test]
+    fn test_span_contains_start() {
+        let span = Span::new(10, 20);
+        assert!(span.contains(10)); // Start is inclusive
+    }
+
+    #[test]
+    fn test_span_contains_end_exclusive() {
+        let span = Span::new(10, 20);
+        assert!(!span.contains(20)); // End is exclusive
+    }
+
+    #[test]
+    fn test_span_merge_non_overlapping() {
+        let span1 = Span::new(0, 5);
+        let span2 = Span::new(10, 15);
+        let merged = span1.merge(&span2);
+
+        assert_eq!(merged.start, 0);
+        assert_eq!(merged.end, 15);
+    }
+
+    #[test]
+    fn test_span_merge_containing() {
+        let outer = Span::new(0, 100);
+        let inner = Span::new(20, 30);
+        let merged = outer.merge(&inner);
+
+        assert_eq!(merged.start, 0);
+        assert_eq!(merged.end, 100);
+    }
+
+    #[test]
+    fn test_span_merge_same_span() {
+        let span = Span::new(5, 10);
+        let merged = span.merge(&span);
+
+        assert_eq!(merged.start, 5);
+        assert_eq!(merged.end, 10);
+    }
+
+    #[test]
+    fn test_span_merge_reversed_order() {
+        let span1 = Span::new(20, 30);
+        let span2 = Span::new(10, 15);
+        let merged = span1.merge(&span2);
+
+        assert_eq!(merged.start, 10);
+        assert_eq!(merged.end, 30);
+    }
+
+    #[test]
+    fn test_position_equality() {
+        let pos1 = Position::new(5, 10);
+        let pos2 = Position::new(5, 10);
+        let pos3 = Position::new(5, 11);
+
+        assert_eq!(pos1, pos2);
+        assert_ne!(pos1, pos3);
+    }
+
+    #[test]
+    fn test_span_equality() {
+        let span1 = Span::new(0, 10);
+        let span2 = Span::new(0, 10);
+        let span3 = Span::new(0, 11);
+
+        assert_eq!(span1, span2);
+        assert_ne!(span1, span3);
+    }
+
+    #[test]
+    fn test_location_equality() {
+        let loc1 = Location::new(Position::new(1, 0), Position::new(1, 5));
+        let loc2 = Location::new(Position::new(1, 0), Position::new(1, 5));
+        let loc3 = Location::new(Position::new(1, 0), Position::new(2, 0));
+
+        assert_eq!(loc1, loc2);
+        assert_ne!(loc1, loc3);
+    }
+
+    #[test]
+    fn test_span_serialization() {
+        let span = Span::new(10, 20);
+        let json = serde_json::to_string(&span).unwrap();
+        assert!(json.contains("10"));
+        assert!(json.contains("20"));
+    }
+
+    #[test]
+    fn test_span_deserialization() {
+        let json = r#"{"start": 5, "end": 15}"#;
+        let span: Span = serde_json::from_str(json).unwrap();
+        assert_eq!(span.start, 5);
+        assert_eq!(span.end, 15);
+    }
+
+    #[test]
+    fn test_position_serialization() {
+        let pos = Position::new(10, 5);
+        let json = serde_json::to_string(&pos).unwrap();
+        assert!(json.contains("10"));
+        assert!(json.contains("5"));
+    }
+
+    #[test]
+    fn test_location_serialization() {
+        let loc = Location::new(Position::new(1, 0), Position::new(1, 10));
+        let json = serde_json::to_string(&loc).unwrap();
+        assert!(json.contains("start"));
+        assert!(json.contains("end"));
+    }
+
+    #[test]
+    fn test_empty_span_contains() {
+        let span = Span::new(5, 5);
+        // Empty span contains nothing
+        assert!(!span.contains(5));
+        assert!(!span.contains(4));
+        assert!(!span.contains(6));
+    }
+
+    #[test]
+    fn test_span_at_zero() {
+        let span = Span::new(0, 10);
+        assert!(span.contains(0));
+        assert_eq!(span.len(), 10);
+    }
+
+    #[test]
+    fn test_single_byte_span() {
+        let span = Span::new(5, 6);
+        assert_eq!(span.len(), 1);
+        assert!(!span.is_empty());
+        assert!(span.contains(5));
+        assert!(!span.contains(6));
+    }
 }

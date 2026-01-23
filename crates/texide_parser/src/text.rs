@@ -158,4 +158,139 @@ mod tests {
         assert!(parser.can_parse("TXT"));
         assert!(!parser.can_parse("md"));
     }
+
+    #[test]
+    fn test_parse_whitespace_only() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "   \n\n   \n";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.node_type, NodeType::Document);
+        assert!(ast.children.is_empty());
+    }
+
+    #[test]
+    fn test_parse_single_line() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "Single line without newline";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.children.len(), 1);
+        let paragraph = &ast.children[0];
+        assert_eq!(paragraph.node_type, NodeType::Paragraph);
+        assert_eq!(paragraph.children[0].value, Some("Single line without newline"));
+    }
+
+    #[test]
+    fn test_parse_multiple_blank_lines() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "First paragraph.\n\n\n\nSecond paragraph.";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.children.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_trailing_newlines() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "Content\n\n\n";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.children.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_leading_newlines() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "\n\nContent";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.children.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_multiline_paragraph() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "Line 1\nLine 2\nLine 3";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        // All lines without blank line separator should be one paragraph
+        assert_eq!(ast.children.len(), 1);
+    }
+
+    #[test]
+    fn test_document_span() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "Hello, world!";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.span.start, 0);
+        assert_eq!(ast.span.end, source.len() as u32);
+    }
+
+    #[test]
+    fn test_paragraph_span() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "Hello";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let paragraph = &ast.children[0];
+        assert_eq!(paragraph.span.start, 0);
+        assert_eq!(paragraph.span.end, 5);
+    }
+
+    #[test]
+    fn test_parser_name() {
+        let parser = PlainTextParser::new();
+        assert_eq!(parser.name(), "text");
+    }
+
+    #[test]
+    fn test_parser_default() {
+        let parser = PlainTextParser::default();
+        assert_eq!(parser.name(), "text");
+    }
+
+    #[test]
+    fn test_text_node_value() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "Test content";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        let paragraph = &ast.children[0];
+        let text_node = &paragraph.children[0];
+
+        assert_eq!(text_node.node_type, NodeType::Str);
+        assert!(text_node.is_text());
+        assert_eq!(text_node.value, Some("Test content"));
+    }
+
+    #[test]
+    fn test_unicode_content() {
+        let arena = AstArena::new();
+        let parser = PlainTextParser::new();
+        let source = "日本語テキスト\n\nEmoji: 🎉";
+
+        let ast = parser.parse(&arena, source).unwrap();
+
+        assert_eq!(ast.children.len(), 2);
+    }
 }
