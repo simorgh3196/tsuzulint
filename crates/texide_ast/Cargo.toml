@@ -1,0 +1,12 @@
+[package]
+name = "texide_ast"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "AST types for Texide natural language linter"
+
+[dependencies]
+bumpalo = { workspace = true }
+serde = { workspace = true }
