@@ -83,7 +83,7 @@ jobs:
           Compress-Archive -Path "dist/*" -DestinationPath "texide-${{ matrix.target }}.zip"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: texide-${{ matrix.target }}
           path: texide-${{ matrix.target }}.${{ matrix.archive }}
@@ -106,7 +106,7 @@ jobs:
           cd crates/texide_wasm/pkg
           tar -czvf ../../../texide-wasm.tar.gz *
       - name: Upload WASM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: texide-wasm
           path: texide-wasm.tar.gz
