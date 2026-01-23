@@ -1,0 +1,56 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug texide_cli",
+            "cargo": {
+                "args": ["build", "--bin=texide_cli", "--package=texide_cli"],
+                "filter": {
+                    "name": "texide_cli",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1",
+                "RUST_LOG": "debug"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in package",
+            "cargo": {
+                "args": ["test", "--no-run", "--lib", "--package=${input:packageName}"],
+                "filter": {
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "packageName",
+            "type": "pickString",
+            "description": "Select a package",
+            "options": [
+                "texide_ast",
+                "texide_parser",
+                "texide_plugin",
+                "texide_cache",
+                "texide_core",
+                "texide_cli",
+                "texide_lsp",
+                "texide_wasm"
+            ]
+        }
+    ]
+}
