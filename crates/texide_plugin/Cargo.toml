@@ -1,0 +1,26 @@
+[package]
+name = "texide_plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "WASM plugin system for Texide"
+
+[features]
+default = ["native"]
+native = ["extism"]
+browser = ["wasmi"]
+
+[dependencies]
+texide_ast = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Native environment (high performance with JIT)
+extism = { workspace = true, optional = true }
+
+# Browser/WASM environment (pure Rust interpreter)
+wasmi = { workspace = true, optional = true }
