@@ -1,0 +1,28 @@
+[package]
+name = "texide_wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WebAssembly bindings for Texide - browser-based text linting"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
+
+[dependencies]
+texide_ast = { workspace = true }
+texide_parser = { workspace = true }
+texide_plugin = { workspace = true, default-features = false, features = ["browser"] }
+
+wasm-bindgen = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+js-sys = { workspace = true }
+console_error_panic_hook = { workspace = true, optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
