@@ -32,8 +32,12 @@ mod arena;
 mod node;
 mod node_type;
 mod span;
+pub mod visitor;
 
 pub use arena::AstArena;
 pub use node::{NodeData, TxtNode};
 pub use node_type::NodeType;
 pub use span::{Location, Position, Span};
+
+// Re-export commonly used visitor items for convenience
+pub use visitor::{MutVisitor, VisitResult, Visitor};
