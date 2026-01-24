@@ -4,9 +4,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use texide_ast::Span;
+use texide_plugin::Diagnostic;
 use tracing::{debug, info};
 
-use crate::{CacheEntry, CacheError};
+use crate::{entry::BlockCacheEntry, CacheEntry, CacheError};
 
 /// Manages the lint cache for all files.
 pub struct CacheManager {
@@ -83,6 +85,134 @@ impl CacheManager {
             Some(entry) => entry.is_valid(content_hash, config_hash, rule_versions),
             None => false,
         }
+    }
+
+    /// Reconciles cached diagnostics with current blocks.
+    ///
+    /// This function tries to reuse cached diagnostics for blocks that haven't changed.
+    /// It returns a list of diagnostics from unchanged blocks, but with their spans shifted.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - File path
+    /// * `current_blocks` - Current blocks in the file
+    /// * `config_hash` - Hash of current configuration
+    /// * `rule_versions` - Current rule versions
+    ///
+    /// # Returns
+    ///
+    /// A tuple of:
+    /// - `Vec<Diagnostic>`: Diagnostics from unchanged blocks (shifted)
+    /// - `Vec<bool>`: A boolean mask indicating which current blocks matched (true = reused, false = changed/new)
+    pub fn reconcile_blocks(
+        &self,
+        path: &Path,
+        current_blocks: &[BlockCacheEntry],
+        config_hash: &str,
+        rule_versions: &HashMap<String, String>,
+    ) -> (Vec<Diagnostic>, Vec<bool>) {
+        let mut reused_diagnostics = Vec::new();
+        let mut matched_mask = vec![false; current_blocks.len()];
+
+        if !self.enabled {
+            return (reused_diagnostics, matched_mask);
+        }
+
+        let cached_entry = match self.entries.get(path) {
+            Some(entry) => entry,
+            None => return (reused_diagnostics, matched_mask),
+        };
+
+        // Check if config/rules are compatible
+        if cached_entry.config_hash != config_hash
+            || cached_entry.rule_versions.len() != rule_versions.len()
+        {
+            return (reused_diagnostics, matched_mask);
+        }
+
+        for (name, version) in &cached_entry.rule_versions {
+            if rule_versions.get(name) != Some(version) {
+                return (reused_diagnostics, matched_mask);
+            }
+        }
+
+        // Simple reconciliation algorithm:
+        // Match blocks by hash. If hash matches, we assume content is same.
+        // We need to account for position shifts.
+
+        // Map of hash -> Vec<BlockCacheEntry> from cache
+        // We use a Vec because multiple blocks might have same content (and thus same hash)
+        let mut cached_blocks_map: HashMap<String, Vec<&BlockCacheEntry>> = HashMap::new();
+        for block in &cached_entry.blocks {
+            cached_blocks_map
+                .entry(block.hash.clone())
+                .or_default()
+                .push(block);
+        }
+
+        // Iterate current blocks and try to find match
+        for (i, current_block) in current_blocks.iter().enumerate() {
+            if let Some(candidates) = cached_blocks_map.get_mut(&current_block.hash) {
+                if let Some(best_match_idx) = Self::find_best_match(current_block, candidates) {
+                    let matched_block = candidates.remove(best_match_idx);
+                    matched_mask[i] = true;
+
+                    // Calculate offset shift
+                    let shift = (current_block.span.start as i64) - (matched_block.span.start as i64);
+
+                    // Add diagnostics from matched block, shifted
+                    for diag in &matched_block.diagnostics {
+                        let mut new_diag = diag.clone();
+                        // Shift span
+                        let new_start = (diag.span.start as i64 + shift) as u32;
+                        let new_end = (diag.span.end as i64 + shift) as u32;
+                        new_diag.span = Span::new(new_start, new_end);
+
+                        // Shift fix if exists
+                        if let Some(fix) = &mut new_diag.fix {
+                            let fix_start = (fix.span.start as i64 + shift) as u32;
+                            let fix_end = (fix.span.end as i64 + shift) as u32;
+                            fix.span = Span::new(fix_start, fix_end);
+                        }
+
+                        // Note: Location (line/col) would need recalculation, but it's derived from source + span.
+                        // We clear it so it gets recomputed if needed, or we rely on Span.
+                        new_diag.loc = None;
+
+                        reused_diagnostics.push(new_diag);
+                    }
+                }
+            }
+        }
+
+        (reused_diagnostics, matched_mask)
+    }
+
+    /// Finds the best match among candidates for a current block.
+    /// Ideally, we want the one strictly matching in order or closest in position.
+    /// For now, we take the first one (simple approach), or maybe closest span start.
+    fn find_best_match(
+        current_block: &BlockCacheEntry,
+        candidates: &[&BlockCacheEntry],
+    ) -> Option<usize> {
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // Heuristic: Pick the candidate closest in position to current block
+        // This helps when there are duplicate blocks (e.g. empty lines or recurring headers)
+        let mut best_idx = 0;
+        let mut min_dist = (current_block.span.start as i64 - candidates[0].span.start as i64).abs();
+
+        for (i, candidate) in candidates.iter().enumerate().skip(1) {
+            let dist = (current_block.span.start as i64 - candidate.span.start as i64).abs();
+            if dist < min_dist {
+                min_dist = dist;
+                best_idx = i;
+            }
+        }
+
+        Some(best_idx)
     }
 
     /// Stores a cache entry for a file.
@@ -193,6 +323,7 @@ mod tests {
             "config456".to_string(),
             HashMap::new(),
             vec![],
+            vec![],
         );
 
         manager.set(path.clone(), entry);
@@ -210,6 +341,7 @@ mod tests {
             "hash123".to_string(),
             "config456".to_string(),
             versions.clone(),
+            vec![],
             vec![],
         );
 
@@ -248,6 +380,7 @@ mod tests {
             "config".to_string(),
             HashMap::new(),
             vec![],
+            vec![],
         );
 
         manager.set(path.clone(), entry);
@@ -268,6 +401,7 @@ mod tests {
                 "config".to_string(),
                 HashMap::new(),
                 vec![],
+                vec![],
             );
             manager.set(path, entry);
         }
@@ -286,6 +420,7 @@ mod tests {
             "hash".to_string(),
             "config".to_string(),
             HashMap::new(),
+            vec![],
             vec![],
         );
 
@@ -306,6 +441,7 @@ mod tests {
             "config".to_string(),
             versions.clone(),
             vec![],
+            vec![],
         );
 
         manager.set(path.clone(), entry);
@@ -325,6 +461,7 @@ mod tests {
             "hash".to_string(),
             "config".to_string(),
             HashMap::new(),
+            vec![],
             vec![],
         );
 
@@ -383,6 +520,7 @@ mod tests {
                 hash.to_string(),
                 "config".to_string(),
                 HashMap::new(),
+                vec![],
                 vec![],
             );
             manager.set(PathBuf::from(path), entry);

@@ -48,4 +48,4 @@ pub use diagnostic::{Diagnostic, Fix, Severity};
 pub use error::PluginError;
 pub use executor::{LoadResult, RuleExecutor};
 pub use host::PluginHost;
-pub use manifest::RuleManifest;
+pub use manifest::{IsolationLevel, RuleManifest};

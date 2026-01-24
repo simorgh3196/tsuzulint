@@ -3,7 +3,21 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use texide_ast::Span;
 use texide_plugin::Diagnostic;
+
+/// A cached block of content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockCacheEntry {
+    /// Hash of the block content.
+    pub hash: String,
+
+    /// Original span of the block.
+    pub span: Span,
+
+    /// Diagnostics associated with this block.
+    pub diagnostics: Vec<Diagnostic>,
+}
 
 /// A cache entry for a single file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +34,10 @@ pub struct CacheEntry {
     /// Cached diagnostics.
     pub diagnostics: Vec<Diagnostic>,
 
+    /// Cached blocks for incremental updates.
+    #[serde(default)]
+    pub blocks: Vec<BlockCacheEntry>,
+
     /// Timestamp when this entry was created.
     pub created_at: u64,
 }
@@ -31,12 +49,14 @@ impl CacheEntry {
         config_hash: String,
         rule_versions: HashMap<String, String>,
         diagnostics: Vec<Diagnostic>,
+        blocks: Vec<BlockCacheEntry>,
     ) -> Self {
         Self {
             content_hash,
             config_hash,
             rule_versions,
             diagnostics,
+            blocks,
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -90,6 +110,7 @@ mod tests {
             "config456".to_string(),
             versions.clone(),
             vec![],
+            vec![],
         );
 
         assert!(entry.is_valid("abc123", "config456", &versions));
@@ -103,6 +124,7 @@ mod tests {
             "config456".to_string(),
             versions.clone(),
             vec![],
+            vec![],
         );
 
         assert!(!entry.is_valid("different", "config456", &versions));
@@ -115,6 +137,7 @@ mod tests {
             "abc123".to_string(),
             "config456".to_string(),
             versions.clone(),
+            vec![],
             vec![],
         );
 
@@ -133,6 +156,7 @@ mod tests {
             "abc123".to_string(),
             "config456".to_string(),
             versions1,
+            vec![],
             vec![],
         );
 
@@ -153,6 +177,7 @@ mod tests {
             "config456".to_string(),
             versions1,
             vec![],
+            vec![],
         );
 
         // Different number of rules should invalidate
@@ -171,6 +196,7 @@ mod tests {
             "abc123".to_string(),
             "config456".to_string(),
             versions1,
+            vec![],
             vec![],
         );
 
@@ -192,10 +218,42 @@ mod tests {
             "config".to_string(),
             versions.clone(),
             diagnostics,
+            vec![],
         );
 
         assert_eq!(entry.diagnostics.len(), 2);
         assert!(entry.is_valid("hash", "config", &versions));
+    }
+
+    #[test]
+    fn test_cache_entry_with_blocks() {
+        use texide_ast::Span;
+        let versions = HashMap::new();
+        let blocks = vec![
+            BlockCacheEntry {
+                hash: "block1".to_string(),
+                span: Span::new(0, 10),
+                diagnostics: vec![],
+            },
+            BlockCacheEntry {
+                hash: "block2".to_string(),
+                span: Span::new(11, 20),
+                diagnostics: vec![
+                    Diagnostic::new("rule1", "Error", Span::new(12, 15))
+                ],
+            },
+        ];
+
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+            blocks,
+        );
+
+        assert_eq!(entry.blocks.len(), 2);
+        assert_eq!(entry.blocks[1].diagnostics.len(), 1);
     }
 
     #[test]
@@ -204,6 +262,7 @@ mod tests {
             "hash".to_string(),
             "config".to_string(),
             HashMap::new(),
+            vec![],
             vec![],
         );
 
@@ -220,6 +279,7 @@ mod tests {
             "abc123".to_string(),
             "config456".to_string(),
             versions,
+            vec![],
             vec![],
         );
 
@@ -244,6 +304,7 @@ mod tests {
         assert_eq!(entry.content_hash, "hash123");
         assert_eq!(entry.config_hash, "config456");
         assert_eq!(entry.created_at, 1700000000);
+        assert!(entry.blocks.is_empty());
     }
 
     #[test]
@@ -255,6 +316,7 @@ mod tests {
             "hash".to_string(),
             "config".to_string(),
             versions.clone(),
+            vec![],
             vec![],
         );
 
@@ -271,6 +333,7 @@ mod tests {
             "hash".to_string(),
             "config".to_string(),
             HashMap::new(),
+            vec![],
             vec![],
         );
 
@@ -289,6 +352,7 @@ mod tests {
             "hash".to_string(),
             "config".to_string(),
             versions.clone(),
+            vec![],
             vec![],
         );
 
