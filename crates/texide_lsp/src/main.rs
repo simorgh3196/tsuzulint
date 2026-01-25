@@ -62,9 +62,17 @@ impl Backend {
     /// Lints text and returns Texide diagnostics.
     fn lint_text(&self, text: &str, file_path: &str) -> Vec<TexideDiagnostic> {
         let path = std::path::Path::new(file_path);
-        let linter = self.linter.read().unwrap();
 
-        match linter.lint_content(text, path) {
+        // Safely acquire read lock, handling potential poisoning
+        let linter_guard = match self.linter.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                error!("Linter lock poisoned: {}", poisoned);
+                return vec![];
+            }
+        };
+
+        match linter_guard.lint_content(text, path) {
             Ok(diagnostics) => diagnostics,
             Err(e) => {
                 error!("Lint error: {}", e);
