@@ -19,7 +19,7 @@ license = "MIT"
 homepage = "https://github.com/simorgh3196/texide"
 repository = "https://github.com/simorgh3196/texide"
 keywords = ["linter", "markdown", "lsp", "wasm"]
-rust-version = "1.93"
+rust-version = "1.92"
 
 [workspace.dependencies]
 # Internal crates
@@ -33,7 +33,7 @@ texide_core = { path = "crates/texide_core", default-features = false }
 extism = "1.7"
 
 # WASM Runtime - Pure Rust interpreter (browser/wasm32 compatible)
-wasmi = "0.40"
+wasmi = "1.0"
 
 # Markdown Parser - mdast-compatible AST output
 markdown = "1.0.0-alpha.21"
@@ -76,7 +76,7 @@ js-sys = "0.3"
 
 # Testing
 pretty_assertions = "1.4"
-rstest = "0.24"
+rstest = "0.26"
 insta = { version = "1.42", features = ["json", "redactions"] }
 tempfile = "3.14"
 assert_fs = "1.1"

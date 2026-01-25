@@ -250,7 +250,9 @@ mod tests {
         let mut config1 = LinterConfig::new();
         let config2 = LinterConfig::new();
 
-        config1.rules.insert("no-todo".to_string(), RuleConfig::Enabled(true));
+        config1
+            .rules
+            .insert("no-todo".to_string(), RuleConfig::Enabled(true));
 
         assert_ne!(config1.hash(), config2.hash());
     }

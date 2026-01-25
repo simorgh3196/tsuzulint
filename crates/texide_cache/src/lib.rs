@@ -15,7 +15,7 @@
 //! Cache is stored using `rkyv` for zero-copy deserialization,
 //! providing fast cache reads without parsing overhead.
 
-mod entry;
+pub mod entry;
 mod error;
 mod manager;
 

@@ -280,7 +280,10 @@ fn ast_to_json(node: &texide_ast::TxtNode) -> serde_json::Value {
     );
 
     if let Some(value) = node.value {
-        obj.insert("value".to_string(), serde_json::Value::String(value.to_string()));
+        obj.insert(
+            "value".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
     }
 
     if !node.children.is_empty() {
@@ -290,10 +293,16 @@ fn ast_to_json(node: &texide_ast::TxtNode) -> serde_json::Value {
 
     // Add node data if present
     if let Some(url) = node.data.url {
-        obj.insert("url".to_string(), serde_json::Value::String(url.to_string()));
+        obj.insert(
+            "url".to_string(),
+            serde_json::Value::String(url.to_string()),
+        );
     }
     if let Some(title) = node.data.title {
-        obj.insert("title".to_string(), serde_json::Value::String(title.to_string()));
+        obj.insert(
+            "title".to_string(),
+            serde_json::Value::String(title.to_string()),
+        );
     }
     if let Some(depth) = node.data.depth {
         obj.insert("depth".to_string(), serde_json::Value::Number(depth.into()));
@@ -302,7 +311,10 @@ fn ast_to_json(node: &texide_ast::TxtNode) -> serde_json::Value {
         obj.insert("ordered".to_string(), serde_json::Value::Bool(ordered));
     }
     if let Some(lang) = node.data.lang {
-        obj.insert("lang".to_string(), serde_json::Value::String(lang.to_string()));
+        obj.insert(
+            "lang".to_string(),
+            serde_json::Value::String(lang.to_string()),
+        );
     }
 
     serde_json::Value::Object(obj)

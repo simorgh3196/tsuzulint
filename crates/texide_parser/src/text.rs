@@ -182,7 +182,10 @@ mod tests {
         assert_eq!(ast.children.len(), 1);
         let paragraph = &ast.children[0];
         assert_eq!(paragraph.node_type, NodeType::Paragraph);
-        assert_eq!(paragraph.children[0].value, Some("Single line without newline"));
+        assert_eq!(
+            paragraph.children[0].value,
+            Some("Single line without newline")
+        );
     }
 
     #[test]
@@ -263,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_parser_default() {
-        let parser = PlainTextParser::default();
+        let parser = PlainTextParser;
         assert_eq!(parser.name(), "text");
     }
 

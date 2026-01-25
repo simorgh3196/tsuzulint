@@ -18,7 +18,7 @@ use crate::{Diagnostic, PluginError, RuleManifest};
 #[cfg(feature = "native")]
 use crate::executor_extism::ExtismExecutor;
 
-#[cfg(feature = "browser")]
+#[cfg(all(feature = "browser", not(feature = "native")))]
 use crate::executor_wasmi::WasmiExecutor;
 
 // Type alias for the executor based on feature flags

@@ -151,8 +151,8 @@ mod tests {
 
     #[test]
     fn test_diagnostic_with_severity() {
-        let diag = Diagnostic::new("rule", "message", Span::new(0, 5))
-            .with_severity(Severity::Warning);
+        let diag =
+            Diagnostic::new("rule", "message", Span::new(0, 5)).with_severity(Severity::Warning);
 
         assert_eq!(diag.severity, Severity::Warning);
     }
@@ -161,8 +161,7 @@ mod tests {
     fn test_diagnostic_with_location() {
         use texide_ast::Position;
         let loc = Location::new(Position::new(1, 1), Position::new(1, 10));
-        let diag = Diagnostic::new("rule", "message", Span::new(0, 10))
-            .with_location(loc);
+        let diag = Diagnostic::new("rule", "message", Span::new(0, 10)).with_location(loc);
 
         assert!(diag.loc.is_some());
         let location = diag.loc.unwrap();
@@ -257,8 +256,8 @@ mod tests {
 
     #[test]
     fn test_diagnostic_clone() {
-        let original = Diagnostic::new("rule", "msg", Span::new(0, 5))
-            .with_severity(Severity::Warning);
+        let original =
+            Diagnostic::new("rule", "msg", Span::new(0, 5)).with_severity(Severity::Warning);
 
         let cloned = original.clone();
 
