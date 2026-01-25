@@ -66,6 +66,7 @@ pub struct LintSummary {
 
 impl LintSummary {
     /// Creates a summary from results.
+    #[allow(dead_code)]
     pub fn from_results(results: &[LintResult]) -> Self {
         let mut summary = Self::default();
 
