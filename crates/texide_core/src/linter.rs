@@ -379,11 +379,7 @@ mod tests {
         let linter = Linter::new(config).unwrap();
 
         let arena = AstArena::new();
-        let text_node = arena.alloc(TxtNode::new_text(
-            NodeType::Str,
-            Span::new(0, 5),
-            "hello",
-        ));
+        let text_node = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello"));
         let children = arena.alloc_slice_copy(&[*text_node]);
         let doc = TxtNode::new_parent(NodeType::Document, Span::new(0, 5), children);
 

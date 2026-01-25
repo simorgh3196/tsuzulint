@@ -247,7 +247,11 @@ mod tests {
     #[test]
     fn walk_children_empty_children() {
         let arena = AstArena::new();
-        let para = arena.alloc(TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 0), &[]));
+        let para = arena.alloc(TxtNode::new_parent(
+            NodeType::Paragraph,
+            Span::new(0, 0),
+            &[],
+        ));
 
         let mut counter = NodeCounter::new();
         let result = walk_children(&mut counter, para);
@@ -321,12 +325,7 @@ mod tests {
 
         assert_eq!(
             tracker.events,
-            vec![
-                "enter:Paragraph",
-                "enter:Str",
-                "exit:Str",
-                "exit:Paragraph"
-            ]
+            vec!["enter:Paragraph", "enter:Str", "exit:Str", "exit:Paragraph"]
         );
     }
 }

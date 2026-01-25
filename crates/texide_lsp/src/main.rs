@@ -23,6 +23,7 @@ struct Backend {
     /// Document contents cache.
     documents: RwLock<HashMap<Url, String>>,
     /// Linter configuration.
+    #[allow(dead_code)]
     config: RwLock<LinterConfig>,
 }
 

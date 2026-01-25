@@ -8,7 +8,7 @@ use predicates::prelude::*;
 
 /// Helper to create a command for the texide CLI
 fn texide_cmd() -> Command {
-    Command::cargo_bin("texide").unwrap()
+    Command::new(env!("CARGO_BIN_EXE_texide"))
 }
 
 mod help_command {
@@ -45,22 +45,14 @@ mod lint_command {
     fn lints_markdown_file() {
         let sample_md = fixtures_dir().join("sample.md");
 
-        texide_cmd()
-            .arg("lint")
-            .arg(&sample_md)
-            .assert()
-            .success();
+        texide_cmd().arg("lint").arg(&sample_md).assert().success();
     }
 
     #[test]
     fn lints_plain_text_file() {
         let sample_txt = fixtures_dir().join("sample.txt");
 
-        texide_cmd()
-            .arg("lint")
-            .arg(&sample_txt)
-            .assert()
-            .success();
+        texide_cmd().arg("lint").arg(&sample_txt).assert().success();
     }
 
     #[test]

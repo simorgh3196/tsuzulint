@@ -418,7 +418,10 @@ mod tests {
         let ast = parser.parse(&arena, source).unwrap();
 
         let paragraph = &ast.children[0];
-        let has_code = paragraph.children.iter().any(|c| c.node_type == NodeType::Code);
+        let has_code = paragraph
+            .children
+            .iter()
+            .any(|c| c.node_type == NodeType::Code);
 
         assert!(has_code);
     }
@@ -590,7 +593,7 @@ mod tests {
 
     #[test]
     fn test_parser_default() {
-        let parser = MarkdownParser::default();
+        let parser = MarkdownParser;
         assert_eq!(parser.name(), "markdown");
     }
 

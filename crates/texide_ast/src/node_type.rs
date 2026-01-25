@@ -341,7 +341,11 @@ mod tests {
         ];
 
         for node_type in non_parent_types {
-            assert!(!node_type.is_parent(), "{:?} should not be parent", node_type);
+            assert!(
+                !node_type.is_parent(),
+                "{:?} should not be parent",
+                node_type
+            );
         }
     }
 
