@@ -145,11 +145,7 @@ impl RuleExecutor for WasmiExecutor {
             .func_wrap(
                 "env",
                 "abort",
-                |_caller: Caller<'_, HostState>,
-                 _msg: i32,
-                 _file: i32,
-                 _line: i32,
-                 _col: i32| {
+                |_caller: Caller<'_, HostState>, _msg: i32, _file: i32, _line: i32, _col: i32| {
                     // Abort handler - in real implementation, this would panic
                 },
             )
@@ -195,10 +191,8 @@ impl RuleExecutor for WasmiExecutor {
 
         // Instantiate the module
         let instance = linker
-            .instantiate(&mut store, &module)
-            .map_err(|e| PluginError::load(format!("Failed to instantiate: {}", e)))?
-            .start(&mut store)
-            .map_err(|e| PluginError::load(format!("Failed to start: {}", e)))?;
+            .instantiate_and_start(&mut store, &module)
+            .map_err(|e| PluginError::load(format!("Failed to instantiate and start: {}", e)))?;
 
         // Get memory export and store in host state
         if let Some(Extern::Memory(memory)) = instance.get_export(&store, "memory") {
@@ -270,10 +264,10 @@ impl RuleExecutor for WasmiExecutor {
             Self::write_string(&mut rule.store, &rule.alloc_fn, input_json)?;
 
         // Call lint function
-        let (output_ptr, output_len) = rule
-            .lint_fn
-            .call(&mut rule.store, (input_ptr, input_len))
-            .map_err(|e| PluginError::call(format!("Rule '{}' failed: {}", rule_name, e)))?;
+        let (output_ptr, output_len) =
+            rule.lint_fn
+                .call(&mut rule.store, (input_ptr, input_len))
+                .map_err(|e| PluginError::call(format!("Rule '{}' failed: {}", rule_name, e)))?;
 
         // Read output from WASM memory
         let response_json = Self::read_string(&rule.store, output_ptr, output_len)?;
