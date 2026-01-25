@@ -66,7 +66,7 @@ npm test
 
 ## Project Structure
 
-```
+```text
 {{RULE_NAME}}/
 ├── package.json      # Node.js project config
 ├── tsconfig.json     # TypeScript compiler config
@@ -88,4 +88,4 @@ npm test
 - No access to Node.js APIs (runs in sandboxed QuickJS environment)
 - Performance is slower than native Rust rules
 
-For production rules with high performance requirements, consider using the [Rust template](../rust/).
+For production rules with high-performance requirements, consider using the [Rust template](../rust/).

@@ -166,16 +166,17 @@ function lint(request: LintRequest): LintResponse {
 
 // Read input JSON, determine which function to call, execute, and write output
 function main(): void {
-  const input = readInput();
+  const rawInput = readInput();
+  const trimmedInput = rawInput?.trim() || "";
 
   // Check if this is a manifest request or lint request
   // The host will call with empty input for get_manifest
-  if (!input || input.trim() === "" || input === "{}") {
+  if (trimmedInput === "" || trimmedInput === "{}") {
     const manifest = getManifest();
     writeOutput(JSON.stringify(manifest));
   } else {
     try {
-      const request: LintRequest = JSON.parse(input);
+      const request: LintRequest = JSON.parse(trimmedInput);
       const response = lint(request);
       writeOutput(JSON.stringify(response));
     } catch (e) {
