@@ -82,11 +82,7 @@ pub struct NodeData<'a> {
 impl<'a> TxtNode<'a> {
     /// Creates a new parent node with children.
     #[inline]
-    pub const fn new_parent(
-        node_type: NodeType,
-        span: Span,
-        children: &'a [TxtNode<'a>],
-    ) -> Self {
+    pub const fn new_parent(node_type: NodeType, span: Span, children: &'a [TxtNode<'a>]) -> Self {
         Self {
             node_type,
             span,
@@ -330,7 +326,8 @@ mod tests {
         let emphasis_children = arena.alloc_slice_copy(&[*emphasis]);
 
         // Create a paragraph containing the emphasis
-        let paragraph = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 6), emphasis_children);
+        let paragraph =
+            TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 6), emphasis_children);
 
         assert_eq!(paragraph.node_type, NodeType::Paragraph);
         assert_eq!(paragraph.children[0].node_type, NodeType::Emphasis);
@@ -382,7 +379,8 @@ mod tests {
     fn test_code_block_node() {
         let arena = AstArena::new();
         let code = "fn main() {}";
-        let mut node = TxtNode::new_text(NodeType::CodeBlock, Span::new(0, 12), arena.alloc_str(code));
+        let mut node =
+            TxtNode::new_text(NodeType::CodeBlock, Span::new(0, 12), arena.alloc_str(code));
         node.data = NodeData::code_block(Some("rust"));
 
         assert_eq!(node.node_type, NodeType::CodeBlock);

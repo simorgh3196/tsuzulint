@@ -19,7 +19,7 @@ license = "MIT"
 homepage = "https://github.com/simorgh3196/texide"
 repository = "https://github.com/simorgh3196/texide"
 keywords = ["linter", "markdown", "lsp", "wasm"]
-rust-version = "1.93"
+rust-version = "1.92"
 
 [workspace.dependencies]
 # Internal crates

@@ -4,8 +4,6 @@
 edition = "2024"
 
 # Import grouping and formatting
-imports_granularity = "Module"
-group_imports = "StdExternalCrate"
 reorder_imports = true
 
 # Line width
@@ -13,8 +11,9 @@ max_width = 100
 use_small_heuristics = "Default"
 
 # Comments
-wrap_comments = false
-normalize_comments = false
+# Nightly-only options removed for stable compatibility
+# wrap_comments = false
+# normalize_comments = false
 
 # Misc
 newline_style = "Unix"
