@@ -47,7 +47,15 @@ impl Backend {
     async fn validate_document(&self, uri: &Url, text: &str, version: Option<i32>) {
         debug!("Validating document: {}", uri);
 
-        let diagnostics = self.lint_text(text, uri.path());
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => {
+                debug!("Skipping validation for non-file URI: {}", uri);
+                return;
+            }
+        };
+
+        let diagnostics = self.lint_text(text, &path);
 
         // Convert to LSP diagnostics
         let lsp_diagnostics: Vec<Diagnostic> = diagnostics
@@ -61,9 +69,7 @@ impl Backend {
     }
 
     /// Lints text and returns Texide diagnostics.
-    fn lint_text(&self, text: &str, file_path: &str) -> Vec<TexideDiagnostic> {
-        let path = std::path::Path::new(file_path);
-
+    fn lint_text(&self, text: &str, path: &std::path::Path) -> Vec<TexideDiagnostic> {
         // Safely acquire read lock, handling potential poisoning
         let linter_guard = match self.linter.read() {
             Ok(guard) => guard,
@@ -288,9 +294,14 @@ impl LanguageServer for Backend {
             }
         };
 
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+
         // Re-run linting to get diagnostics with fixes
         // Note: In a real implementation, we should cache diagnostics map to avoid re-linting
-        let diagnostics = self.lint_text(&text, uri.path());
+        let diagnostics = self.lint_text(&text, &path);
 
         let mut actions = Vec::new();
 
