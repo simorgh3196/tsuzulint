@@ -15,7 +15,6 @@
     "rust-analyzer.cargo.buildScripts.enable": true,
     "rust-analyzer.check.command": "clippy",
     "rust-analyzer.check.extraArgs": [
-        "--all-targets",
         "--all-features"
     ],
     "rust-analyzer.checkOnSave": true,
