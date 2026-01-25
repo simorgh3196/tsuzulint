@@ -12,11 +12,9 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
-use texide_ast::AstArena;
 use texide_core::{
     Diagnostic as TexideDiagnostic, Linter, LinterConfig, Severity as TexideSeverity,
 };
-use texide_parser::{MarkdownParser, Parser, PlainTextParser};
 
 /// The LSP backend for Texide.
 struct Backend {

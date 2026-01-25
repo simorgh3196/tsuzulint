@@ -2,6 +2,17 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Isolation level for rules.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IsolationLevel {
+    /// Rule requires the entire document context.
+    #[default]
+    Global,
+    /// Rule can be run on individual blocks (e.g., paragraphs) independently.
+    Block,
+}
+
 /// Manifest for a WASM rule plugin.
 ///
 /// Every rule must export a `get_manifest` function that returns
@@ -28,6 +39,10 @@ pub struct RuleManifest {
     #[serde(default)]
     pub node_types: Vec<String>,
 
+    /// Isolation level for this rule.
+    #[serde(default)]
+    pub isolation_level: IsolationLevel,
+
     /// JSON Schema for rule options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<serde_json::Value>,
@@ -42,6 +57,7 @@ impl RuleManifest {
             description: None,
             fixable: false,
             node_types: Vec::new(),
+            isolation_level: IsolationLevel::Global,
             schema: None,
         }
     }
@@ -63,6 +79,12 @@ impl RuleManifest {
         self.node_types = node_types;
         self
     }
+
+    /// Sets the isolation level for this rule.
+    pub fn with_isolation_level(mut self, isolation_level: IsolationLevel) -> Self {
+        self.isolation_level = isolation_level;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -76,6 +98,7 @@ mod tests {
         assert_eq!(manifest.name, "no-todo");
         assert_eq!(manifest.version, "1.0.0");
         assert!(!manifest.fixable);
+        assert_eq!(manifest.isolation_level, IsolationLevel::Global);
     }
 
     #[test]
@@ -83,7 +106,8 @@ mod tests {
         let manifest = RuleManifest::new("no-todo", "1.0.0")
             .with_description("Disallow TODO comments")
             .with_fixable(true)
-            .with_node_types(vec!["Str".to_string()]);
+            .with_node_types(vec!["Str".to_string()])
+            .with_isolation_level(IsolationLevel::Block);
 
         assert_eq!(
             manifest.description,
@@ -91,6 +115,7 @@ mod tests {
         );
         assert!(manifest.fixable);
         assert_eq!(manifest.node_types, vec!["Str"]);
+        assert_eq!(manifest.isolation_level, IsolationLevel::Block);
     }
 
     #[test]
@@ -100,5 +125,17 @@ mod tests {
 
         assert!(json.contains("\"name\":\"test-rule\""));
         assert!(json.contains("\"version\":\"0.1.0\""));
+        assert!(json.contains("\"isolation_level\":\"global\""));
+    }
+
+    #[test]
+    fn test_manifest_deserialization_default_isolation() {
+        let json = r#"{
+            "name": "test-rule",
+            "version": "0.1.0"
+        }"#;
+
+        let manifest: RuleManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.isolation_level, IsolationLevel::Global);
     }
 }

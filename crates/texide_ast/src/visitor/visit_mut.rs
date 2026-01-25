@@ -342,10 +342,7 @@ mod tests {
     #[test]
     fn walk_children_mut_returns_none_when_no_changes() {
         let arena = AstArena::new();
-        let hr = arena.alloc(TxtNode::new_leaf(
-            NodeType::HorizontalRule,
-            Span::new(0, 3),
-        ));
+        let hr = arena.alloc(TxtNode::new_leaf(NodeType::HorizontalRule, Span::new(0, 3)));
         let children = arena.alloc_slice_copy(&[*hr]);
         let doc = arena.alloc(TxtNode::new_parent(
             NodeType::Document,
@@ -363,7 +360,11 @@ mod tests {
     #[test]
     fn walk_children_mut_empty_children() {
         let arena = AstArena::new();
-        let para = arena.alloc(TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 0), &[]));
+        let para = arena.alloc(TxtNode::new_parent(
+            NodeType::Paragraph,
+            Span::new(0, 0),
+            &[],
+        ));
 
         let mut transformer = UppercaseTransformer { arena: &arena };
         let result = walk_children_mut(&mut transformer, para);

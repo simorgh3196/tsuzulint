@@ -10,7 +10,7 @@ use miette::{IntoDiagnostic, Result};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-use texide_core::{apply_fixes_to_file, LintResult, Linter, LinterConfig, Severity};
+use texide_core::{LintResult, Linter, LinterConfig, Severity, apply_fixes_to_file};
 
 /// Texide - High-performance natural language linter
 #[derive(Parser)]

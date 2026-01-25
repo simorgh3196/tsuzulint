@@ -1,6 +1,6 @@
 //! Core linter engine.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -9,10 +9,10 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
-use texide_ast::AstArena;
-use texide_cache::{CacheEntry, CacheManager};
+use texide_ast::{AstArena, NodeType, TxtNode};
+use texide_cache::{CacheEntry, CacheManager, entry::BlockCacheEntry};
 use texide_parser::{MarkdownParser, Parser, PlainTextParser};
-use texide_plugin::PluginHost;
+use texide_plugin::{IsolationLevel, PluginHost};
 
 use crate::{LintResult, LinterConfig, LinterError};
 
@@ -184,7 +184,7 @@ impl Linter {
         let config_hash = self.config.hash();
         let rule_versions = self.get_rule_versions();
 
-        // Check cache
+        // 1. Check full cache first
         {
             let cache = self.cache.lock().unwrap();
             if cache.is_valid(path, &content_hash, &config_hash, &rule_versions)
@@ -198,22 +198,216 @@ impl Linter {
             }
         }
 
-        // Lint content
-        let diagnostics = self.lint_content(&content, path)?;
+        // Find appropriate parser
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let parser = self.select_parser(extension);
+
+        // Parse the file
+        let arena = AstArena::new();
+        let ast = parser
+            .parse(&arena, &content)
+            .map_err(|e| LinterError::parse(e.to_string()))?;
+
+        // Extract blocks for incremental analysis
+        let current_blocks = self.extract_blocks(&ast, &content);
+
+        // 2. Incremental Caching Strategy
+        // If file changed, try to reuse diagnostics for unchanged blocks
+        let (reused_diagnostics, matched_mask) = {
+            let cache = self.cache.lock().unwrap();
+            cache.reconcile_blocks(path, &current_blocks, &config_hash, &rule_versions)
+        };
+
+        // Prepare diagnostics collection
+        // We track global diagnostics separately to avoid polluting block cache later
+        let mut global_diagnostics = Vec::new();
+        let mut block_diagnostics = Vec::new();
+
+        // Run rules
+        {
+            let mut host = self.plugin_host.lock().unwrap();
+
+            // A. Run Global Rules
+            // Global rules must always run on the full document if anything changed
+            // because they depend on the full context.
+            let global_rule_names = self.get_rule_names_by_isolation(&host, IsolationLevel::Global);
+            if !global_rule_names.is_empty() {
+                let ast_json = self.ast_to_json(&ast, &content);
+                for rule in global_rule_names {
+                    match host.run_rule(&rule, &ast_json, &content, path.to_str()) {
+                        Ok(diags) => global_diagnostics.extend(diags),
+                        Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                    }
+                }
+            }
+
+            // B. Run Block Rules on CHANGED/NEW blocks
+            let block_rule_names = self.get_rule_names_by_isolation(&host, IsolationLevel::Block);
+            if !block_rule_names.is_empty() {
+                // Collect AST nodes for changed blocks
+                // We map `matched_mask` back to actual AST nodes by traversing.
+                let mut block_index = 0;
+                self.visit_blocks(&ast, &mut |node| {
+                    if block_index < matched_mask.len() {
+                        if !matched_mask[block_index] {
+                            // This block changed. Run block rules on it.
+                            let node_json = self.ast_to_json(node, &content);
+                            for rule in &block_rule_names {
+                                match host.run_rule(rule, &node_json, &content, path.to_str()) {
+                                    Ok(diags) => block_diagnostics.extend(diags),
+                                    Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                                }
+                            }
+                        }
+                        block_index += 1;
+                    }
+                });
+            }
+        }
+
+        // Deduplicate diagnostics
+        // We combine reused (unchanged blocks), global (fresh), and block (changed blocks) diagnostics.
+        let mut all_diagnostics = reused_diagnostics;
+        all_diagnostics.extend(global_diagnostics.iter().cloned());
+        all_diagnostics.extend(block_diagnostics);
+
+        let mut final_diagnostics = Vec::new();
+        let mut seen_diagnostics = HashSet::new();
+
+        // Also track which diagnostics are "global" so we don't stick them into block cache
+        let mut global_keys = HashSet::new();
+        for d in &global_diagnostics {
+            global_keys.insert((
+                d.span.start,
+                d.span.end,
+                d.message.clone(),
+                d.rule_id.clone(),
+            ));
+        }
+
+        for diag in all_diagnostics {
+            let key = (
+                diag.span.start,
+                diag.span.end,
+                diag.message.clone(),
+                diag.rule_id.clone(),
+            );
+            if seen_diagnostics.insert(key) {
+                final_diagnostics.push(diag);
+            }
+        }
 
         // Update cache
+        // We need to associate diagnostics with blocks for NEXT time.
+        // We ensure we ONLY store diagnostics that belong to the block and are NOT global.
+
+        let new_blocks: Vec<BlockCacheEntry> = current_blocks
+            .into_iter()
+            .map(|mut block| {
+                // Filter diagnostics that fall within this block's span
+                let block_diags: Vec<_> = final_diagnostics
+                    .iter()
+                    .filter(|d| {
+                        // Check strict inclusion
+                        let in_block =
+                            d.span.start >= block.span.start && d.span.end <= block.span.end;
+                        if !in_block {
+                            return false;
+                        }
+
+                        // Check if it's a global diagnostic
+                        let key = (
+                            d.span.start,
+                            d.span.end,
+                            d.message.clone(),
+                            d.rule_id.clone(),
+                        );
+                        !global_keys.contains(&key)
+                    })
+                    .cloned()
+                    .collect();
+                block.diagnostics = block_diags;
+                block
+            })
+            .collect();
+
         {
             let mut cache = self.cache.lock().unwrap();
             let entry = CacheEntry::new(
                 content_hash,
                 config_hash,
                 rule_versions,
-                diagnostics.clone(),
+                final_diagnostics.clone(),
+                new_blocks,
             );
             cache.set(path.to_path_buf(), entry);
         }
 
-        Ok(LintResult::new(path.to_path_buf(), diagnostics))
+        Ok(LintResult::new(path.to_path_buf(), final_diagnostics))
+    }
+
+    /// Extracts blocks from AST for caching.
+    fn extract_blocks(&self, ast: &TxtNode, content: &str) -> Vec<BlockCacheEntry> {
+        let mut blocks = Vec::new();
+
+        // Helper to traverse and collect blocks
+        self.visit_blocks(ast, &mut |node| {
+            // Compute hash for this block
+            // Use byte-safe operations to prevent panics
+            let start = node.span.start as usize;
+            let end = node.span.end as usize;
+            let content_bytes = content.as_bytes();
+
+            // Safety check for bounds
+            if start <= content_bytes.len() && end <= content_bytes.len() && start <= end {
+                let bytes = &content_bytes[start..end];
+                let block_content = String::from_utf8_lossy(bytes);
+                let hash = CacheManager::hash_content(&block_content);
+
+                blocks.push(BlockCacheEntry {
+                    hash,
+                    span: node.span,
+                    diagnostics: Vec::new(), // Will be populated later
+                });
+            } else {
+                warn!(
+                    "Block span {:?} out of bounds for content length {}",
+                    node.span,
+                    content.len()
+                );
+            }
+        });
+
+        blocks
+    }
+
+    /// Visits nodes that are considered "blocks" (e.g. Paragraphs, Headers).
+    /// This defines the granularity of incremental caching.
+    fn visit_blocks<F>(&self, node: &TxtNode, f: &mut F)
+    where
+        F: FnMut(&TxtNode),
+    {
+        // Define what constitutes a "block".
+        // For Markdown, usually top-level children of Document (Paragraph, Heading, List, etc.)
+        // For now, we assume direct children of Root are blocks.
+        if node.node_type == NodeType::Document {
+            for child in node.children.iter() {
+                f(child);
+            }
+        }
+    }
+
+    /// Gets rule names filtered by isolation level.
+    fn get_rule_names_by_isolation(&self, host: &PluginHost, level: IsolationLevel) -> Vec<String> {
+        let mut names = Vec::new();
+        for name in host.loaded_rules() {
+            if let Some(manifest) = host.get_manifest(name)
+                && manifest.isolation_level == level
+            {
+                names.push(name.to_string());
+            }
+        }
+        names
     }
 
     /// Lints content directly (for LSP or modify-on-save scenarios).
