@@ -31,7 +31,8 @@ impl Backend {
     /// Creates a new backend with the given client.
     fn new(client: Client) -> Self {
         // Initialize linter with default config
-        // TODO: Load config from workspace root. Track in issue #12.
+        // Initialize linter with default config
+        // Real config will be loaded during `initialize` if available
         let config = LinterConfig::new();
         let linter = Linter::new(config).expect("Failed to initialize linter");
 
@@ -144,8 +145,29 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         info!("Texide LSP server initializing...");
+
+        if let Some(path) = params.root_uri.and_then(|u| u.to_file_path().ok()) {
+            let config_files = [".texide.json", ".texiderc", "texide.config.json"];
+            for name in config_files {
+                let config_path = path.join(name);
+                if config_path.exists() {
+                    info!("Found config file: {}", config_path.display());
+                    match LinterConfig::from_file(&config_path) {
+                        Ok(config) => {
+                            info!("Loaded configuration from workspace");
+                            let mut linter = self.linter.write().unwrap();
+                            *linter = Linter::new(config).expect("Failed to re-initialize linter");
+                        }
+                        Err(e) => {
+                            error!("Failed to load config: {}", e);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {

@@ -44,6 +44,17 @@ texide lint "**/*.md"
 texide lint --fix "**/*.md"
 ```
 
+## Editor Integration (LSP)
+
+Texide includes a Language Server Protocol (LSP) implementation for real-time diagnostics and fixes in editors like VSCode.
+
+```bash
+# Start the LSP server
+texide-lsp
+```
+
+The server automatically loads configuration from `.texide.json` or similar files in the workspace root.
+
 ## Configuration
 
 Create `.texide.json` in your project root:
