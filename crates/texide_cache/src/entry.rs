@@ -238,9 +238,7 @@ mod tests {
             BlockCacheEntry {
                 hash: "block2".to_string(),
                 span: Span::new(11, 20),
-                diagnostics: vec![
-                    Diagnostic::new("rule1", "Error", Span::new(12, 15))
-                ],
+                diagnostics: vec![Diagnostic::new("rule1", "Error", Span::new(12, 15))],
             },
         ];
 

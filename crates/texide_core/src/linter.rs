@@ -401,10 +401,10 @@ impl Linter {
     fn get_rule_names_by_isolation(&self, host: &PluginHost, level: IsolationLevel) -> Vec<String> {
         let mut names = Vec::new();
         for name in host.loaded_rules() {
-            if let Some(manifest) = host.get_manifest(name) {
-                if manifest.isolation_level == level {
-                    names.push(name.to_string());
-                }
+            if let Some(manifest) = host.get_manifest(name)
+                && manifest.isolation_level == level
+            {
+                names.push(name.to_string());
             }
         }
         names
