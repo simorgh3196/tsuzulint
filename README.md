@@ -42,6 +42,71 @@ texide lint "**/*.md"
 
 # Lint with auto-fix
 texide lint --fix "**/*.md"
+
+# Lint with performance timings
+texide lint --timings "**/*.md"
+```
+
+## Try with Sample Rules
+
+Sample rules are included in the `rules/` directory. To try them out:
+
+### 1. Build sample rules
+
+```bash
+cd rules
+cargo build --target wasm32-wasip1 --release
+cd ..
+```
+
+This builds the following sample rules:
+- **no-todo** - Detects TODO/FIXME/XXX comments
+- **sentence-length** - Checks sentence length limits
+- **no-doubled-joshi** - Detects doubled Japanese particles (助詞の重複)
+
+Built WASM files are located at `rules/target/wasm32-wasip1/release/`.
+
+### 2. Create configuration
+
+Create `.texide.json` in your project root:
+
+```json
+{
+  "rules": {
+    "no-todo": true,
+    "sentence-length": { "max": 100 },
+    "no-doubled-joshi": true
+  },
+  "plugins": [
+    "rules/target/wasm32-wasip1/release/texide_rule_no_todo.wasm",
+    "rules/target/wasm32-wasip1/release/texide_rule_sentence_length.wasm",
+    "rules/target/wasm32-wasip1/release/texide_rule_no_doubled_joshi.wasm"
+  ]
+}
+```
+
+> [!NOTE]
+> Currently, automatic rule loading from the `plugins` field is not yet implemented in the CLI.
+> This feature is planned for a future release.
+
+### 3. Run lint with performance timings
+
+```bash
+cargo run -p texide -- lint --timings "**/*.md"
+```
+
+Example output:
+```text
+Checked 19 files (0 from cache), found 0 issues
+
+Performance Timings:
+Rule                           | Duration        | %
+-------------------------------+-----------------+-----------
+sentence-length                | 26.554126ms     | 33.9%
+no-todo                        | 26.099628ms     | 33.3%
+no-doubled-joshi               | 25.790751ms     | 32.9%
+-------------------------------+-----------------+-----------
+Total                          | 78.444505ms
 ```
 
 ## Editor Integration (LSP)
@@ -66,9 +131,29 @@ Create `.texide.json` in your project root:
     "max-lines": {
       "max": 300
     }
-  }
+  },
+  "plugins": [
+    "path/to/rule.wasm"
+  ],
+  "include": ["**/*.md", "**/*.txt"],
+  "exclude": ["**/node_modules/**"],
+  "cache": true,
+  "cache_dir": ".texide-cache",
+  "timings": false
 }
 ```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rules` | object | `{}` | Rule configurations (name -> enabled/options) |
+| `plugins` | string[] | `[]` | Paths to WASM rule files |
+| `include` | string[] | `[]` | File patterns to include |
+| `exclude` | string[] | `[]` | File patterns to exclude |
+| `cache` | boolean | `true` | Enable caching for faster re-lints |
+| `cache_dir` | string | `.texide-cache` | Cache directory path |
+| `timings` | boolean | `false` | Enable performance timing output |
 
 ## Creating Custom Rules
 

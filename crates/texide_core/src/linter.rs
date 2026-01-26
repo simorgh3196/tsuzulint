@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use tracing::{debug, info, warn};
@@ -222,6 +223,7 @@ impl Linter {
         // We track global diagnostics separately to avoid polluting block cache later
         let mut global_diagnostics = Vec::new();
         let mut block_diagnostics = Vec::new();
+        let mut timings = HashMap::new();
 
         // Run rules
         {
@@ -234,9 +236,13 @@ impl Linter {
             if !global_rule_names.is_empty() {
                 let ast_json = self.ast_to_json(&ast, &content);
                 for rule in global_rule_names {
+                    let start = Instant::now();
                     match host.run_rule(&rule, &ast_json, &content, path.to_str()) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                    }
+                    if self.config.timings {
+                        timings.insert(rule, start.elapsed());
                     }
                 }
             }
@@ -253,9 +259,14 @@ impl Linter {
                             // This block changed. Run block rules on it.
                             let node_json = self.ast_to_json(node, &content);
                             for rule in &block_rule_names {
+                                let start = Instant::now();
                                 match host.run_rule(rule, &node_json, &content, path.to_str()) {
                                     Ok(diags) => block_diagnostics.extend(diags),
                                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                                }
+                                if self.config.timings {
+                                    *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
+                                        start.elapsed();
                                 }
                             }
                         }
@@ -343,7 +354,9 @@ impl Linter {
             cache.set(path.to_path_buf(), entry);
         }
 
-        Ok(LintResult::new(path.to_path_buf(), final_diagnostics))
+        let mut result = LintResult::new(path.to_path_buf(), final_diagnostics);
+        result.timings = timings;
+        Ok(result)
     }
 
     /// Extracts blocks from AST for caching.
