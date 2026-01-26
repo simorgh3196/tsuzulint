@@ -25,7 +25,6 @@ TODO.md
 
 # AI assistant directories
 .agent/
-.agents/
 .claude/
 .cursor/
 .kiro/

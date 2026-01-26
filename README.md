@@ -242,6 +242,15 @@ cargo test
 cargo run --bin texide -- lint tests/fixtures/
 ```
 
+## Agent Skills
+
+```bash
+npx skills add anthropics/skills -s doc-coauthoring # doc-skills
+npx skills add softaworks/agent-toolkit -s commit-work -s using-git-worktrees # git-skills
+npx skills add obra/superpowers -s test-driven-development # tdd-skills
+npx skills add ZhangHanDong/rust-skills # rust-skills
+```
+
 ## License
 
 MIT License - see [LICENSE](./LICENSE) for details.
