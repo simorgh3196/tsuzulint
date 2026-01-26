@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -11,11 +11,11 @@ use crate::LinterError;
 /// Configuration for the linter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinterConfig {
-    /// Rule configurations.
+    /// Rules configuration.
     #[serde(default)]
     pub rules: HashMap<String, RuleConfig>,
 
-    /// Plugin configurations.
+    /// Plugin names to load.
     #[serde(default)]
     pub plugins: Vec<String>,
 
@@ -38,6 +38,11 @@ pub struct LinterConfig {
     /// Whether to enable performance timings.
     #[serde(default)]
     pub timings: bool,
+
+    /// Base directory for resolving relative paths (plugins, etc.).
+    /// This is usually the directory containing the configuration file.
+    #[serde(skip)]
+    pub base_dir: Option<PathBuf>,
 }
 
 fn default_cache() -> bool {
@@ -91,18 +96,26 @@ impl LinterConfig {
             cache: true,
             cache_dir: ".texide-cache".to_string(),
             timings: false,
+            base_dir: None,
         }
     }
 
     /// Loads configuration from a file.
     ///
-    /// Supports `.texide.json`, `.texiderc`, `texide.config.json`.
+    /// Supports `.texiderc.json`, `.texiderc`, `texide.config.json`.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, LinterError> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)
             .map_err(|e| LinterError::config(format!("Failed to read config: {}", e)))?;
 
-        Self::from_json(&content)
+        let mut config = Self::from_json(&content)?;
+
+        // precise parent directory handling
+        if let Some(parent) = path.parent() {
+            config.base_dir = Some(parent.to_path_buf());
+        }
+
+        Ok(config)
     }
 
     /// Parses configuration from JSON string.
@@ -280,5 +293,19 @@ mod tests {
 
         assert!(warn.is_enabled());
         assert!(warning.is_enabled());
+    }
+
+    #[test]
+    fn test_config_from_file_sets_base_dir() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{{}}").unwrap();
+
+        let path = file.path();
+        let config = LinterConfig::from_file(path).unwrap();
+
+        assert_eq!(config.base_dir, path.parent().map(|p| p.to_path_buf()));
     }
 }

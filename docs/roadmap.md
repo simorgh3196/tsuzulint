@@ -24,6 +24,7 @@ Texideは、textlintにインスパイアされた高性能な自然言語リン
 |--------------|------|------|
 | **texide_lsp** | ⏳ 未実装 | プレースホルダのみ存在 |
 | **--fix オプション** | ⏳ 未実装 | CLI引数は存在するが機能していない |
+| **Plugin Loading** | ✅ 完成 | `.texiderc.json` からの名前解決とWASMロード |
 
 ### ルール実装
 
@@ -49,6 +50,10 @@ Texideは、textlintにインスパイアされた高性能な自然言語リン
 - [ ] **Auto-fix機能の実装**
   - Diagnostic に `fix` 情報がある場合に自動修正
   - `--fix --dry-run` オプション追加
+
+- [ ] **プラグイン管理機能**
+  - 名前ベースのプラグイン解決 (`$PROJECT/.texide/plugins` -> `$HOME/.texide/plugins`)
+  - `texide install <plugin-name>` (将来実装)
 
 - [ ] **出力フォーマット拡張**
   - SARIF形式 (GitHub Actions連携用)

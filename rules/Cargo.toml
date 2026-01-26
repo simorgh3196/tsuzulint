@@ -1,11 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "common",
-    "no-todo",
-    "sentence-length",
-    "no-doubled-joshi",
-]
+members = ["common", "no-todo", "sentence-length", "no-doubled-joshi"]
 
 [workspace.package]
 version = "0.1.0"
@@ -30,4 +25,4 @@ texide-rule-common = { path = "common" }
 
 # Testing
 pretty_assertions = "1.4"
-rstest = "0.24"
+rstest = "0.26.1"

@@ -190,7 +190,12 @@ fn run_lint(
 }
 
 fn find_config() -> Result<LinterConfig> {
-    let config_files = [".texide.json", ".texiderc", "texide.config.json"];
+    let config_files = [
+        ".texiderc.json",
+        ".texide.json",
+        ".texiderc",
+        "texide.config.json",
+    ];
 
     for name in config_files {
         let path = PathBuf::from(name);
@@ -291,7 +296,7 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
 }
 
 fn run_init(force: bool) -> Result<()> {
-    let config_path = PathBuf::from(".texide.json");
+    let config_path = PathBuf::from(".texiderc.json");
 
     if config_path.exists() && !force {
         return Err(miette::miette!(
@@ -443,7 +448,7 @@ fn run_add_rule(path: &Path) -> Result<()> {
 
     // For now, just verify the WASM file can be loaded
     info!("Rule added: {}", path.display());
-    info!("Add the rule to your .texide.json to enable it");
+    info!("Add the rule to your .texiderc.json to enable it");
 
     Ok(())
 }

@@ -15,6 +15,7 @@ use texide_cache::{CacheEntry, CacheManager, entry::BlockCacheEntry};
 use texide_parser::{MarkdownParser, Parser, PlainTextParser};
 use texide_plugin::{IsolationLevel, PluginHost};
 
+use crate::resolver::PluginResolver;
 use crate::{LintResult, LinterConfig, LinterError};
 
 /// The core linter engine.
@@ -52,9 +53,30 @@ impl Linter {
         let include_globs = Self::build_globset(&config.include)?;
         let exclude_globs = Self::build_globset(&config.exclude)?;
 
+        // Initialize plugin host
+        let mut host = PluginHost::new();
+
+        // Load configured plugins
+        for plugin_name in &config.plugins {
+            match PluginResolver::resolve(plugin_name, config.base_dir.as_deref()) {
+                Some(path) => {
+                    info!("Loading plugin '{}' from {}", plugin_name, path.display());
+                    if let Err(e) = host.load_rule(&path) {
+                        warn!("Failed to load plugin '{}': {}", plugin_name, e);
+                    }
+                }
+                None => {
+                    warn!(
+                        "Plugin '{}' not found. Checked .texide/plugins/ and global directories.",
+                        plugin_name
+                    );
+                }
+            }
+        }
+
         Ok(Self {
             config,
-            plugin_host: Mutex::new(PluginHost::new()),
+            plugin_host: Mutex::new(host),
             cache: Mutex::new(cache),
             include_globs,
             exclude_globs,

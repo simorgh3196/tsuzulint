@@ -26,6 +26,7 @@ mod config;
 mod error;
 mod fixer;
 mod linter;
+pub mod resolver;
 mod result;
 
 pub use config::LinterConfig;

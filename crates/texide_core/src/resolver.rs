@@ -1,0 +1,65 @@
+//! Plugin resolution logic.
+
+use std::path::{Path, PathBuf};
+
+/// Resolves plugin paths from names.
+pub struct PluginResolver;
+
+impl PluginResolver {
+    /// Resolves a plugin name to a filesystem path.
+    ///
+    /// Search order:
+    /// 1. `$PROJECT_ROOT/.texide/plugins/<name>.wasm`
+    /// 2. `$HOME/.texide/plugins/<name>.wasm`
+    pub fn resolve(name: &str, project_root: Option<&Path>) -> Option<PathBuf> {
+        let filename = format!("{}.wasm", name);
+
+        // 1. Check local project directory
+        if let Some(root) = project_root {
+            let local_path = root.join(".texide").join("plugins").join(&filename);
+            if local_path.exists() {
+                return Some(local_path);
+            }
+        }
+
+        // 2. Check global home directory
+        if let Some(home) = dirs::home_dir() {
+            let global_path = home.join(".texide").join("plugins").join(&filename);
+            if global_path.exists() {
+                return Some(global_path);
+            }
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_resolve_local() {
+        let dir = tempdir().unwrap();
+        let project_root = dir.path();
+        let plugins_dir = project_root.join(".texide").join("plugins");
+        fs::create_dir_all(&plugins_dir).unwrap();
+
+        let plugin_path = plugins_dir.join("my-rule.wasm");
+        fs::write(&plugin_path, "").unwrap();
+
+        let resolved = PluginResolver::resolve("my-rule", Some(project_root));
+        assert_eq!(resolved, Some(plugin_path));
+    }
+
+    #[test]
+    fn test_resolve_not_found() {
+        let dir = tempdir().unwrap();
+        let project_root = dir.path();
+
+        let resolved = PluginResolver::resolve("non-existent", Some(project_root));
+        assert_eq!(resolved, None);
+    }
+}
