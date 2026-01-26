@@ -12,12 +12,26 @@ impl PluginResolver {
     /// 1. `$PROJECT_ROOT/.texide/plugins/<name>.wasm`
     /// 2. `$HOME/.texide/plugins/<name>.wasm`
     pub fn resolve(name: &str, project_root: Option<&Path>) -> Option<PathBuf> {
+        // Validate plugin name to prevent path traversal
+        let path = Path::new(name);
+        let mut components = path.components();
+        match (components.next(), components.next()) {
+            (Some(std::path::Component::Normal(_)), None) => {
+                // Good: exactly one normal component
+            }
+            _ => return None,
+        }
+
+        if name.contains(std::path::is_separator) {
+            return None;
+        }
+
         let filename = format!("{}.wasm", name);
 
         // 1. Check local project directory
         if let Some(root) = project_root {
             let local_path = root.join(".texide").join("plugins").join(&filename);
-            if local_path.exists() {
+            if local_path.is_file() {
                 return Some(local_path);
             }
         }
@@ -25,7 +39,7 @@ impl PluginResolver {
         // 2. Check global home directory
         if let Some(home) = dirs::home_dir() {
             let global_path = home.join(".texide").join("plugins").join(&filename);
-            if global_path.exists() {
+            if global_path.is_file() {
                 return Some(global_path);
             }
         }
@@ -61,5 +75,14 @@ mod tests {
 
         let resolved = PluginResolver::resolve("non-existent", Some(project_root));
         assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn test_resolve_invalid_names() {
+        assert_eq!(PluginResolver::resolve("../plugin", None), None);
+        assert_eq!(PluginResolver::resolve("/plugin", None), None);
+        assert_eq!(PluginResolver::resolve("dir/plugin", None), None);
+        assert_eq!(PluginResolver::resolve(".", None), None);
+        assert_eq!(PluginResolver::resolve("..", None), None);
     }
 }

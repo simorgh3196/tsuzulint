@@ -58,6 +58,21 @@ impl Linter {
 
         // Load configured plugins
         for plugin_name in &config.plugins {
+            // Validate plugin name before attempting resolution
+            let path = Path::new(plugin_name);
+            let mut components = path.components();
+            let is_valid = matches!(
+                (components.next(), components.next()),
+                (Some(std::path::Component::Normal(_)), None)
+            );
+
+            if !is_valid || plugin_name.contains(std::path::is_separator) {
+                return Err(LinterError::config(format!(
+                    "Invalid plugin name '{}': plugin names must be a single filename without paths.",
+                    plugin_name
+                )));
+            }
+
             match PluginResolver::resolve(plugin_name, config.base_dir.as_deref()) {
                 Some(path) => {
                     info!("Loading plugin '{}' from {}", plugin_name, path.display());

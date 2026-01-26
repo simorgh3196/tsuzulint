@@ -13,10 +13,12 @@ Texide is a high-performance natural language linter written in Rust, inspired b
 ## Development Rules
 
 1.  **Do NOT commit directly to `main` branch.**
-2.  **Always create a Pull Request.**
-    - Branch naming: `feature/name`, `fix/name`, `docs/name`
+2.  **Confirm before Push**: After committing changes, ALWAYS ask the user for permission before pushing to the remote repository.
+3.  **Verify before Commit**: Always run `make lint` and `make fmt-check` before committing to ensure there are no errors.
+4.  **Always create a Pull Request.**
+    - Branch naming: `feat/name`, `fix/name`, `docs/name`
     - PR description must be clear.
-3.  **Tests must pass** before requesting review.
+5.  **Tests must pass** before requesting review.
 
 ## Common Commands
 

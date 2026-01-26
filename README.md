@@ -78,17 +78,22 @@ Create `.texide.json` in your project root:
     "sentence-length": { "max": 100 },
     "no-doubled-joshi": true
   },
+    "no-doubled-joshi": true
+  },
   "plugins": [
-    "rules/target/wasm32-wasip1/release/texide_rule_no_todo.wasm",
-    "rules/target/wasm32-wasip1/release/texide_rule_sentence_length.wasm",
-    "rules/target/wasm32-wasip1/release/texide_rule_no_doubled_joshi.wasm"
+    "texide_rule_no_todo",
+    "texide_rule_sentence_length",
+    "texide_rule_no_doubled_joshi"
   ]
 }
 ```
 
-> [!NOTE]
-> Currently, automatic rule loading from the `plugins` field is not yet implemented in the CLI.
-> This feature is planned for a future release.
+#### Plugin Loading Logic
+
+Plugins are resolved by name. `texide` searches for `<name>.wasm` in:
+
+1. `.texide/plugins/` (in your project)
+2. `~/.texide/plugins/` (in your user directory)
 
 ### 3. Run lint with performance timings
 
@@ -123,7 +128,7 @@ The server automatically loads configuration from `.texide.json` or similar file
 
 ## Configuration
 
-Create `.texide.json` in your project root:
+Create `.texiderc.json` in your project root:
 
 ```json
 {
@@ -134,7 +139,7 @@ Create `.texide.json` in your project root:
     }
   },
   "plugins": [
-    "path/to/rule.wasm"
+    "my-rule"
   ],
   "include": ["**/*.md", "**/*.txt"],
   "exclude": ["**/node_modules/**"],
@@ -149,7 +154,7 @@ Create `.texide.json` in your project root:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `rules` | object | `{}` | Rule configurations (name -> enabled/options) |
-| `plugins` | string[] | `[]` | Paths to WASM rule files |
+| `plugins` | string[] | `[]` | List of plugin names to load |
 | `include` | string[] | `[]` | File patterns to include |
 | `exclude` | string[] | `[]` | File patterns to exclude |
 | `cache` | boolean | `true` | Enable caching for faster re-lints |
