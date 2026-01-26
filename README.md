@@ -96,7 +96,7 @@ cargo run -p texide -- lint --timings "**/*.md"
 ```
 
 Example output:
-```
+```text
 Checked 19 files (0 from cache), found 0 issues
 
 Performance Timings:
