@@ -34,6 +34,10 @@ pub struct LinterConfig {
     /// Cache directory.
     #[serde(default = "default_cache_dir")]
     pub cache_dir: String,
+
+    /// Whether to enable performance timings.
+    #[serde(default)]
+    pub timings: bool,
 }
 
 fn default_cache() -> bool {
@@ -86,6 +90,7 @@ impl LinterConfig {
             exclude: Vec::new(),
             cache: true,
             cache_dir: ".texide-cache".to_string(),
+            timings: false,
         }
     }
 

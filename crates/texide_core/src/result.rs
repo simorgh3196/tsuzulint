@@ -1,5 +1,8 @@
 //! Lint result types.
 
+use std::collections::HashMap;
+use std::time::Duration;
+
 use std::path::PathBuf;
 
 use texide_plugin::Diagnostic;
@@ -15,6 +18,9 @@ pub struct LintResult {
 
     /// Whether the result was loaded from cache.
     pub from_cache: bool,
+
+    /// Execution time per rule.
+    pub timings: HashMap<String, Duration>,
 }
 
 impl LintResult {
@@ -24,6 +30,7 @@ impl LintResult {
             path,
             diagnostics,
             from_cache: false,
+            timings: HashMap::new(),
         }
     }
 
@@ -33,6 +40,7 @@ impl LintResult {
             path,
             diagnostics,
             from_cache: true,
+            timings: HashMap::new(),
         }
     }
 

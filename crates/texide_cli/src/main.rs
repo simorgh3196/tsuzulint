@@ -2,8 +2,10 @@
 //!
 //! High-performance natural language linter written in Rust.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use miette::{IntoDiagnostic, Result};
@@ -52,6 +54,10 @@ enum Commands {
         /// Preview fixes without applying them
         #[arg(long, requires = "fix")]
         dry_run: bool,
+
+        /// Measure performance
+        #[arg(long)]
+        timings: bool,
     },
 
     /// Initialize configuration
@@ -110,8 +116,10 @@ fn run(cli: Cli) -> Result<bool> {
             ref patterns,
             ref format,
             fix,
+
             dry_run,
-        } => run_lint(&cli, patterns, format, fix, dry_run),
+            timings,
+        } => run_lint(&cli, patterns, format, fix, dry_run, timings),
         Commands::Init { force } => {
             run_init(force)?;
             Ok(false)
@@ -133,14 +141,23 @@ fn run_lint(
     format: &str,
     fix: bool,
     dry_run: bool,
+    timings: bool,
 ) -> Result<bool> {
     // Load configuration
-    let config = if let Some(ref path) = cli.config {
+    let mut config = if let Some(ref path) = cli.config {
         LinterConfig::from_file(path).into_diagnostic()?
     } else {
         // Try to find config file
         find_config()?
     };
+
+    // Override timings from CLI
+    if timings {
+        config.timings = true;
+    }
+
+    // Capture timings flag before config is moved
+    let timings_enabled = config.timings;
 
     // Create linter
     let linter = Linter::new(config).into_diagnostic()?;
@@ -155,7 +172,7 @@ fn run_lint(
 
         if dry_run {
             // In dry-run mode, still output diagnostics
-            let has_errors = output_results(&results, format)?;
+            let has_errors = output_results(&results, format, timings_enabled)?;
             return Ok(has_errors);
         }
 
@@ -167,7 +184,7 @@ fn run_lint(
     }
 
     // Output results
-    let has_errors = output_results(&results, format)?;
+    let has_errors = output_results(&results, format, timings_enabled)?;
 
     Ok(has_errors)
 }
@@ -188,7 +205,7 @@ fn find_config() -> Result<LinterConfig> {
     Ok(LinterConfig::new())
 }
 
-fn output_results(results: &[LintResult], format: &str) -> Result<bool> {
+fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result<bool> {
     let has_errors = results.iter().any(|r| r.has_errors());
 
     match format {
@@ -235,6 +252,35 @@ fn output_results(results: &[LintResult], format: &str) -> Result<bool> {
                 "Checked {} files ({} from cache), found {} issues",
                 total_files, cached, total_errors
             );
+
+            if timings {
+                let mut total_duration = Duration::new(0, 0);
+                let mut rule_timings: HashMap<String, Duration> = HashMap::new();
+
+                for result in results {
+                    for (rule, duration) in &result.timings {
+                        *rule_timings.entry(rule.clone()).or_default() += *duration;
+                        total_duration += *duration;
+                    }
+                }
+
+                if !rule_timings.is_empty() {
+                    println!("\nPerformance Timings:");
+                    println!("{:<30} | {:<15} | {:<10}", "Rule", "Duration", "%");
+                    println!("{:-<30}-+-{:-<15}-+-{:-<10}", "", "", "");
+
+                    let mut sorted_timings: Vec<_> = rule_timings.into_iter().collect();
+                    sorted_timings.sort_by(|a, b| b.1.cmp(&a.1));
+
+                    for (rule, duration) in sorted_timings {
+                        let percentage =
+                            (duration.as_secs_f64() / total_duration.as_secs_f64()) * 100.0;
+                        println!("{:<30} | {:<15?} | {:<10.1}%", rule, duration, percentage);
+                    }
+                    println!("{:-<30}-+-{:-<15}-+-{:-<10}", "", "", "");
+                    println!("{:<30} | {:<15?}", "Total", total_duration);
+                }
+            }
         }
     }
 
