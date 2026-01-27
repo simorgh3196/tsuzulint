@@ -65,7 +65,7 @@ texide plugin install https://example.com/rules/custom-rule.wasm
 
 **What `plugin install` Does:**
 
-1. If `.texiderc.json` doesn't exist, creates it from template with JSON Schema reference
+1. If `.texide.jsonc` doesn't exist, creates it from template with JSON Schema reference
 2. Adds plugin declaration to the `plugins` array
 3. Retrieves configuration schema from the plugin's manifest (`texide-plugin.json`)
 4. Adds all plugin options with default values to the `rules` section
@@ -75,7 +75,7 @@ Example - first install:
 texide plugin install simorgh3196/texide-rule-sentence-length
 ```
 
-Generated `.texiderc.json`:
+Generated `.texide.jsonc`:
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
@@ -93,7 +93,7 @@ Generated `.texiderc.json`:
 
 #### Specify in Configuration File
 
-`.texiderc.json`:
+`.texide.jsonc`:
 
 ```json
 {
@@ -173,7 +173,7 @@ texide plugin cache clean
 
 ### 1.5 Security Settings
 
-Configure security policy in `.texiderc.json`:
+Configure security policy in `.texide.jsonc`:
 
 ```json
 {
@@ -238,6 +238,44 @@ For CI/CD, skip with `--yes` flag:
 
 ```bash
 texide plugin install --yes simorgh3196/texide-rule-foo
+```
+
+### 1.6 Configuration File Priority and Rule Conflicts
+
+#### Config File Priority
+
+Texide supports two configuration file formats. When both exist, `.texide.jsonc` takes precedence:
+
+1. `.texide.jsonc` (default, supports comments)
+2. `.texide.json`
+
+#### Same-Name Rule Conflict Resolution (First Wins)
+
+When multiple plugins provide rules with the same name, the **first defined plugin in the `plugins` array takes priority**.
+
+Example:
+```json
+{
+  "plugins": [
+    "alice/texide-rule-my-lint",      // ← This "my-lint" rule takes priority
+    "bob/texide-rule-my-lint"         // ← Ignored (same name)
+  ],
+  "rules": {
+    "my-lint": true
+  }
+}
+```
+
+**Reasons for this approach:**
+- **Explicit control**: Users can control priority through configuration file order
+- **Safe behavior**: Existing configurations won't break when new plugins are added
+- **No overwriting**: Later plugins cannot override existing rule behavior
+
+When a conflict is detected, Texide displays a warning:
+```
+⚠️ Rule "my-lint" is defined in multiple plugins:
+   - alice/texide-rule-my-lint (active)
+   - bob/texide-rule-my-lint (ignored)
 ```
 
 ---

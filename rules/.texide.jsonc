@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "plugins": [
+    { "path": "./no-todo/texide-plugin.json" },
+    { "path": "./sentence-length/texide-plugin.json" },
+    { "path": "./no-doubled-joshi/texide-plugin.json" }
+  ],
+  "rules": {
+    "no-todo": true,
+    "sentence-length": { "max": 100 },
+    "no-doubled-joshi": true
+  }
+}

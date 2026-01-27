@@ -120,8 +120,8 @@ cargo test
 # Copy to your project
 cp target/wasm32-wasip1/release/texide_rule_my_rule.wasm ~/.texide/rules/
 
-# Configure in .texide.json
-cat > .texide.json << 'EOF'
+# Configure in .texide.jsonc
+cat > .texide.jsonc << 'EOF'
 {
   "plugins": ["~/.texide/rules/texide_rule_my_rule.wasm"],
   "rules": {
@@ -281,7 +281,7 @@ fn default_max() -> usize { 100 }
 
 ### User Configuration
 
-In `.texide.json`:
+In `.texide.jsonc`:
 
 ```json
 {
@@ -493,7 +493,7 @@ See [Plugin Distribution Guide](./plugin-distribution.md) for details.
 
 ### Option 2: Direct Distribution
 
-Share the `.wasm` file directly. Users add to `.texiderc.json`:
+Share the `.wasm` file directly. Users add to `.texide.jsoncc`:
 
 ```json
 {

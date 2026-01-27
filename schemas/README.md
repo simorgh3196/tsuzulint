@@ -9,7 +9,7 @@ This directory contains JSON Schema definitions for Texide configuration and rul
 | Schema | Description | Usage |
 |--------|-------------|-------|
 | [v1/plugin.json](v1/plugin.json) | Plugin manifest schema | `texide-plugin.json` in plugin repositories |
-| [v1/config.json](v1/config.json) | Project configuration schema | `.texiderc.json` in user projects |
+| [v1/config.json](v1/config.json) | Project configuration schema | `.texide.jsonc` in user projects |
 
 ### Type Definitions
 
@@ -52,7 +52,7 @@ Add `$schema` to your `texide-plugin.json` for IDE auto-completion and validatio
 
 ### Project Configuration
 
-Add `$schema` to your `.texiderc.json`:
+Add `$schema` to your `.texide.jsonc`:
 
 ```json
 {
@@ -158,8 +158,8 @@ npm install -g ajv-cli
 # Validate texide-plugin.json
 ajv validate -s schemas/v1/plugin.json -d texide-plugin.json
 
-# Validate .texiderc.json
-ajv validate -s schemas/v1/config.json -d .texiderc.json
+# Validate .texide.jsonc
+ajv validate -s schemas/v1/config.json -d .texide.jsonc
 
 # Validate rule manifest output
 ajv validate -s schemas/rule-types.json \

@@ -23,7 +23,7 @@ Texideは、textlintにインスパイアされた高性能な自然言語リン
 
 | コンポーネント | 状態 | 説明 |
 |--------------|------|------|
-| **Plugin Loading** | ✅ 完成 | `.texiderc.json` からの名前解決とWASMロード |
+| **Plugin Loading** | ✅ 完成 | `.texide.jsonc` からの名前解決とWASMロード |
 
 ### ルール実装
 
@@ -188,7 +188,7 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 
 ### 1.6.1 プラグイン指定形式
 
-`.texiderc.json` でのプラグイン指定を拡張:
+`.texide.jsonc` でのプラグイン指定を拡張:
 
 ```json
 {
@@ -210,6 +210,32 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 
 > [!NOTE]
 > バージョン範囲指定（`^1.0`, `~1.0`）は採用しない。固定バージョン指定により、設定ファイル自体が再現性を保証する。
+
+**設定ファイルの優先順位:**
+
+両方存在する場合は `.texide.jsonc` を優先:
+1. `.texide.jsonc`（デフォルト、コメント可）
+2. `.texide.json`
+
+**同名ルールの競合解決（First wins）:**
+
+複数のプラグインが同じルール名を提供する場合、`plugins` 配列で**先に定義されたものが優先**:
+
+```json
+{
+  "plugins": [
+    "author-a/texide-rule-foo",  // ← この "foo" ルールが使われる
+    "author-b/texide-rule-foo"   // ← 同名なので無視（警告を出力）
+  ]
+}
+```
+
+競合時は警告を表示:
+```
+warning: Rule 'foo' is defined in multiple plugins
+  - author-a/texide-rule-foo (active)
+  - author-b/texide-rule-foo (ignored)
+```
 
 ### 1.6.2 プラグインスペックファイル（texide-plugin.json）
 
@@ -361,7 +387,7 @@ texide plugin trust remove simorgh3196/texide-rule-foo
 
 **`plugin install` の動作詳細:**
 
-1. `.texiderc.json` が存在しない場合、テンプレートから自動生成
+1. `.texide.jsonc` が存在しない場合、テンプレートから自動生成
 2. `plugins` 配列にプラグイン宣言を追加
 3. プラグインのマニフェスト（`texide-plugin.json`）から設定スキーマを取得
 4. `rules` セクションにプラグインの全オプションをデフォルト値で追記
@@ -371,7 +397,7 @@ texide plugin trust remove simorgh3196/texide-rule-foo
 texide plugin install simorgh3196/texide-rule-sentence-length
 ```
 
-生成される `.texiderc.json`:
+生成される `.texide.jsonc`:
 
 ```json
 {
@@ -390,12 +416,12 @@ texide plugin install simorgh3196/texide-rule-sentence-length
 
 **将来拡張（LSP統合）:**
 - LSPサーバーがインストール済みプラグインのスキーマを動的に認識
-- `.texiderc.json` 編集時にプラグイン固有オプションの補完・バリデーションを提供
+- `.texide.jsonc` 編集時にプラグイン固有オプションの補完・バリデーションを提供
 - プラグインアップデート時に新オプションを自動提案
 
 ### 1.6.6 設定ファイルスキーマ
 
-`.texiderc.json` 用のJSON Schema（`schemas/v1/config.json`）:
+`.texide.jsonc` 用のJSON Schema（`schemas/v1/config.json`）:
 - 基本フィールド（`plugins`, `rules`, `plugin_security`等）の補完・バリデーション
 - `rules` セクションは `additionalProperties: true` でプラグイン固有オプションを許容
 - 将来的にLSPで動的補完に移行
