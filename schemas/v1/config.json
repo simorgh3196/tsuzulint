@@ -9,14 +9,14 @@
       "type": "string",
       "description": "JSON Schema URL for validation and IDE support"
     },
-    "plugins": {
+    "rules": {
       "type": "array",
-      "description": "List of plugins to load",
+      "description": "List of rules to load",
       "items": {
         "oneOf": [
           {
             "type": "string",
-            "description": "Plugin specification: 'owner/repo' or 'owner/repo@version'",
+            "description": "Rule specification: 'owner/repo' or 'owner/repo@version'",
             "examples": [
               "simorgh3196/texide-rule-no-doubled-joshi",
               "simorgh3196/texide-rule-sentence-length@1.2.0"
@@ -24,25 +24,25 @@
           },
           {
             "type": "object",
-            "description": "Plugin with URL specification",
+            "description": "Rule with URL specification",
             "required": ["url"],
             "properties": {
               "url": {
                 "type": "string",
                 "format": "uri",
-                "description": "URL to texide-plugin.json manifest"
+                "description": "URL to texide-rule.json manifest"
               }
             },
             "additionalProperties": false
           },
           {
             "type": "object",
-            "description": "Plugin with local path specification",
+            "description": "Rule with local path specification",
             "required": ["path"],
             "properties": {
               "path": {
                 "type": "string",
-                "description": "Local path to texide-plugin.json manifest"
+                "description": "Local path to texide-rule.json manifest"
               }
             },
             "additionalProperties": false
@@ -50,9 +50,9 @@
         ]
       }
     },
-    "rules": {
+    "options": {
       "type": "object",
-      "description": "Rule configuration. Keys are rule IDs, values are rule options or boolean/severity.",
+      "description": "Rule options. Keys are rule IDs, values are rule options or boolean/severity.",
       "additionalProperties": {
         "oneOf": [
           {
@@ -79,14 +79,14 @@
         }
       ]
     },
-    "plugin_security": {
+    "security": {
       "type": "object",
-      "description": "Plugin security settings",
+      "description": "Rule security settings",
       "properties": {
         "confirm_install": {
           "type": "boolean",
           "default": true,
-          "description": "Show confirmation prompt when installing new plugins"
+          "description": "Show confirmation prompt when installing new rules"
         },
         "trusted_repositories": {
           "type": "array",

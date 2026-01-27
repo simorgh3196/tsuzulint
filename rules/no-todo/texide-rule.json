@@ -1,14 +1,12 @@
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/plugin.json",
-  "plugin": {
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "rule": {
     "name": "no-todo",
     "version": "0.1.0",
     "description": "Disallow TODO/FIXME comments",
     "repository": "https://github.com/simorgh3196/texide",
     "license": "MIT",
-    "keywords": ["todo", "fixme", "comment"]
-  },
-  "rule": {
+    "keywords": ["todo", "fixme", "comment"],
     "fixable": false,
     "node_types": ["Str"],
     "isolation_level": "block"

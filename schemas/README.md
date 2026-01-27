@@ -8,7 +8,7 @@ This directory contains JSON Schema definitions for Texide configuration and rul
 
 | Schema | Description | Usage |
 |--------|-------------|-------|
-| [v1/plugin.json](v1/plugin.json) | Plugin manifest schema | `texide-plugin.json` in plugin repositories |
+| [v1/rule.json](v1/rule.json) | Rule manifest schema | `texide-rule.json` in rule repositories |
 | [v1/config.json](v1/config.json) | Project configuration schema | `.texide.jsonc` in user projects |
 
 ### Type Definitions
@@ -30,14 +30,14 @@ https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v{major}/schem
 
 ## Usage
 
-### Plugin Authors
+### Rule Authors
 
-Add `$schema` to your `texide-plugin.json` for IDE auto-completion and validation:
+Add `$schema` to your `texide-rule.json` for IDE auto-completion and validation:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/plugin.json",
-  "plugin": {
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "rule": {
     "name": "my-rule",
     "version": "1.0.0"
   },
@@ -57,10 +57,10 @@ Add `$schema` to your `.texide.jsonc`:
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
-  "plugins": [
+  "rules": [
     "simorgh3196/texide-rule-no-doubled-joshi"
   ],
-  "rules": {
+  "options": {
     "no-doubled-joshi": true
   }
 }
@@ -111,12 +111,11 @@ Use any JSON Schema code generator for your target language:
 
 ## Schema Reference
 
-### v1/plugin.json - Plugin Manifest
+### v1/rule.json - Rule Manifest
 
 | Section | Required | Description |
 |---------|----------|-------------|
-| `plugin` | Yes | Plugin metadata (name, version, description, etc.) |
-| `rule` | No | Rule behavior (fixable, node_types, isolation_level) |
+| `rule` | Yes | Rule metadata (name, version, description, fixable, node_types, etc.) |
 | `artifacts` | Yes | Download URLs (wasm) |
 | `security` | Yes | SHA256 hash for verification |
 | `permissions` | No | Filesystem/network permissions (future) |
@@ -127,9 +126,9 @@ Use any JSON Schema code generator for your target language:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `plugins` | No | List of plugins to load |
-| `rules` | No | Rule configurations |
-| `plugin_security` | No | Security settings |
+| `rules` | No | List of rules to load |
+| `options` | No | Rule options |
+| `security` | No | Security settings |
 | `cache` | No | Cache settings |
 | `output` | No | Output formatting |
 | `ignore` | No | Files to ignore |
@@ -155,8 +154,8 @@ Validate your files:
 # Using ajv-cli
 npm install -g ajv-cli
 
-# Validate texide-plugin.json
-ajv validate -s schemas/v1/plugin.json -d texide-plugin.json
+# Validate texide-rule.json
+ajv validate -s schemas/v1/rule.json -d texide-rule.json
 
 # Validate .texide.jsonc
 ajv validate -s schemas/v1/config.json -d .texide.jsonc
