@@ -384,7 +384,48 @@ texide plugin trust list
 texide plugin trust remove simorgh3196/texide-rule-foo
 ```
 
-### 1.6.7 新規クレート構成
+**`plugin install` の動作詳細:**
+
+1. `.texiderc.json` が存在しない場合、テンプレートから自動生成
+2. `plugins` 配列にプラグイン宣言を追加
+3. プラグインのマニフェスト（`texide-plugin.json`）から設定スキーマを取得
+4. `rules` セクションにプラグインの全オプションをデフォルト値で追記
+
+```bash
+# 例: 初回インストール
+texide plugin install simorgh3196/texide-rule-sentence-length
+```
+
+生成される `.texiderc.json`:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "plugins": [
+    "simorgh3196/texide-rule-sentence-length"
+  ],
+  "rules": {
+    "sentence-length": {
+      "max": 100,
+      "min": 0
+    }
+  }
+}
+```
+
+**将来拡張（LSP統合）:**
+- LSPサーバーがインストール済みプラグインのスキーマを動的に認識
+- `.texiderc.json` 編集時にプラグイン固有オプションの補完・バリデーションを提供
+- プラグインアップデート時に新オプションを自動提案
+
+### 1.6.7 設定ファイルスキーマ
+
+`.texiderc.json` 用のJSON Schema（`schemas/v1/config.json`）:
+- 基本フィールド（`plugins`, `rules`, `plugin_security`等）の補完・バリデーション
+- `rules` セクションは `additionalProperties: true` でプラグイン固有オプションを許容
+- 将来的にLSPで動的補完に移行
+
+### 1.6.8 新規クレート構成
 
 ```
 crates/
@@ -398,7 +439,7 @@ crates/
     └── permissions.rs      # パーミッション検証・ホスト関数
 ```
 
-### 1.6.8 依存クレート
+### 1.6.9 依存クレート
 
 ```toml
 # Cargo.toml への追加

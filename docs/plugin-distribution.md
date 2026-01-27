@@ -63,6 +63,34 @@ texide plugin install simorgh3196/texide-rule-no-doubled-joshi@1.2.0
 texide plugin install https://example.com/rules/custom-rule.wasm
 ```
 
+**What `plugin install` Does:**
+
+1. If `.texiderc.json` doesn't exist, creates it from template with JSON Schema reference
+2. Adds plugin declaration to the `plugins` array
+3. Retrieves configuration schema from the plugin's manifest (`texide-plugin.json`)
+4. Adds all plugin options with default values to the `rules` section
+
+Example - first install:
+```bash
+texide plugin install simorgh3196/texide-rule-sentence-length
+```
+
+Generated `.texiderc.json`:
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "plugins": [
+    "simorgh3196/texide-rule-sentence-length"
+  ],
+  "rules": {
+    "sentence-length": {
+      "max": 100,
+      "min": 0
+    }
+  }
+}
+```
+
 #### Specify in Configuration File
 
 `.texiderc.json`:
