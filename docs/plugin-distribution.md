@@ -289,16 +289,14 @@ To distribute a plugin, place `texide-rule.json` in your repository. Using JSON 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
-  "plugin": {
+  "rule": {
     "name": "no-doubled-joshi",
     "version": "1.0.0",
     "description": "Detects duplicate Japanese particles",
     "repository": "https://github.com/simorgh3196/texide-rule-no-doubled-joshi",
     "license": "MIT",
     "authors": ["Tomoya Hayakawa <simorgh3196@gmail.com>"],
-    "keywords": ["japanese", "grammar", "joshi"]
-  },
-  "rule": {
+    "keywords": ["japanese", "grammar", "joshi"],
     "fixable": true,
     "node_types": ["Str"],
     "isolation_level": "block"
