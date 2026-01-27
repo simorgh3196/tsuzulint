@@ -107,7 +107,7 @@
       "properties": {
         "sha256": {
           "type": "string",
-          "pattern": "^[a-f0-9]{64}$",
+          "pattern": "^[a-fA-F0-9]{64}$",
           "description": "SHA256 hash of the WASM file for integrity verification"
         }
       },

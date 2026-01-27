@@ -11,7 +11,7 @@ A guide for installing and managing plugins published on GitHub, as well as a di
 Texide's plugin system has the following features:
 
 - **GitHub Integration**: Install directly from GitHub Releases using `owner/repo` format
-- **Version Management**: Reproducibility through semantic versioning and lockfiles
+- **Version Management**: Reproducibility through semantic versioning and exact version pinning (owner/repo@1.0.0)
 - **Security**: WASM sandbox + hash verification + confirmation UI
 - **Backward Compatibility**: Continues to support existing local plugin specifications
 
@@ -25,7 +25,7 @@ flowchart LR
     end
 
     subgraph GitHub["GitHub Releases"]
-        GH[texide-plugin.json<br/>+ rule.wasm]
+        GH[texide-rule.json<br/>+ rule.wasm]
     end
 
     subgraph User["User"]
@@ -60,14 +60,14 @@ texide plugin install simorgh3196/texide-rule-no-doubled-joshi
 texide plugin install simorgh3196/texide-rule-no-doubled-joshi@1.2.0
 
 # Direct URL specification
-texide plugin install https://example.com/rules/custom-rule.wasm
+texide plugin install https://example.com/rules/texide-rule.json
 ```
 
 **What `plugin install` Does:**
 
 1. If `.texide.jsonc` doesn't exist, creates it from template with JSON Schema reference
 2. Adds plugin declaration to the `plugins` array
-3. Retrieves configuration schema from the plugin's manifest (`texide-plugin.json`)
+3. Retrieves configuration schema from the plugin's manifest (`texide-rule.json`)
 4. Adds all plugin options with default values to the `rules` section
 
 Example - first install:
@@ -114,8 +114,8 @@ Generated `.texide.jsonc`:
 |--------|---------|-------------|
 | GitHub | `"owner/repo"` | Fetch latest release |
 | GitHub + version | `"owner/repo@1.0.0"` | Fetch specific version (pinned) |
-| URL | `{ "url": "https://.../texide-plugin.json" }` | Manifest URL |
-| Path | `{ "path": "./local/texide-plugin.json" }` | Local manifest path |
+| URL | `{ "url": "https://.../texide-rule.json" }` | Manifest URL |
+| Path | `{ "path": "./local/texide-rule.json" }` | Local manifest path |
 
 > **Note**: Version range specification (e.g., `^1.0`, `~1.0`) is not supported. Use exact versions for reproducibility.
 
@@ -159,7 +159,7 @@ texide plugin remove simorgh3196/texide-rule-no-doubled-joshi
 │           └── texide-rule-no-doubled-joshi/
 │               ├── 1.2.3/
 │               │   ├── no_doubled_joshi.wasm
-│               │   └── texide-plugin.json
+│               │   └── texide-rule.json
 │               └── 1.2.2/
 │                   └── ...
 └── trust.json                    # Trusted repository list
@@ -282,13 +282,13 @@ When a conflict is detected, Texide displays a warning:
 
 ## Part 2: Plugin Author Guide
 
-### 2.1 Plugin Spec File (texide-plugin.json)
+### 2.1 Plugin Spec File (texide-rule.json)
 
-To distribute a plugin, place `texide-plugin.json` in your repository. Using JSON Schema provides auto-completion, validation, and inline documentation in IDEs.
+To distribute a plugin, place `texide-rule.json` in your repository. Using JSON Schema provides auto-completion, validation, and inline documentation in IDEs.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/plugin.json",
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
   "plugin": {
     "name": "no-doubled-joshi",
     "version": "1.0.0",
@@ -321,7 +321,7 @@ To distribute a plugin, place `texide-plugin.json` in your repository. Using JSO
 - No need to memorize field names or valid values
 
 **Schema Versioning:**
-- URL format: `schemas/v{major}/plugin.json` (e.g., `schemas/v1/plugin.json`)
+- URL format: `schemas/v{major}/rule.json` (e.g., `schemas/v1/rule.json`)
 - Major version increments for backward-incompatible changes (adding required fields, removing fields, etc.)
 - Backward-compatible changes (adding optional fields, etc.) are updated within the same version
 - Old schema versions are maintained for a period after deprecation
@@ -409,7 +409,7 @@ texide plugin hash my_rule.wasm
    shasum -a 256 target/wasm32-wasip1/release/my_rule.wasm
    ```
 
-3. Update `texide-plugin.json` (set sha256)
+3. Update `texide-rule.json` (set sha256)
 
 4. Create GitHub Release
    - Tag: `v1.0.0`
@@ -440,7 +440,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-wasip1
 
@@ -453,19 +453,19 @@ jobs:
           HASH=$(shasum -a 256 target/wasm32-wasip1/release/*.wasm | cut -d' ' -f1)
           echo "sha256=$HASH" >> $GITHUB_OUTPUT
 
-      - name: Update texide-plugin.json
+      - name: Update texide-rule.json
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           jq --arg ver "$VERSION" --arg hash "${{ steps.hash.outputs.sha256 }}" \
-            '.plugin.version = $ver | .security.sha256 = $hash' \
-            texide-plugin.json > tmp.json && mv tmp.json texide-plugin.json
+            '.rule.version = $ver | .security.sha256 = $hash' \
+            texide-rule.json > tmp.json && mv tmp.json texide-rule.json
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             target/wasm32-wasip1/release/*.wasm
-            texide-plugin.json
+            texide-rule.json
           generate_release_notes: true
 ```
 
@@ -493,7 +493,7 @@ texide-rule-no-doubled-joshi/
 ├── src/
 │   └── lib.rs                    # Rule implementation
 ├── Cargo.toml
-├── texide-plugin.json            # Plugin spec (required)
+├── texide-rule.json            # Plugin spec (required)
 ├── README.md
 └── LICENSE
 ```
@@ -559,7 +559,7 @@ flowchart TB
 flowchart TB
     WASM[Downloaded WASM file]
     CALC[Calculated hash]
-    TOML[texide-plugin.json]
+    TOML[texide-rule.json]
 
     WASM -->|SHA256| CALC
     CALC --> CHECK{Hash match?}
@@ -596,7 +596,7 @@ Error: Plugin 'owner/repo' not found
 ```
 - Verify repository name is correct
 - Verify release is published
-- Verify `texide-plugin.json` exists in repository
+- Verify `texide-rule.json` exists in repository
 
 **"Hash mismatch"**
 ```
@@ -605,7 +605,7 @@ Error: SHA256 hash mismatch
   Actual:   x9y8z7...
 ```
 - Download may have been corrupted → Retry
-- Hash in `texide-plugin.json` may be outdated → Report to author
+- Hash in `texide-rule.json` may be outdated → Report to author
 - WASM file may have been tampered with → Verify trusted source
 
 ### Runtime Errors
@@ -714,7 +714,7 @@ Arguments:
 
 Description:
   Calculates SHA256 hash of a WASM file.
-  Use this to set the [security] section in texide-plugin.json.
+  Use this to set the [security] section in texide-rule.json.
 ```
 
 ---

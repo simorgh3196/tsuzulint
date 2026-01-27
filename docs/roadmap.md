@@ -200,10 +200,10 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
     "simorgh3196/texide-rule-sentence-length@1.2.0",
 
     // 形式3: URL指定（マニフェストを指定）
-    { "url": "https://example.com/rules/texide-plugin.json" },
+    { "url": "https://example.com/rules/texide-rule.json" },
 
     // 形式4: ローカルパス（マニフェストを指定、開発用）
-    { "path": "./my-rules/texide-plugin.json" }
+    { "path": "./my-rules/texide-rule.json" }
   ]
 }
 ```
@@ -237,22 +237,20 @@ warning: Rule 'foo' is defined in multiple plugins
   - author-b/texide-rule-foo (ignored)
 ```
 
-### 1.6.2 プラグインスペックファイル（texide-plugin.json）
+### 1.6.2 プラグインスペックファイル（texide-rule.json）
 
 プラグイン作者がリポジトリに配置する必須ファイル。JSON Schema による補完・検証が可能:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/plugin.json",
-  "plugin": {
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "rule": {
     "name": "no-doubled-joshi",
     "version": "1.0.0",
     "description": "日本語助詞の重複を検出するルール",
     "repository": "https://github.com/simorgh3196/texide-rule-no-doubled-joshi",
     "license": "MIT",
-    "authors": ["Author Name <email@example.com>"]
-  },
-  "rule": {
+    "authors": ["Author Name <email@example.com>"],
     "fixable": true,
     "node_types": ["Str"],
     "isolation_level": "block"
@@ -275,7 +273,7 @@ warning: Rule 'foo' is defined in multiple plugins
 - 保存時に型チェック・必須フィールドチェック
 
 **スキーマバージョニング:**
-- URL形式: `schemas/v{major}/plugin.json`（例: `schemas/v1/plugin.json`）
+- URL形式: `schemas/v{major}/rule.json`（例: `schemas/v1/rule.json`）
 - 後方互換性のない変更（必須フィールド追加、フィールド削除等）でメジャーバージョンを上げる
 - 後方互換性のある変更（オプショナルフィールド追加等）は同一バージョン内で更新
 - 旧バージョンのスキーマは非推奨化後も一定期間維持
@@ -291,7 +289,7 @@ flowchart TB
     end
 
     subgraph L2["2. SHA256ハッシュ検証"]
-        L2A["ダウンロード後にtexide-plugin.jsonのハッシュと照合"]
+        L2A["ダウンロード後にtexide-rule.jsonのハッシュと照合"]
         L2B["改ざん・破損を検出"]
     end
 
@@ -389,7 +387,7 @@ texide plugin trust remove simorgh3196/texide-rule-foo
 
 1. `.texide.jsonc` が存在しない場合、テンプレートから自動生成
 2. `plugins` 配列にプラグイン宣言を追加
-3. プラグインのマニフェスト（`texide-plugin.json`）から設定スキーマを取得
+3. プラグインのマニフェスト（`texide-rule.json`）から設定スキーマを取得
 4. `rules` セクションにプラグインの全オプションをデフォルト値で追記
 
 ```bash
@@ -433,7 +431,7 @@ crates/
 └── texide_registry/        # NEW: プラグイン解決・取得・セキュリティ
     ├── resolver.rs         # GitHub/URL/Local の解析
     ├── source.rs           # ダウンロード・キャッシュ
-    ├── manifest.rs         # texide-plugin.json パース
+    ├── manifest.rs         # texide-rule.json パース
     ├── hash.rs             # SHA256検証
     ├── trust.rs            # 信頼済みリポジトリ管理
     └── permissions.rs      # パーミッション検証・ホスト関数
@@ -445,7 +443,7 @@ crates/
 # Cargo.toml への追加
 reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
 semver = "1.0"
-serde_json = "1.0"  # texide-plugin.json パース
+serde_json = "1.0"  # texide-rule.json パース
 jsonschema = "0.18" # スキーマ検証
 sha2 = "0.10"
 ```

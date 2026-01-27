@@ -454,18 +454,16 @@ cargo build --target wasm32-wasip1 --release
 # Calculate hash
 HASH=$(shasum -a 256 target/wasm32-wasip1/release/texide_rule_my_rule.wasm | cut -d' ' -f1)
 
-# Create texide-plugin.json (required for GitHub distribution)
-cat > texide-plugin.json << EOF
+# Create texide-rule.json (required for GitHub distribution)
+cat > texide-rule.json << EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/plugin.json",
-  "plugin": {
+  "\$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "rule": {
     "name": "my-rule",
     "version": "1.0.0",
     "description": "My custom lint rule",
     "repository": "https://github.com/yourname/texide-rule-my-rule",
-    "license": "MIT"
-  },
-  "rule": {
+    "license": "MIT",
     "fixable": false,
     "node_types": ["Str"]
   },
@@ -481,7 +479,7 @@ EOF
 # Create GitHub release with .wasm file
 gh release create v1.0.0 \
   target/wasm32-wasip1/release/texide_rule_my_rule.wasm \
-  texide-plugin.json
+  texide-rule.json
 ```
 
 Users can install with:
@@ -493,7 +491,7 @@ See [Plugin Distribution Guide](./plugin-distribution.md) for details.
 
 ### Option 2: Direct Distribution
 
-Share the `.wasm` file directly. Users add to `.texide.jsoncc`:
+Share the `.wasm` file directly. Users add to `.texide.jsonc`:
 
 ```json
 {
