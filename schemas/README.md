@@ -70,7 +70,7 @@ Add `$schema` to your `.texide.jsonc`:
 
 #### Rust
 
-Use the `texide-rule-common` crate which implements these types:
+Use the `texide-rule-foundation` crate which implements these types:
 
 ```rust
 use texide_rule_common::{

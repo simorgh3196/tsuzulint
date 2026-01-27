@@ -43,7 +43,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-texide-rule-common = { path = "../common" }
+texide-rule-foundation = { path = "../common" }
 extism-pdk = "1.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
