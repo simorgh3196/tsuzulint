@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "rule": {
+    "name": "no-doubled-joshi",
+    "version": "0.1.0",
+    "description": "Detect repeated Japanese particles",
+    "repository": "https://github.com/simorgh3196/texide",
+    "license": "MIT",
+    "keywords": ["japanese", "grammar", "joshi", "particle"],
+    "fixable": true,
+    "node_types": ["Str"],
+    "isolation_level": "block"
+  },
+  "artifacts": {
+    "wasm": "../target/wasm32-wasip1/release/texide_rule_no_doubled_joshi.wasm",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "options": {
+    "type": "object",
+    "properties": {
+      "particles": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["は", "が", "を", "に", "で", "と", "も", "の"],
+        "description": "Particles to check for duplication"
+      },
+      "min_interval": {
+        "type": "integer",
+        "default": 0,
+        "description": "Minimum interval between same particles"
+      },
+      "allow": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": [],
+        "description": "Allowed patterns"
+      },
+      "suggest_fix": {
+        "type": "boolean",
+        "default": true,
+        "description": "Suggest auto-fix"
+      }
+    }
+  }
+}

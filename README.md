@@ -4,8 +4,6 @@
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/simorgh3196/texide/actions/workflows/ci.yml/badge.svg)](https://github.com/simorgh3196/texide/actions/workflows/ci.yml)
 
-# Texide
-
 > [!WARNING]
 > **Research-only / WIP (Work In Progress)**
 >
@@ -25,11 +23,15 @@
 
 ## Installation
 
-```bash
-# From source
-cargo install texide
+Since this project is currently in research phase, please install from source:
 
-# Or download pre-built binary from releases
+```bash
+# Clone the repository
+git clone https://github.com/simorgh3196/texide.git
+cd texide
+
+# Install the binary
+cargo install --path crates/texide_cli
 ```
 
 ## Quick Start
@@ -48,104 +50,42 @@ texide lint --fix "**/*.md"
 texide lint --timings "**/*.md"
 ```
 
-## Try with Sample Rules
-
-Sample rules are included in the `rules/` directory. To try them out:
-
-### 1. Build sample rules
-
-```bash
-cd rules
-cargo build --target wasm32-wasip1 --release
-cd ..
-```
-
-This builds the following sample rules:
-- **no-todo** - Detects TODO/FIXME/XXX comments
-- **sentence-length** - Checks sentence length limits
-- **no-doubled-joshi** - Detects doubled Japanese particles (助詞の重複)
-
-Built WASM files are located at `rules/target/wasm32-wasip1/release/`.
-
-### 2. Create configuration
-
-Create `.texide.json` in your project root:
-
-```json
-{
-  "rules": {
-    "no-todo": true,
-    "sentence-length": { "max": 100 },
-    "no-doubled-joshi": true
-  },
-    "no-doubled-joshi": true
-  },
-  "plugins": [
-    "texide_rule_no_todo",
-    "texide_rule_sentence_length",
-    "texide_rule_no_doubled_joshi"
-  ]
-}
-```
-
-#### Plugin Loading Logic
-
-Plugins are resolved by name. `texide` searches for `<name>.wasm` in:
-
-1. `.texide/plugins/` (in your project)
-2. `~/.texide/plugins/` (in your user directory)
-
-### 3. Run lint with performance timings
-
-```bash
-cargo run -p texide -- lint --timings "**/*.md"
-```
-
-Example output:
-```text
-Checked 19 files (0 from cache), found 0 issues
-
-Performance Timings:
-Rule                           | Duration        | %
--------------------------------+-----------------+-----------
-sentence-length                | 26.554126ms     | 33.9%
-no-todo                        | 26.099628ms     | 33.3%
-no-doubled-joshi               | 25.790751ms     | 32.9%
--------------------------------+-----------------+-----------
-Total                          | 78.444505ms
-```
-
 ## Editor Integration (LSP)
 
 Texide includes a Language Server Protocol (LSP) implementation for real-time diagnostics and fixes in editors like VSCode.
 
 ```bash
 # Start the LSP server
-texide-lsp
+texide lsp
 ```
 
-The server automatically loads configuration from `.texide.json` or similar files in the workspace root.
+The server automatically loads configuration from `.texide.jsonc` or `.texide.json` in the workspace root.
 
 ## Configuration
 
-Create `.texiderc.json` in your project root:
+Create `.texide.jsonc` in your project root:
 
 ```json
 {
-  "rules": {
-    "no-todo": true,
-    "max-lines": {
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "rules": [
+    "owner/texide-rule-sample-rule"
+  ],
+  "options": {
+    "sample-rule": {
       "max": 300
     }
   },
-  "plugins": [
-    "my-rule"
-  ],
   "include": ["**/*.md", "**/*.txt"],
   "exclude": ["**/node_modules/**"],
-  "cache": true,
-  "cache_dir": ".texide-cache",
-  "timings": false
+  "cache": {
+    "enabled": true,
+    "path": ".texide/cache"
+  },
+  "output": {
+    "format": "pretty",
+    "color": true
+  }
 }
 ```
 
@@ -153,26 +93,19 @@ Create `.texiderc.json` in your project root:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `rules` | object | `{}` | Rule configurations (name -> enabled/options) |
-| `plugins` | string[] | `[]` | List of plugin names to load |
+| `$schema` | string | - | JSON Schema URL |
+| `rules` | (string \| object)[] | `[]` | List of rules to load |
+| `options` | object | `{}` | Rule configurations (name -> enabled/options) |
 | `include` | string[] | `[]` | File patterns to include |
 | `exclude` | string[] | `[]` | File patterns to exclude |
-| `cache` | boolean | `true` | Enable caching for faster re-lints |
-| `cache_dir` | string | `.texide-cache` | Cache directory path |
-| `timings` | boolean | `false` | Enable performance timing output |
+| `cache` | object | `{ "enabled": true }` | Cache settings (`enabled`, `path`) |
+| `output` | object | `{ "format": "pretty" }` | Output settings (`format`, `color`) |
 
 ## Creating Custom Rules
 
 ```bash
 # Create a new rule project
-texide create-rule my-custom-rule
-cd my-custom-rule
-
-# Build WASM
-cargo build --target wasm32-wasip1 --release
-
-# Add to your project
-texide add-rule ./target/wasm32-wasip1/release/my_custom_rule.wasm
+texide rules create -l rust my-custom-rule
 ```
 
 See [Rule Development Guide](./docs/rule-development.md) for details.
@@ -219,6 +152,8 @@ graph TB
 - [Rule Development Guide](./docs/rule-development.md)
 - [Migration Guide from textlint](./docs/migration-guide.md)
 - [Architecture](./docs/architecture.md)
+- [WASM Interface](./docs/wasm-interface.md)
+- [Roadmap](./docs/roadmap.md)
 - [Contributing](./CONTRIBUTING.md)
 
 ## Contributing
@@ -233,13 +168,14 @@ git clone https://github.com/simorgh3196/texide.git
 cd texide
 
 # Build
-cargo build
+make build
 
 # Run tests
-cargo test
+make test
 
 # Run linter on test fixtures
-cargo run --bin texide -- lint tests/fixtures/
+make lint
+make fmt-check
 ```
 
 ## Agent Skills
@@ -249,6 +185,9 @@ npx skills add anthropics/skills -s doc-coauthoring # doc-skills
 npx skills add softaworks/agent-toolkit -s commit-work -s using-git-worktrees # git-skills
 npx skills add obra/superpowers -s test-driven-development # tdd-skills
 npx skills add ZhangHanDong/rust-skills # rust-skills
+
+# Manual link skills
+ln -s ../.agents/skills <agent>/skills
 ```
 
 ## License
@@ -259,5 +198,5 @@ MIT License - see [LICENSE](./LICENSE) for details.
 
 - [textlint](https://textlint.github.io/) - The original natural language linter
 - [Biome](https://biomejs.dev/) - Inspiration for linter architecture
-- [Oxc](https://oxc-project.github.io/) - Inspiration for AST and performance
+- [Oxc](https://oxc.rs/) - Inspiration for AST and performance
 - [Extism](https://extism.org/) - WASM plugin system

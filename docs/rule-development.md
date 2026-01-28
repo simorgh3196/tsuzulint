@@ -120,11 +120,11 @@ cargo test
 # Copy to your project
 cp target/wasm32-wasip1/release/texide_rule_my_rule.wasm ~/.texide/rules/
 
-# Configure in .texide.json
-cat > .texide.json << 'EOF'
+# Configure in .texide.jsonc
+cat > .texide.jsonc << 'EOF'
 {
-  "plugins": ["~/.texide/rules/texide_rule_my_rule.wasm"],
-  "rules": {
+  "rules": ["~/.texide/rules/texide_rule_my_rule.wasm"],
+  "options": {
     "my-rule": true
   }
 }
@@ -281,15 +281,14 @@ fn default_max() -> usize { 100 }
 
 ### User Configuration
 
-In `.texide.json`:
+In `.texide.jsonc`:
 
 ```json
 {
-  "rules": {
-    "my-rule": true,
-    "my-rule": "error",
+  "options": {
     "my-rule": {
       "max": 80,
+      "ignore_patterns": ["pattern1", "pattern2"],
       "strict": true
     }
   }
@@ -439,37 +438,61 @@ texide lint --config test-config.json test.md
 
 ## Publishing
 
-### Option 1: GitHub Releases
+### Option 1: GitHub Releases (Recommended)
+
+> [!WARNING]
+> **Not Yet Implemented**: GitHub-based plugin distribution is planned but not yet implemented.
+> The specification described here is subject to change.
+
+By publishing on GitHub Releases, users can easily install your plugin using the `owner/repo` format.
 
 ```bash
 # Build release
 cargo build --target wasm32-wasip1 --release
 
+# Calculate hash
+HASH=$(shasum -a 256 target/wasm32-wasip1/release/texide_rule_my_rule.wasm | cut -d' ' -f1)
+
+# Create texide-rule.json (required for GitHub distribution)
+cat > texide-rule.json << EOF
+{
+  "\$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "rule": {
+    "name": "my-rule",
+    "version": "1.0.0",
+    "description": "My custom lint rule",
+    "repository": "https://github.com/yourname/texide-rule-my-rule",
+    "license": "MIT",
+    "fixable": false,
+    "node_types": ["Str"]
+  },
+  "artifacts": {
+    "wasm": "https://github.com/yourname/texide-rule-my-rule/releases/download/v{version}/texide_rule_my_rule.wasm",
+    "sha256": "$HASH"
+  }
+}
+EOF
+
 # Create GitHub release with .wasm file
 gh release create v1.0.0 \
-  target/wasm32-wasip1/release/texide_rule_my_rule.wasm
+  target/wasm32-wasip1/release/texide_rule_my_rule.wasm \
+  texide-rule.json
 ```
 
-### Option 2: npm Registry
-
+Users can install with:
 ```bash
-# Create package.json for distribution
-{
-  "name": "@yourorg/texide-rule-my-rule",
-  "version": "1.0.0",
-  "files": ["texide_rule_my_rule.wasm"]
-}
-
-npm publish
+texide plugin install yourname/texide-rule-my-rule
 ```
 
-### Option 3: Direct Distribution
+See [Plugin Distribution Guide](./plugin-distribution.md) for details.
 
-Share the `.wasm` file directly. Users add to `.texide.json`:
+### Option 2: Direct Distribution
+
+Share the `.wasm` file directly. Users add to `.texide.jsonc`:
 
 ```json
 {
-  "plugins": ["./rules/my-rule.wasm"]
+  "rules": ["./rules/my-rule.wasm"]
 }
 ```
 

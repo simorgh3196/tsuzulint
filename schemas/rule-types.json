@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://texide.dev/schemas/rule-types.json",
+  "$id": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/rule-types.json",
   "title": "Texide Rule Types",
   "description": "Type definitions for Texide WASM rules",
 

@@ -155,7 +155,7 @@ impl LanguageServer for Backend {
         info!("Texide LSP server initializing...");
 
         if let Some(path) = params.root_uri.and_then(|u| u.to_file_path().ok()) {
-            let config_files = [".texide.json", ".texiderc", "texide.config.json"];
+            let config_files = [".texide.jsonc", ".texide.json"];
             for name in config_files {
                 let config_path = path.join(name);
                 if config_path.exists() {

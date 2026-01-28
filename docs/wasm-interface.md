@@ -26,7 +26,7 @@ Signature: () -> i32 (pointer to JSON string)
 
 ### `lint`
 
-Performs linting on a single AST node.
+Performs linting on AST nodes. Nodes are passed as a batch (array) for efficiency.
 
 ```
 Signature: (input_ptr: i32, input_len: i32) -> i32 (pointer to JSON string)
@@ -89,6 +89,18 @@ dealloc(ptr: i32, size: i32)  // Free memory (optional)
       "default": [],
       "description": "Node types to receive (empty = all nodes)"
     },
+    "cache_scope": {
+      "type": "string",
+      "enum": ["node", "node_type", "document"],
+      "default": "node",
+      "description": "Cache granularity for incremental linting (not yet implemented)"
+    },
+    "exclude_contexts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Parent node types to exclude (e.g., ['CodeBlock'] to skip code blocks) (not yet implemented)"
+    },
     "schema": {
       "type": "object",
       "description": "JSON Schema for rule configuration options"
@@ -97,29 +109,47 @@ dealloc(ptr: i32, size: i32)  // Free memory (optional)
 }
 ```
 
+#### cache_scope Values
+
+> **Note**: `cache_scope` and `exclude_contexts` are not yet implemented. They are reserved for future incremental linting optimization.
+
+| Value | Description | Use Case |
+|-------|-------------|----------|
+| `"node"` | Each node can be cached independently | Rules that only look at individual nodes (e.g., `sentence-length`) |
+| `"node_type"` | All nodes of the same type are re-linted together | Rules that compare nodes of the same type (e.g., `no-duplicate-headers`) |
+| `"document"` | Entire document is re-linted on any change | Rules that need full document context (e.g., `consistent-terminology`) |
+
 ### LintRequest
+
+All matching nodes are passed as a batch (array) in a single `lint` call. This design:
+- Reduces WASM call overhead
+- Enables efficient caching (source is passed only once)
+- Simplifies stateful rules (all nodes available at once)
 
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["node", "config", "source"],
+  "required": ["nodes", "config", "source"],
   "properties": {
-    "node": {
-      "type": "object",
-      "description": "AST node to lint",
-      "properties": {
-        "type": { "type": "string" },
-        "range": {
-          "type": "array",
-          "items": { "type": "integer" },
-          "minItems": 2,
-          "maxItems": 2,
-          "description": "[start, end] byte offsets"
-        },
-        "children": {
-          "type": "array",
-          "items": { "$ref": "#/properties/node" }
+    "nodes": {
+      "type": "array",
+      "description": "Array of AST nodes matching node_types",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "range": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[start, end] byte offsets"
+          },
+          "children": {
+            "type": "array",
+            "items": { "$ref": "#/properties/nodes/items" }
+          }
         }
       }
     },
@@ -200,7 +230,7 @@ dealloc(ptr: i32, size: i32)  // Free memory (optional)
 
 ## AST Node Types
 
-Rules receive individual AST nodes based on their `node_types` manifest field.
+Rules receive AST nodes as a batch based on their `node_types` manifest field.
 
 ### Block Elements
 
@@ -250,14 +280,27 @@ struct Manifest {
     description: &'static str,
     fixable: bool,
     node_types: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_scope: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exclude_contexts: Option<Vec<&'static str>>,
 }
 
 #[derive(Deserialize)]
 struct LintRequest {
-    node: serde_json::Value,
+    nodes: Vec<Node>,
     config: serde_json::Value,
     source: String,
     file_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Node {
+    #[serde(rename = "type")]
+    node_type: String,
+    range: [u32; 2],
+    #[serde(default)]
+    children: Vec<Node>,
 }
 
 #[derive(Serialize)]
@@ -287,6 +330,8 @@ pub fn get_manifest() -> FnResult<String> {
         description: "My custom rule",
         fixable: false,
         node_types: vec!["Str"],
+        cache_scope: Some("node"),           // Optional: "node", "node_type", or "document"
+        exclude_contexts: Some(vec!["CodeBlock"]), // Optional: skip nodes inside CodeBlock
     };
     Ok(serde_json::to_string(&manifest)?)
 }
@@ -294,9 +339,13 @@ pub fn get_manifest() -> FnResult<String> {
 #[plugin_fn]
 pub fn lint(input: String) -> FnResult<String> {
     let request: LintRequest = serde_json::from_str(&input)?;
-    let diagnostics: Vec<Diagnostic> = vec![];
+    let mut diagnostics: Vec<Diagnostic> = vec![];
 
-    // Your lint logic here
+    // All matching nodes are passed as a batch
+    for node in &request.nodes {
+        let text = &request.source[node.range[0] as usize..node.range[1] as usize];
+        // Your lint logic here
+    }
 
     Ok(serde_json::to_string(&LintResponse { diagnostics })?)
 }
@@ -315,6 +364,23 @@ class Manifest {
   description: string = "My custom rule";
   fixable: boolean = false;
   node_types: string[] = ["Str"];
+  cache_scope: string = "node";           // Optional: "node", "node_type", or "document"
+  exclude_contexts: string[] = ["CodeBlock"]; // Optional: skip nodes inside CodeBlock
+}
+
+@json
+class Node {
+  type: string = "";
+  range: u32[] = [];
+  children: Node[] = [];
+}
+
+@json
+class LintRequest {
+  nodes: Node[] = [];
+  config: string = "";  // JSON string
+  source: string = "";
+  file_path: string = "";
 }
 
 @json
@@ -344,9 +410,16 @@ export function get_manifest(): i32 {
 
 export function lint(): i32 {
   const input = Host.inputString();
-  // Parse input and perform linting
-
+  const request = JSON.parse<LintRequest>(input);
   const response = new LintResponse();
+
+  // All matching nodes are passed as a batch
+  for (let i = 0; i < request.nodes.length; i++) {
+    const node = request.nodes[i];
+    const text = request.source.slice(node.range[0], node.range[1]);
+    // Your lint logic here
+  }
+
   Output.setString(JSON.stringify(response));
   return 0;
 }

@@ -102,7 +102,7 @@ impl LinterConfig {
 
     /// Loads configuration from a file.
     ///
-    /// Supports `.texiderc.json`, `.texiderc`, `texide.config.json`.
+    /// Supports `.texide.jsonc`, `.texide.json`.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, LinterError> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)

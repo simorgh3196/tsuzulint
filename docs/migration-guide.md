@@ -12,13 +12,14 @@ Texide is a Rust reimplementation of textlint with:
 
 ## Configuration
 
-### Same Format
+### Similar Format
 
-Texide uses a similar JSON configuration format:
+Texide uses a similar JSON configuration format, with `options` for rule configuration:
 
 ```json
 {
-  "rules": {
+  "rules": ["no-todo", "max-lines"],
+  "options": {
     "no-todo": true,
     "max-lines": { "max": 300 }
   }
@@ -29,10 +30,8 @@ Supported config files:
 
 | Format | Status |
 |--------|--------|
+| `.texide.jsonc` | Supported (default, supports comments) |
 | `.texide.json` | Supported |
-| `.texiderc` (JSON) | Supported |
-| `texide.config.json` | Supported |
-| `.textlintrc.js` | Not supported - use JSON |
 
 ## Rules
 

@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "title": "Texide Configuration",
+  "description": "Schema for .texide.jsonc / .texide.json - Texide project configuration",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL for validation and IDE support"
+    },
+    "rules": {
+      "type": "array",
+      "description": "List of rules to load",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Rule specification: 'owner/repo' or 'owner/repo@version'",
+            "examples": [
+              "simorgh3196/texide-rule-no-doubled-joshi",
+              "simorgh3196/texide-rule-sentence-length@1.2.0"
+            ]
+          },
+          {
+            "type": "object",
+            "description": "Rule with GitHub specification and optional alias",
+            "required": ["github"],
+            "properties": {
+              "github": {
+                "type": "string",
+                "description": "GitHub repository: 'owner/repo' or 'owner/repo@version'",
+                "examples": ["alice/texide-rule-foo", "alice/texide-rule-foo@1.0.0"]
+              },
+              "as": {
+                "type": "string",
+                "description": "Alias for this rule (used in options)",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Rule with URL specification (alias required)",
+            "required": ["url", "as"],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL to texide-rule.json manifest"
+              },
+              "as": {
+                "type": "string",
+                "description": "Alias for this rule (required for URL sources)",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Rule with local path specification (alias required)",
+            "required": ["path", "as"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Local path to texide-rule.json manifest"
+              },
+              "as": {
+                "type": "string",
+                "description": "Alias for this rule (required for path sources)",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "options": {
+      "type": "object",
+      "description": "Rule options. Keys are rule IDs, values are rule options or boolean/severity.",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "boolean",
+            "description": "Enable (true) or disable (false) the rule"
+          },
+          {
+            "type": "string",
+            "enum": ["error", "warning", "info", "off"],
+            "description": "Set rule severity"
+          },
+          {
+            "type": "object",
+            "description": "Rule configuration options (varies by rule)",
+            "additionalProperties": true
+          }
+        ]
+      },
+      "examples": [
+        {
+          "no-todo": true,
+          "sentence-length": { "max": 100 },
+          "no-doubled-joshi": "warning"
+        }
+      ]
+    },
+    "include": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Glob patterns for files to include",
+      "examples": [
+        ["**/*.md", "docs/**/*.txt"]
+      ]
+    },
+    "exclude": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Glob patterns for files to exclude",
+      "examples": [
+        ["node_modules/**", "dist/**", "*.min.js"]
+      ]
+    },
+    "cache": {
+      "type": "object",
+      "description": "Cache settings",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable file-level caching"
+        },
+        "path": {
+          "type": "string",
+          "description": "Cache directory path (default: .texide/cache)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "output": {
+      "type": "object",
+      "description": "Output formatting settings",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["pretty", "json", "sarif", "github"],
+          "default": "pretty",
+          "description": "Output format"
+        },
+        "color": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable colored output"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

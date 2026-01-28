@@ -1,14 +1,74 @@
 # Texide JSON Schemas
 
-This directory contains JSON Schema definitions for Texide rule development.
+This directory contains JSON Schema definitions for Texide configuration and rule development.
 
-## Files
+## Schema Files
 
-- `rule-types.json` - All type definitions for WASM rules
+### Configuration Schemas (Versioned)
+
+| Schema | Description | Usage |
+|--------|-------------|-------|
+| [v1/rule.json](v1/rule.json) | Rule manifest schema | `texide-rule.json` in rule repositories |
+| [v1/config.json](v1/config.json) | Project configuration schema | `.texide.jsonc` in user projects |
+
+### Type Definitions
+
+| Schema | Description | Usage |
+|--------|-------------|-------|
+| [rule-types.json](rule-types.json) | WASM rule type definitions | Code generation for rule development |
+
+## Schema Versioning
+
+Schemas follow semantic versioning with the URL format:
+```
+https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v{major}/schema.json
+```
+
+- **Major version increments** for backward-incompatible changes (adding required fields, removing fields)
+- **Backward-compatible changes** (adding optional fields) are updated within the same version
+- Old schema versions are maintained for a period after deprecation
 
 ## Usage
 
-### Rust
+### Rule Authors
+
+Add `$schema` to your `texide-rule.json` for IDE auto-completion and validation:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "rule": {
+    "name": "my-rule",
+    "version": "1.0.0"
+  },
+  "artifacts": {
+    "wasm": "https://github.com/.../releases/download/v{version}/rule.wasm"
+  },
+  "security": {
+    "sha256": "..."
+  }
+}
+```
+
+### Project Configuration
+
+Add `$schema` to your `.texide.jsonc`:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "rules": [
+    "simorgh3196/texide-rule-no-doubled-joshi"
+  ],
+  "options": {
+    "no-doubled-joshi": true
+  }
+}
+```
+
+### Rule Development
+
+#### Rust
 
 Use the `texide-rule-common` crate which implements these types:
 
@@ -18,7 +78,7 @@ use texide_rule_common::{
 };
 ```
 
-### TypeScript / AssemblyScript
+#### TypeScript / AssemblyScript
 
 Generate types using [quicktype](https://quicktype.io/):
 
@@ -31,16 +91,9 @@ quicktype schemas/rule-types.json \
   --src-lang schema \
   --lang typescript \
   --out src/types.ts
-
-# Generate AssemblyScript (experimental)
-quicktype schemas/rule-types.json \
-  --src-lang schema \
-  --lang typescript \
-  --out src/types.ts
-# Then manually adapt for AssemblyScript
 ```
 
-### Go
+#### Go
 
 ```bash
 # Using gojsonschema
@@ -49,80 +102,65 @@ go install github.com/atombender/go-jsonschema/cmd/gojsonschema@latest
 gojsonschema -p types schemas/rule-types.json -o types/rule_types.go
 ```
 
-### Other Languages
+#### Other Languages
 
 Use any JSON Schema code generator for your target language:
 - Python: `datamodel-code-generator`
 - Java: `jsonschema2pojo`
 - C#: `NJsonSchema`
 
-## Type Reference
+## Schema Reference
 
-### RuleManifest
+### v1/rule.json - Rule Manifest
 
-Returned by `get_manifest()` function.
+| Section | Required | Description |
+|---------|----------|-------------|
+| `rule` | Yes | Rule metadata (name, version, description, fixable, node_types, etc.) |
+| `artifacts` | Yes | Download URLs (wasm) |
+| `security` | Yes | SHA256 hash for verification |
+| `permissions` | No | Filesystem/network permissions (future) |
+| `texide` | No | Texide version requirements |
+| `options` | No | JSON Schema for rule configuration options |
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| name | string | Yes | Rule identifier (e.g., "no-todo") |
-| version | string | Yes | Semver version (e.g., "1.0.0") |
-| description | string | No | Human-readable description |
-| fixable | boolean | No | Whether rule provides auto-fixes |
-| node_types | string[] | No | Node types to receive (empty = all) |
-| schema | object | No | JSON Schema for config options |
+### v1/config.json - Project Configuration
 
-### LintRequest
+| Field | Required | Description |
+|-------|----------|-------------|
+| `rules` | No | List of rules to load |
+| `options` | No | Rule options |
+| `security` | No | Security settings |
+| `cache` | No | Cache settings |
+| `output` | No | Output formatting |
+| `ignore` | No | Files to ignore |
+| `include` | No | Files to include |
 
-Input to `lint()` function.
+### rule-types.json - WASM Rule Types
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| node | AstNode | Yes | AST node to lint |
-| config | object | Yes | Rule configuration |
-| source | string | Yes | Full source text |
-| file_path | string? | No | File path (if available) |
-
-### LintResponse
-
-Output from `lint()` function.
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| diagnostics | Diagnostic[] | Yes | Array of lint results |
-
-### Diagnostic
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| rule_id | string | Yes | Rule identifier |
-| message | string | Yes | Error message |
-| span | Span | Yes | Source location |
-| severity | Severity | No | "error" / "warning" / "info" |
-| fix | Fix | No | Auto-fix (if fixable) |
-
-### Span
-
-| Field | Type | Description |
-|-------|------|-------------|
-| start | u32 | Start byte offset (inclusive) |
-| end | u32 | End byte offset (exclusive) |
-
-### Fix
-
-| Field | Type | Description |
-|-------|------|-------------|
-| span | Span | Range to replace |
-| text | string | Replacement text |
+| Type | Description |
+|------|-------------|
+| `RuleManifest` | Returned by `get_manifest()` function |
+| `LintRequest` | Input to `lint()` function |
+| `LintResponse` | Output from `lint()` function |
+| `Diagnostic` | A single lint warning or error |
+| `Span` | Byte range in source text |
+| `Fix` | Auto-fix replacement |
+| `AstNode` | TxtAST node |
 
 ## Validation
 
-Validate your rule output:
+Validate your files:
 
 ```bash
 # Using ajv-cli
 npm install -g ajv-cli
 
-# Validate a manifest
+# Validate texide-rule.json
+ajv validate -s schemas/v1/rule.json -d texide-rule.json
+
+# Validate .texide.jsonc
+ajv validate -s schemas/v1/config.json -d .texide.jsonc
+
+# Validate rule manifest output
 ajv validate -s schemas/rule-types.json \
   --spec=draft7 \
   -r '#/$defs/RuleManifest' \

@@ -1,0 +1,175 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "title": "Texide Rule Manifest",
+  "description": "Schema for texide-rule.json - Rule distribution manifest",
+  "type": "object",
+  "required": ["rule", "artifacts"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL for validation and IDE support"
+    },
+    "rule": {
+      "type": "object",
+      "description": "Rule metadata",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique rule identifier (e.g., 'no-todo', 'sentence-length')",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "examples": ["no-todo", "sentence-length", "no-doubled-joshi"]
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?$",
+          "examples": ["1.0.0", "2.1.0-beta.1"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the rule"
+        },
+        "repository": {
+          "type": "string",
+          "format": "uri",
+          "description": "GitHub repository URL",
+          "examples": ["https://github.com/simorgh3196/texide-rule-no-doubled-joshi"]
+        },
+        "license": {
+          "type": "string",
+          "description": "License identifier (SPDX format recommended)",
+          "examples": ["MIT", "Apache-2.0", "GPL-3.0-only"]
+        },
+        "authors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of authors (format: 'Name <email>')",
+          "examples": [["Tomoya Hayakawa <simorgh3196@gmail.com>"]]
+        },
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Search keywords",
+          "examples": [["japanese", "grammar", "joshi"]]
+        },
+        "fixable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this rule can provide auto-fixes"
+        },
+        "node_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "Document", "Paragraph", "Header", "BlockQuote",
+              "List", "ListItem", "CodeBlock", "HorizontalRule",
+              "Html", "Table", "TableRow", "TableCell",
+              "Str", "Break", "Emphasis", "Strong", "Delete",
+              "Code", "Link", "Image", "LinkReference",
+              "ImageReference", "FootnoteReference"
+            ]
+          },
+          "default": [],
+          "description": "AST node types this rule processes (empty = all)"
+        },
+        "isolation_level": {
+          "type": "string",
+          "enum": ["global", "block"],
+          "default": "global",
+          "description": "Rule isolation level: 'global' requires entire document, 'block' can run on individual blocks"
+        }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "description": "Downloadable artifacts and integrity verification",
+      "required": ["wasm", "sha256"],
+      "properties": {
+        "wasm": {
+          "type": "string",
+          "format": "uri",
+          "description": "WASM file download URL. Use {version} placeholder for version interpolation.",
+          "examples": [
+            "https://github.com/owner/repo/releases/download/v{version}/rule.wasm"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "SHA256 hash of the WASM file for integrity verification"
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "description": "Additional permissions required by the rule (future extension)",
+      "properties": {
+        "filesystem": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "access"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "File or directory path (supports ~ for home directory)"
+              },
+              "access": {
+                "type": "string",
+                "enum": ["read", "write"],
+                "description": "Access type: 'read' or 'write'"
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Filesystem access permissions"
+        },
+        "network": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["host", "access"],
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Hostname to access"
+              },
+              "access": {
+                "type": "string",
+                "enum": ["http", "https"],
+                "description": "Protocol to use"
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Network access permissions (future, low priority)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "texide": {
+      "type": "object",
+      "description": "Texide compatibility requirements",
+      "properties": {
+        "min_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Minimum required Texide version",
+          "examples": ["0.2.0", "1.0.0"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "options": {
+      "type": "object",
+      "description": "JSON Schema for rule configuration options. Used by CLI to generate default config.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
