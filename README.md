@@ -73,24 +73,26 @@ Built WASM files are located at `rules/target/wasm32-wasip1/release/`.
 
 Create `.texide.jsonc` in your project root:
 
-```json
+```jsonc
 {
   "rules": [
-    "texide_rule_no_todo",
-    "texide_rule_sentence_length",
-    "texide_rule_no_doubled_joshi"
+    "owner/texide-rule-my-rule",                                      // From GitHub
+    { "github": "owner/texide-rule-my-rule", "as": "my-rule2" },      // From GitHub with custom name
+    { "path": "local_rules/my-rule/texide-rule.json", "as": "local-rule" }, // From local file
+    { "url": "https://example.com/texide-rule.json", "as": "remote-rule" }  // From remote file
   ],
   "options": {
-    "no-todo": true,
-    "sentence-length": { "max": 100 },
-    "no-doubled-joshi": true
+    "my-rule": { "max": 100 },
+    "my-rule2": { "min": 100 },
+    "local-rule": {},
+    "remote-rule": {}
   }
 }
 ```
 
 #### Rule Loading Logic
 
-Rules are resolved by name. `texide` searches for `<name>.wasm` in:
+Rules are resolved by name. `texide` searches for `.texide.jsonc` in:
 
 1. `.texide/rules/` (in your project)
 2. `~/.texide/rules/` (in your user directory)
@@ -121,7 +123,7 @@ Texide includes a Language Server Protocol (LSP) implementation for real-time di
 
 ```bash
 # Start the LSP server
-texide-lsp
+texide lsp start
 ```
 
 The server automatically loads configuration from `.texide.jsonc` or similar files in the workspace root.
@@ -133,10 +135,9 @@ Create `.texide.jsonc` in your project root:
 ```json
 {
   "rules": [
-    "my-rule"
+    "owner/texide-rule-max-lines"
   ],
   "options": {
-    "no-todo": true,
     "max-lines": {
       "max": 300
     }
@@ -165,14 +166,14 @@ Create `.texide.jsonc` in your project root:
 
 ```bash
 # Create a new rule project
-texide create-rule my-custom-rule
+texide rules create -l rust my-custom-rule
 cd my-custom-rule
 
 # Build WASM
 cargo build --target wasm32-wasip1 --release
 
 # Add to your project
-texide add-rule ./target/wasm32-wasip1/release/my_custom_rule.wasm
+texide rules add ./my-custom-rule/texide-rule.json
 ```
 
 See [Rule Development Guide](./docs/rule-development.md) for details.
@@ -235,13 +236,14 @@ git clone https://github.com/simorgh3196/texide.git
 cd texide
 
 # Build
-cargo build
+make build
 
 # Run tests
-cargo test
+make test
 
 # Run linter on test fixtures
-cargo run --bin texide -- lint tests/fixtures/
+make lint
+make fmt-check
 ```
 
 ## Agent Skills

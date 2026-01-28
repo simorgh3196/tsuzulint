@@ -286,10 +286,9 @@ In `.texide.jsonc`:
 ```json
 {
   "options": {
-    "my-rule": true,
-    "my-rule": "error",
     "my-rule": {
       "max": 80,
+      "ignore_patterns": ["pattern1", "pattern2"],
       "strict": true
     }
   }
