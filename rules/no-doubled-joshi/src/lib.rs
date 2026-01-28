@@ -27,9 +27,8 @@
 
 use extism_pdk::*;
 use serde::Deserialize;
-use texide_rule_common::{
-    extract_node_text, is_node_type, Diagnostic, Fix, LintRequest, LintResponse, RuleManifest,
-    Span,
+use texide_rule_pdk::{
+    Diagnostic, Fix, LintRequest, LintResponse, RuleManifest, Span, extract_node_text, is_node_type,
 };
 
 const RULE_ID: &str = "no-doubled-joshi";

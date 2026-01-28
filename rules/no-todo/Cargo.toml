@@ -11,7 +11,7 @@ description = "Texide rule: Disallow TODO/FIXME comments"
 crate-type = ["cdylib"]
 
 [dependencies]
-texide-rule-common = { workspace = true }
+texide-rule-pdk = { workspace = true }
 extism-pdk = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
