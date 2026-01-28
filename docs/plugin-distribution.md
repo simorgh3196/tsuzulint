@@ -67,7 +67,7 @@ texide plugin install https://example.com/rules/texide-rule.json
 
 1. If `.texide.jsonc` doesn't exist, creates it from template with JSON Schema reference
 2. Adds rule declaration to the `rules` array
-3. Retrieves configuration schema from the rule's manifest (`texide-rule.json`)
+3. Retrieves configuration schema from `get_manifest()` returned manifest
 4. Adds all rule options with default values to the `options` section
 
 Example - first install:
@@ -249,33 +249,67 @@ Texide supports two configuration file formats. When both exist, `.texide.jsonc`
 1. `.texide.jsonc` (default, supports comments)
 2. `.texide.json`
 
-#### Same-Name Rule Conflict Resolution (First Wins)
+#### Rule Identifier and Namespace
 
-When multiple rules with the same name are specified, the **first defined rule in the `rules` array takes priority**.
+Each rule has two forms of identification:
 
-Example:
+- **Short name**: Defined in manifest's `name` field (e.g., `no-todo`, `sentence-length`)
+- **Full identifier**: Automatically constructed as `{owner}/{name}` (e.g., `simorgh3196/no-todo`)
+
+The manifest only requires the short name:
 ```json
 {
-  "rules": [
-    "alice/texide-rule-my-lint",      // ← This "my-lint" rule takes priority
-    "bob/texide-rule-my-lint"         // ← Ignored (same name)
-  ],
-  "options": {
-    "my-lint": true
+  "rule": {
+    "name": "sentence-length",
+    ...
   }
 }
 ```
 
-**Reasons for this approach:**
-- **Explicit control**: Users can control priority through configuration file order
-- **Safe behavior**: Existing configurations won't break when new plugins are added
-- **No overwriting**: Later plugins cannot override existing rule behavior
+Texide automatically constructs the full identifier from the repository owner and the rule name.
 
-When a conflict is detected, Texide displays a warning:
+#### Same-Name Rule Resolution
+
+When multiple rules have the same short name, the `options` key resolution works as follows:
+
+**No conflict** - Short name can be used:
+```json
+{
+  "rules": [
+    "simorgh3196/texide-rule-no-todo",
+    "alice/texide-rule-sentence-length"
+  ],
+  "options": {
+    "no-todo": true,              // OK: no conflict
+    "sentence-length": { "max": 100 }  // OK: no conflict
+  }
+}
 ```
-⚠️ Rule "my-lint" is defined in multiple plugins:
-   - alice/texide-rule-my-lint (active)
-   - bob/texide-rule-my-lint (ignored)
+
+**With conflict** - Full identifier required:
+```json
+{
+  "rules": [
+    "alice/texide-rule-sentence-length",
+    "bob/texide-rule-sentence-length"
+  ],
+  "options": {
+    "alice/sentence-length": { "max": 100 },  // Full identifier required
+    "bob/sentence-length": { "max": 80 }      // Full identifier required
+  }
+}
+```
+
+**Behavior:**
+1. **No conflict**: Short name resolves to the single matching rule
+2. **With conflict**: Short name in `options` causes an error; full identifier (`{owner}/{name}`) is required
+
+When a conflict is detected, Texide displays a message:
+```
+⚠️ Rule name "sentence-length" is ambiguous (multiple plugins provide this rule):
+   - alice/sentence-length
+   - bob/sentence-length
+   Use full identifier in options (e.g., "alice/sentence-length": {...})
 ```
 
 ---
