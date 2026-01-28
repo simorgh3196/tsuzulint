@@ -333,9 +333,7 @@ To distribute a plugin, place `texide-rule.json` in your repository. Using JSON 
     "keywords": ["japanese", "grammar", "joshi"]
   },
   "artifacts": {
-    "wasm": "https://github.com/simorgh3196/texide-rule-no-doubled-joshi/releases/download/v{version}/no_doubled_joshi.wasm"
-  },
-  "security": {
+    "wasm": "https://github.com/simorgh3196/texide-rule-no-doubled-joshi/releases/download/v{version}/no_doubled_joshi.wasm",
     "sha256": "a1b2c3d4e5f6789..."
   },
   "texide": {
@@ -376,11 +374,6 @@ To distribute a plugin, place `texide-rule.json` in your repository. Using JSON 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `wasm` | ✓ | WASM file download URL |
-
-**[security] section**
-
-| Field | Required | Description |
-|-------|----------|-------------|
 | `sha256` | ✓ | SHA256 hash of WASM file (for tampering/corruption detection) |
 
 **permissions** (Future Extension)
@@ -480,7 +473,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           jq --arg ver "$VERSION" --arg hash "${{ steps.hash.outputs.sha256 }}" \
-            '.rule.version = $ver | .security.sha256 = $hash' \
+            '.rule.version = $ver | .artifacts.sha256 = $hash' \
             texide-rule.json > tmp.json && mv tmp.json texide-rule.json
 
       - name: Create Release
@@ -737,7 +730,7 @@ Arguments:
 
 Description:
   Calculates SHA256 hash of a WASM file.
-  Use this to set the [security] section in texide-rule.json.
+  Use this to set the sha256 field in the [artifacts] section of texide-rule.json.
 ```
 
 ---

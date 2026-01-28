@@ -468,9 +468,7 @@ cat > texide-rule.json << EOF
     "node_types": ["Str"]
   },
   "artifacts": {
-    "wasm": "https://github.com/yourname/texide-rule-my-rule/releases/download/v{version}/texide_rule_my_rule.wasm"
-  },
-  "security": {
+    "wasm": "https://github.com/yourname/texide-rule-my-rule/releases/download/v{version}/texide_rule_my_rule.wasm",
     "sha256": "$HASH"
   }
 }

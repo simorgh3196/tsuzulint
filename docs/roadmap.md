@@ -280,9 +280,7 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
     "authors": ["Author Name <email@example.com>"]
   },
   "artifacts": {
-    "wasm": "https://github.com/.../releases/download/v{version}/rule.wasm"
-  },
-  "security": {
+    "wasm": "https://github.com/.../releases/download/v{version}/rule.wasm",
     "sha256": "a1b2c3d4e5f6..."
   },
   "texide": {

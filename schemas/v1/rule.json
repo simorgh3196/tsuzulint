@@ -4,7 +4,7 @@
   "title": "Texide Rule Manifest",
   "description": "Schema for texide-rule.json - Rule distribution manifest",
   "type": "object",
-  "required": ["rule", "artifacts", "security"],
+  "required": ["rule", "artifacts"],
   "properties": {
     "$schema": {
       "type": "string",
@@ -86,8 +86,8 @@
     },
     "artifacts": {
       "type": "object",
-      "description": "Downloadable artifacts",
-      "required": ["wasm"],
+      "description": "Downloadable artifacts and integrity verification",
+      "required": ["wasm", "sha256"],
       "properties": {
         "wasm": {
           "type": "string",
@@ -96,15 +96,7 @@
           "examples": [
             "https://github.com/owner/repo/releases/download/v{version}/rule.wasm"
           ]
-        }
-      },
-      "additionalProperties": false
-    },
-    "security": {
-      "type": "object",
-      "description": "Security verification",
-      "required": ["sha256"],
-      "properties": {
+        },
         "sha256": {
           "type": "string",
           "pattern": "^[a-fA-F0-9]{64}$",
