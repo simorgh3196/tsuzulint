@@ -10,7 +10,6 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, error, info};
-use tracing_subscriber::EnvFilter;
 
 use texide_core::{
     Diagnostic as TexideDiagnostic, Linter, LinterConfig, Severity as TexideSeverity,
@@ -351,16 +350,10 @@ impl LanguageServer for Backend {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive("texide_lsp=debug".parse().unwrap()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
-
+/// Starts the LSP server.
+///
+/// This function does not return unless an error occurs or the server shuts down.
+pub async fn run() {
     info!("Texide LSP server starting...");
 
     let stdin = tokio::io::stdin();

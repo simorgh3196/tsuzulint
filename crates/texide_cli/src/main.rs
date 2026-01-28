@@ -67,14 +67,26 @@ enum Commands {
         force: bool,
     },
 
+    /// Manage rules
+    Rules {
+        #[command(subcommand)]
+        command: RulesCommands,
+    },
+
+    /// Start the LSP server
+    Lsp,
+}
+
+#[derive(Subcommand)]
+enum RulesCommands {
     /// Create a new rule project
-    CreateRule {
+    Create {
         /// Rule name
         name: String,
     },
 
     /// Add a WASM rule
-    AddRule {
+    Add {
         /// Path to WASM file
         path: PathBuf,
     },
@@ -93,6 +105,7 @@ fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
+        .with_writer(std::io::stderr)
         .init();
 
     match run(cli) {
@@ -116,7 +129,6 @@ fn run(cli: Cli) -> Result<bool> {
             ref patterns,
             ref format,
             fix,
-
             dry_run,
             timings,
         } => run_lint(&cli, patterns, format, fix, dry_run, timings),
@@ -124,15 +136,32 @@ fn run(cli: Cli) -> Result<bool> {
             run_init(force)?;
             Ok(false)
         }
-        Commands::CreateRule { name } => {
-            run_create_rule(&name)?;
-            Ok(false)
-        }
-        Commands::AddRule { path } => {
-            run_add_rule(&path)?;
+        Commands::Rules { command } => match command {
+            RulesCommands::Create { name } => {
+                run_create_rule(&name)?;
+                Ok(false)
+            }
+            RulesCommands::Add { path } => {
+                run_add_rule(&path)?;
+                Ok(false)
+            }
+        },
+        Commands::Lsp => {
+            run_lsp()?;
             Ok(false)
         }
     }
+}
+
+fn run_lsp() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .into_diagnostic()?
+        .block_on(async {
+            texide_lsp::run().await;
+        });
+    Ok(())
 }
 
 fn run_lint(

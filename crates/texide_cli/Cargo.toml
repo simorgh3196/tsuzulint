@@ -18,6 +18,8 @@ miette = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
+texide_lsp = { version = "0.1.0", path = "../texide_lsp" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

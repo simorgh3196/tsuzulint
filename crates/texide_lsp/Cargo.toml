@@ -7,9 +7,6 @@ repository.workspace = true
 rust-version.workspace = true
 description = "LSP server for Texide"
 
-[[bin]]
-name = "texide-lsp"
-path = "src/main.rs"
 
 [dependencies]
 texide_core = { workspace = true, features = ["native"] }

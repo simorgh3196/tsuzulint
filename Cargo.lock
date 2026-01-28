@@ -2750,6 +2750,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "texide_core",
+ "texide_lsp",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
