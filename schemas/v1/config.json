@@ -107,29 +107,21 @@
         }
       ]
     },
-    "security": {
-      "type": "object",
-      "description": "Rule security settings",
-      "properties": {
-        "confirm_install": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show confirmation prompt when installing new rules"
-        },
-        "trusted_repositories": {
-          "type": "array",
-          "items": { "type": "string" },
-          "default": [],
-          "description": "List of trusted repositories (format: 'owner/repo')",
-          "examples": [
-            [
-              "simorgh3196/texide-rule-no-doubled-joshi",
-              "simorgh3196/texide-rule-sentence-length"
-            ]
-          ]
-        }
-      },
-      "additionalProperties": false
+    "include": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Glob patterns for files to include",
+      "examples": [
+        ["**/*.md", "docs/**/*.txt"]
+      ]
+    },
+    "exclude": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Glob patterns for files to exclude",
+      "examples": [
+        ["node_modules/**", "dist/**", "*.min.js"]
+      ]
     },
     "cache": {
       "type": "object",
@@ -140,7 +132,7 @@
           "default": true,
           "description": "Enable file-level caching"
         },
-        "directory": {
+        "path": {
           "type": "string",
           "description": "Cache directory path (default: .texide/cache)"
         }
@@ -164,22 +156,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "ignore": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Glob patterns for files to ignore",
-      "examples": [
-        ["node_modules/**", "dist/**", "*.min.js"]
-      ]
-    },
-    "include": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Glob patterns for files to include",
-      "examples": [
-        ["**/*.md", "docs/**/*.txt"]
-      ]
     }
   },
   "additionalProperties": false

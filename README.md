@@ -50,73 +50,6 @@ texide lint --fix "**/*.md"
 texide lint --timings "**/*.md"
 ```
 
-## Try with Sample Rules
-
-Sample rules are included in the `rules/` directory. To try them out:
-
-### 1. Build sample rules
-
-```bash
-cd rules
-cargo build --target wasm32-wasip1 --release
-cd ..
-```
-
-This builds the following sample rules:
-- **no-todo** - Detects TODO/FIXME/XXX comments
-- **sentence-length** - Checks sentence length limits
-- **no-doubled-joshi** - Detects doubled Japanese particles (助詞の重複)
-
-Built WASM files are located at `rules/target/wasm32-wasip1/release/`.
-
-### 2. Create configuration
-
-Create `.texide.jsonc` in your project root:
-
-```jsonc
-{
-  "rules": [
-    "owner/texide-rule-my-rule",                                      // From GitHub
-    { "github": "owner/texide-rule-my-rule", "as": "my-rule2" },      // From GitHub with custom name
-    { "path": "local_rules/my-rule/texide-rule.json", "as": "local-rule" }, // From local file
-    { "url": "https://example.com/texide-rule.json", "as": "remote-rule" }  // From remote file
-  ],
-  "options": {
-    "my-rule": { "max": 100 },
-    "my-rule2": { "min": 100 },
-    "local-rule": {},
-    "remote-rule": {}
-  }
-}
-```
-
-#### Rule Loading Logic
-
-Rules are resolved by name. `texide` searches for `.texide.jsonc` in:
-
-1. `.texide/rules/` (in your project)
-2. `~/.texide/rules/` (in your user directory)
-
-### 3. Run lint with performance timings
-
-```bash
-texide lint --timings "**/*.md"
-```
-
-Example output:
-```text
-Checked 19 files (0 from cache), found 0 issues
-
-Performance Timings:
-Rule                           | Duration        | %
--------------------------------+-----------------+-----------
-sentence-length                | 26.554126ms     | 33.9%
-no-todo                        | 26.099628ms     | 33.3%
-no-doubled-joshi               | 25.790751ms     | 32.9%
--------------------------------+-----------------+-----------
-Total                          | 78.444505ms
-```
-
 ## Editor Integration (LSP)
 
 Texide includes a Language Server Protocol (LSP) implementation for real-time diagnostics and fixes in editors like VSCode.
@@ -134,19 +67,25 @@ Create `.texide.jsonc` in your project root:
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
   "rules": [
-    "owner/texide-rule-max-lines"
+    "owner/texide-rule-sample-rule"
   ],
   "options": {
-    "max-lines": {
+    "sample-rule": {
       "max": 300
     }
   },
   "include": ["**/*.md", "**/*.txt"],
   "exclude": ["**/node_modules/**"],
-  "cache": true,
-  "cache_dir": ".texide-cache",
-  "timings": false
+  "cache": {
+    "enabled": true,
+    "path": ".texide/cache"
+  },
+  "output": {
+    "format": "pretty",
+    "color": true
+  }
 }
 ```
 
@@ -154,26 +93,19 @@ Create `.texide.jsonc` in your project root:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `rules` | string[] | `[]` | List of rule names to load |
+| `$schema` | string | - | JSON Schema URL |
+| `rules` | (string \| object)[] | `[]` | List of rules to load |
 | `options` | object | `{}` | Rule configurations (name -> enabled/options) |
 | `include` | string[] | `[]` | File patterns to include |
 | `exclude` | string[] | `[]` | File patterns to exclude |
-| `cache` | boolean | `true` | Enable caching for faster re-lints |
-| `cache_dir` | string | `.texide-cache` | Cache directory path |
-| `timings` | boolean | `false` | Enable performance timing output |
+| `cache` | object | `{ "enabled": true }` | Cache settings (`enabled`, `path`) |
+| `output` | object | `{ "format": "pretty" }` | Output settings (`format`, `color`) |
 
 ## Creating Custom Rules
 
 ```bash
 # Create a new rule project
 texide rules create -l rust my-custom-rule
-cd my-custom-rule
-
-# Build WASM
-cargo build --target wasm32-wasip1 --release
-
-# Add to your project
-texide rules add ./my-custom-rule/texide-rule.json
 ```
 
 See [Rule Development Guide](./docs/rule-development.md) for details.
