@@ -24,7 +24,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-texide-rule-common = { path = "../common" }
+texide-rule-pdk = { path = "../rules-pdk" }
 extism-pdk = "1.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -44,7 +44,7 @@ Create `src/lib.rs`:
 ```rust
 use extism_pdk::*;
 use serde::Deserialize;
-use texide_rule_common::{
+use texide_rule_pdk::{
     extract_node_text, is_node_type,
     Diagnostic, LintRequest, LintResponse, RuleManifest, Span,
 };
@@ -186,7 +186,7 @@ Returns diagnostics:
 
 ## Helper Functions
 
-The `texide-rule-common` crate provides utilities:
+The `texide-rule-pdk` crate provides utilities:
 
 ### `extract_node_text(node, source)`
 
@@ -305,7 +305,7 @@ To provide auto-fixes:
 2. Include `fix` in diagnostics
 
 ```rust
-use texide_rule_common::Fix;
+use texide_rule_pdk::Fix;
 
 #[plugin_fn]
 pub fn get_manifest() -> FnResult<String> {
@@ -502,11 +502,11 @@ Share the `.wasm` file directly. Users add to `.texide.jsonc`:
 
 ### Rust (Recommended)
 
-Use `extism-pdk` and `texide-rule-common`:
+Use `extism-pdk` and `texide-rule-pdk`:
 
 ```toml
 [dependencies]
-texide-rule-common = { git = "https://github.com/simorgh3196/texide" }
+texide-rule-pdk = { git = "https://github.com/simorgh3196/texide" }
 extism-pdk = "1.3"
 ```
 

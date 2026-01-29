@@ -70,10 +70,10 @@ Add `$schema` to your `.texide.jsonc`:
 
 #### Rust
 
-Use the `texide-rule-common` crate which implements these types:
+Use the `texide-rule-pdk` crate which implements these types:
 
 ```rust
-use texide_rule_common::{
+use texide_rule_pdk::{
     LintRequest, LintResponse, Diagnostic, Span, Fix, RuleManifest
 };
 ```

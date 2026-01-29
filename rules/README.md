@@ -43,7 +43,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-texide-rule-common = { path = "../common" }
+texide-rule-pdk = { path = "../rules-pdk" }
 extism-pdk = "1.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -168,7 +168,7 @@ Returns JSON metadata:
 Receives lint request, returns diagnostics:
 
 ```rust
-use texide_rule_common::{
+use texide_rule_pdk::{
     extract_node_text, is_node_type,
     Diagnostic, LintRequest, LintResponse, RuleManifest, Span,
 };
@@ -192,7 +192,7 @@ pub fn lint(input: String) -> FnResult<String> {
 rules/
 ├── Cargo.toml              # Workspace manifest
 ├── README.md               # This file
-├── common/                 # Shared types library
+├── rules-pdk/             # Shared types library
 │   ├── Cargo.toml
 │   └── src/lib.rs
 ├── no-todo/                # Sample rule

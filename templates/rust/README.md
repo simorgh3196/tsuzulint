@@ -37,7 +37,7 @@ If creating a rule outside the rules workspace:
 
 ```toml
 [dependencies]
-texide-rule-common = { git = "https://github.com/simorgh3196/texide", branch = "main" }
+texide-rule-pdk = { git = "https://github.com/simorgh3196/texide", branch = "main" }
 ```
 
 ### 4. Implement Your Logic

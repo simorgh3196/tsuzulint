@@ -160,7 +160,7 @@ graph LR
 
 #### b) 共通ヘルパーライブラリの強化
 
-`texide-rule-common` クレートの拡張:
+`texide-rule-pdk` クレートの拡張:
 
 ```rust
 // 現在
