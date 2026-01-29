@@ -11,9 +11,11 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, error, info};
 
+use texide_ast::{AstArena, NodeType, TxtNode};
 use texide_core::{
     Diagnostic as TexideDiagnostic, Linter, LinterConfig, Severity as TexideSeverity,
 };
+use texide_parser::{MarkdownParser, Parser, PlainTextParser};
 
 /// The LSP backend for Texide.
 struct Backend {
@@ -24,6 +26,8 @@ struct Backend {
     /// Linter configuration.
     /// Linter instance.
     linter: RwLock<Linter>,
+    /// Workspace root path.
+    workspace_root: RwLock<Option<std::path::PathBuf>>,
 }
 
 impl Backend {
@@ -39,6 +43,7 @@ impl Backend {
             client,
             documents: RwLock::new(HashMap::new()),
             linter: RwLock::new(linter),
+            workspace_root: RwLock::new(None),
         }
     }
 
@@ -146,6 +151,182 @@ impl Backend {
     fn positions_le(&self, p1: Position, p2: Position) -> bool {
         p1.line < p2.line || (p1.line == p2.line && p1.character <= p2.character)
     }
+
+    /// Extracts document symbols from AST.
+    fn extract_symbols(&self, node: &TxtNode, text: &str) -> Vec<DocumentSymbol> {
+        let mut symbols = Vec::new();
+
+        // We only care about specific block elements for the outline
+        for child in &node.children {
+            let symbol_kind = match child.node_type {
+                // H1 -> File/Class, H2 -> Method/Module. Using String for now.
+                NodeType::Header => SymbolKind::STRING,
+                NodeType::CodeBlock => SymbolKind::FUNCTION,
+                _ => continue,
+            };
+
+            // Extract details (e.g., header text)
+            let mut detail = String::new();
+            if child.node_type == NodeType::Header {
+                // Collect text children
+                self.collect_text(child, &mut detail, text);
+            } else if child.node_type == NodeType::CodeBlock {
+                detail = "Code Block".to_string();
+            }
+
+            // Convert range
+            if let Some(range) =
+                self.offset_to_range(child.span.start as usize, child.span.end as usize, text)
+            {
+                // For selection range, ideally we want just the header text, but full range is fine for now
+                let selection_range = range;
+
+                #[allow(deprecated)]
+                let symbol = DocumentSymbol {
+                    name: if detail.is_empty() {
+                        format!("{}", child.node_type)
+                    } else {
+                        detail
+                    },
+                    detail: None,
+                    kind: symbol_kind,
+                    tags: None,
+                    deprecated: None,
+                    range,
+                    selection_range,
+                    children: None, // Flat list for now
+                };
+
+                symbols.push(symbol);
+            }
+        }
+
+        symbols
+    }
+
+    fn collect_text(&self, node: &TxtNode, out: &mut String, source: &str) {
+        if node.node_type == NodeType::Str {
+            let start = node.span.start as usize;
+            let end = node.span.end as usize;
+            if start <= end && end <= source.len() {
+                out.push_str(&source[start..end]);
+            }
+        }
+        for child in &node.children {
+            self.collect_text(child, out, source);
+        }
+    }
+
+    /// Reloads configuration from the workspace root.
+    fn reload_config(&self) {
+        let root_guard = match self.workspace_root.read() {
+            Ok(g) => g,
+            Err(e) => {
+                error!("Workspace root lock poisoned: {}", e);
+                return;
+            }
+        };
+
+        let path = match root_guard.as_ref() {
+            Some(p) => p,
+            None => {
+                // No root path, cannot load config
+                return;
+            }
+        };
+
+        let config_files = [".texide.jsonc", ".texide.json"];
+        for name in config_files {
+            let config_path = path.join(name);
+            if config_path.exists() {
+                info!("Found config file: {}", config_path.display());
+                match LinterConfig::from_file(&config_path) {
+                    Ok(config) => {
+                        info!("Loaded configuration from workspace");
+                        match self.linter.write() {
+                            Ok(mut linter_guard) => match Linter::new(config) {
+                                Ok(new_linter) => {
+                                    *linter_guard = new_linter;
+                                    info!("Linter re-initialized with new config");
+                                }
+                                Err(e) => error!("Failed to create new linter: {}", e),
+                            },
+                            Err(e) => error!("Linter lock poisoned: {}", e),
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to load config: {}", e);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    /// Extracts document symbols from AST.
+    fn extract_symbols(&self, node: &TxtNode, text: &str) -> Vec<DocumentSymbol> {
+        let mut symbols = Vec::new();
+
+        // We only care about specific block elements for the outline
+        for child in &node.children {
+            let symbol_kind = match child.node_type {
+                // H1 -> File/Class, H2 -> Method/Module. Using String for now.
+                NodeType::Header => SymbolKind::STRING,
+                NodeType::CodeBlock => SymbolKind::FUNCTION,
+                _ => continue,
+            };
+
+            // Extract details (e.g., header text)
+            let mut detail = String::new();
+            if child.node_type == NodeType::Header {
+                // Collect text children
+                self.collect_text(child, &mut detail, text);
+            } else if child.node_type == NodeType::CodeBlock {
+                detail = "Code Block".to_string();
+            }
+
+            // Convert range
+            if let Some(range) =
+                self.offset_to_range(child.span.start as usize, child.span.end as usize, text)
+            {
+                // For selection range, ideally we want just the header text, but full range is fine for now
+                let selection_range = range;
+
+                #[allow(deprecated)]
+                let symbol = DocumentSymbol {
+                    name: if detail.is_empty() {
+                        format!("{}", child.node_type)
+                    } else {
+                        detail
+                    },
+                    detail: None,
+                    kind: symbol_kind,
+                    tags: None,
+                    deprecated: None,
+                    range,
+                    selection_range,
+                    children: None, // Flat list for now
+                };
+
+                symbols.push(symbol);
+            }
+        }
+
+        symbols
+    }
+
+    fn collect_text(&self, node: &TxtNode, out: &mut String, source: &str) {
+        if node.node_type == NodeType::Str {
+            let start = node.span.start as usize;
+            let end = node.span.end as usize;
+            if start <= end && end <= source.len() {
+                out.push_str(&source[start..end]);
+            }
+        }
+        for child in &node.children {
+            self.collect_text(child, out, source);
+        }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -154,29 +335,14 @@ impl LanguageServer for Backend {
         info!("Texide LSP server initializing...");
 
         if let Some(path) = params.root_uri.and_then(|u| u.to_file_path().ok()) {
-            let config_files = [".texide.jsonc", ".texide.json"];
-            for name in config_files {
-                let config_path = path.join(name);
-                if config_path.exists() {
-                    info!("Found config file: {}", config_path.display());
-                    match LinterConfig::from_file(&config_path) {
-                        Ok(config) => {
-                            info!("Loaded configuration from workspace");
-                            match self.linter.write() {
-                                Ok(mut linter_guard) => match Linter::new(config) {
-                                    Ok(new_linter) => *linter_guard = new_linter,
-                                    Err(e) => error!("Failed to create new linter: {}", e),
-                                },
-                                Err(e) => error!("Linter lock poisoned: {}", e),
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to load config: {}", e);
-                        }
-                    }
-                    break;
-                }
+            // Store workspace root
+            {
+                let mut root = self.workspace_root.write().unwrap();
+                *root = Some(path);
             }
+
+            // Initial config load
+            self.reload_config();
         }
 
         Ok(InitializeResult {
@@ -192,7 +358,18 @@ impl LanguageServer for Backend {
                     },
                 )),
                 // Code action support for auto-fix
-                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionProviderOptions {
+                        code_action_kinds: Some(vec![
+                            CodeActionKind::QUICKFIX,
+                            CodeActionKind::SOURCE_FIX_ALL,
+                        ]),
+                        resolve_provider: Some(false),
+                        work_done_progress_options: Default::default(),
+                    },
+                )),
+                // Document symbol support
+                document_symbol_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -264,6 +441,21 @@ impl LanguageServer for Backend {
         }
     }
 
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        debug!("Watched files changed: {:?}", params.changes);
+
+        // Check if any config files changed
+        let config_changed = params.changes.iter().any(|change| {
+            let path = change.uri.path();
+            path.ends_with(".texide.json") || path.ends_with(".texide.jsonc")
+        });
+
+        if config_changed {
+            info!("Configuration file changed, reloading...");
+            self.reload_config();
+        }
+    }
+
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         debug!("Document closed: {}", params.text_document.uri);
 
@@ -309,25 +501,75 @@ impl LanguageServer for Backend {
 
         let mut actions = Vec::new();
 
-        for diag in diagnostics {
-            if let Some(fix) = diag.fix {
-                // Check if the diagnostic range intersects with the requested range
-                // For simplicity, we check if the fix applies to the diagnostic in the requested range
-                // A more robust check would involve comparing LSP ranges
+        // Handle SourceFixAll
+        if let Some(only) = &params.context.only {
+            if only.contains(&CodeActionKind::SOURCE_FIX_ALL) {
+                let mut changes = HashMap::new();
+                let mut edits = Vec::new();
 
+                // Apply all available fixes
+                // We need to be careful about overlapping ranges.
+                // Simple approach: Sort by position (descending) and apply.
+                // Ideally, we should use texide_core::fixer, but here we construct TextEdits.
+
+                let mut fixable_diags: Vec<_> = diagnostics
+                    .into_iter()
+                    .filter(|d| d.fix.is_some())
+                    .collect();
+
+                // Sort descending by start position to avoid offset shifting issues if applied sequentially
+                // But LSP TextEdits are applied simultaneously by the client, so standard order often doesn't matter
+                // IF ranges don't overlap. If they overlap, it's a conflict.
+                // We assume rule-generated fixes don't usually overlap for different rules, OR we take one.
+
+                fixable_diags.sort_by(|a, b| b.span.start.cmp(&a.span.start));
+
+                for diag in fixable_diags {
+                    if let Some(fix) = diag.fix {
+                        if let Some(range) = self.offset_to_range(
+                            fix.span.start as usize,
+                            fix.span.end as usize,
+                            &text,
+                        ) {
+                            edits.push(TextEdit {
+                                range,
+                                new_text: fix.text,
+                            });
+                        }
+                    }
+                }
+
+                if !edits.is_empty() {
+                    changes.insert(uri.clone(), edits);
+
+                    let action = CodeAction {
+                        title: "Fix all Texide issues".to_string(),
+                        kind: Some(CodeActionKind::SOURCE_FIX_ALL),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(changes),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    };
+                    actions.push(CodeActionOrCommand::CodeAction(action));
+                }
+            }
+        }
+
+        for diag in self.lint_text(&text, &path) {
+            // Re-lint is expensive but correct for fresh context
+            if let Some(fix) = diag.fix {
                 let fix_range =
                     self.offset_to_range(fix.span.start as usize, fix.span.end as usize, &text);
 
                 if let Some(range) = fix_range {
-                    // Check intersection with params.range using proper Position comparison
-                    // Two ranges intersect if (start1 <= end2) && (start2 <= end1)
                     if self.positions_le(range.start, params.range.end)
                         && self.positions_le(params.range.start, range.end)
                     {
                         let action = CodeAction {
                             title: format!("Fix: {}", diag.message),
                             kind: Some(CodeActionKind::QUICKFIX),
-                            diagnostics: None, // We could link back to the LSP diagnostic here
+                            diagnostics: None,
                             edit: Some(WorkspaceEdit {
                                 changes: Some(HashMap::from([(
                                     uri.clone(),
@@ -347,6 +589,55 @@ impl LanguageServer for Backend {
         }
 
         Ok(Some(actions))
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        debug!("Document symbol request: {}", params.text_document.uri);
+
+        let uri = &params.text_document.uri;
+        let text = {
+            let docs = match self.documents.read() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("Documents lock poisoned: {}", e);
+                    return Ok(None);
+                }
+            };
+            match docs.get(uri) {
+                Some(text) => text.clone(),
+                None => return Ok(None),
+            }
+        };
+
+        // We need to parse the document to get symbols
+        let path = match uri.to_file_path() {
+            Ok(p) => p,
+            Err(_) => std::path::PathBuf::from("untitled"),
+        };
+
+        // Select parser
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let parser: Box<dyn Parser> = if extension == "md" || extension == "markdown" {
+            Box::new(MarkdownParser::new())
+        } else {
+            // For plain text, maybe no symbols? Or just return None
+            Box::new(PlainTextParser::new())
+        };
+
+        let arena = AstArena::new();
+        let ast = match parser.parse(&arena, &text) {
+            Ok(ast) => ast,
+            Err(e) => {
+                error!("Failed to parse document for symbols: {}", e);
+                return Ok(None);
+            }
+        };
+
+        let symbols = self.extract_symbols(&ast, &text);
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
 }
 

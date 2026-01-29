@@ -133,7 +133,9 @@ graph TB
 
 **Purpose**: Language Server Protocol implementation.
 
-**Status**: Placeholder for future implementation.
+**Status**: 🚧 β版 - Basic implementation (Diagnostics, Code Actions, Symbols) completed.
+
+**Details**: See [LSP Documentation](lsp.md) for more information.
 
 ## Data Flow
 
