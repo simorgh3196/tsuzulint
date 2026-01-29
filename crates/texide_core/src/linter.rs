@@ -56,35 +56,54 @@ impl Linter {
         // Initialize plugin host
         let mut host = PluginHost::new();
 
-        // Load configured plugins
-        for plugin_name in &config.plugins {
-            // Validate plugin name before attempting resolution
-            let path = Path::new(plugin_name);
-            let mut components = path.components();
-            let is_valid = matches!(
-                (components.next(), components.next()),
-                (Some(std::path::Component::Normal(_)), None)
-            );
-
-            if !is_valid || plugin_name.contains(std::path::is_separator) {
-                return Err(LinterError::config(format!(
-                    "Invalid plugin name '{}': plugin names must be a single filename without paths.",
-                    plugin_name
-                )));
-            }
-
-            match PluginResolver::resolve(plugin_name, config.base_dir.as_deref()) {
+        // Helper to load a rule/plugin by name/path
+        let load_plugin = |name: &str, host: &mut PluginHost| -> Result<(), LinterError> {
+            match PluginResolver::resolve(name, config.base_dir.as_deref()) {
                 Some(path) => {
-                    info!("Loading plugin '{}' from {}", plugin_name, path.display());
+                    info!("Loading plugin '{}' from {}", name, path.display());
                     if let Err(e) = host.load_rule(&path) {
-                        warn!("Failed to load plugin '{}': {}", plugin_name, e);
+                        warn!("Failed to load plugin '{}': {}", name, e);
                     }
                 }
                 None => {
                     warn!(
                         "Plugin '{}' not found. Checked .texide/plugins/ and global directories.",
-                        plugin_name
+                        name
                     );
+                }
+            }
+            Ok(())
+        };
+
+        // Load legacy plugins list
+        for plugin_name in &config.plugins {
+            let _ = load_plugin(plugin_name, &mut host);
+        }
+
+        // Load rules from new rules array
+        for rule_def in &config.rules {
+            use crate::config::RuleDefinition;
+            match rule_def {
+                RuleDefinition::Simple(name) => {
+                    let _ = load_plugin(name, &mut host);
+                }
+                RuleDefinition::Detail(detail) => {
+                    // Prioritize path, then github/url (not fully implemented yet)
+                    if let Some(path) = &detail.path {
+                        // Resolve path relative to base_dir if possible
+                        let path_buf = if let Some(base) = &config.base_dir {
+                            base.join(path)
+                        } else {
+                            PathBuf::from(path)
+                        };
+                        let path_str = path_buf.to_string_lossy();
+                        let _ = load_plugin(&path_str, &mut host);
+                    } else if let Some(github) = &detail.github {
+                        // Placeholder for github fetching
+                        warn!("GitHub rule fetching not yet implemented: {}", github);
+                    } else if let Some(url) = &detail.url {
+                        warn!("URL rule fetching not yet implemented: {}", url);
+                    }
                 }
             }
         }
@@ -450,8 +469,13 @@ impl Linter {
     /// Gets rule names filtered by isolation level.
     fn get_rule_names_by_isolation(&self, host: &PluginHost, level: IsolationLevel) -> Vec<String> {
         let mut names = Vec::new();
+        // Only run rules that are enabled in options
+        let enabled_rules = self.config.enabled_rules();
+        let enabled_names: HashSet<&str> = enabled_rules.iter().map(|(n, _)| *n).collect();
+
         for name in host.loaded_rules() {
-            if let Some(manifest) = host.get_manifest(name)
+            if enabled_names.contains(name)
+                && let Some(manifest) = host.get_manifest(name)
                 && manifest.isolation_level == level
             {
                 names.push(name.to_string());

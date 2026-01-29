@@ -195,6 +195,10 @@ pub fn get_manifest() -> FnResult<String> {
 /// Lints a node for doubled particles.
 #[plugin_fn]
 pub fn lint(input: String) -> FnResult<String> {
+    lint_impl(input)
+}
+
+fn lint_impl(input: String) -> FnResult<String> {
     let request: LintRequest = serde_json::from_str(&input)?;
     let mut diagnostics = Vec::new();
 

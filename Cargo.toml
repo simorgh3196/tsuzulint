@@ -8,6 +8,7 @@ members = [
     "crates/texide_core",
     "crates/texide_cli",
     "crates/texide_lsp",
+    "crates/texide_registry",
     "crates/texide_wasm",
 ]
 
@@ -63,6 +64,14 @@ miette = { version = "7.4", features = ["fancy"] }
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+
+# HTTP & Plugin Registry
+reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
+semver = "1.0"
+jsonschema = "0.18"
+sha2 = "0.10"
+
 
 # File system
 walkdir = "2.5"
