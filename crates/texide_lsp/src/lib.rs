@@ -337,7 +337,13 @@ impl LanguageServer for Backend {
 
         // Store document content
         {
-            let mut docs = self.documents.write().unwrap();
+            let mut docs = match self.documents.write() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("Documents lock poisoned: {}", e);
+                    return;
+                }
+            };
             docs.insert(
                 params.text_document.uri.clone(),
                 params.text_document.text.clone(),
@@ -360,7 +366,13 @@ impl LanguageServer for Backend {
         if let Some(change) = params.content_changes.into_iter().next() {
             // Update stored content
             {
-                let mut docs = self.documents.write().unwrap();
+                let mut docs = match self.documents.write() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        error!("Documents lock poisoned: {}", e);
+                        return;
+                    }
+                };
                 docs.insert(params.text_document.uri.clone(), change.text.clone());
             }
 
@@ -403,7 +415,13 @@ impl LanguageServer for Backend {
 
         // Remove from cache
         {
-            let mut docs = self.documents.write().unwrap();
+            let mut docs = match self.documents.write() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("Documents lock poisoned: {}", e);
+                    return;
+                }
+            };
             docs.remove(&params.text_document.uri);
         }
 
@@ -455,10 +473,8 @@ impl LanguageServer for Backend {
             // Simple approach: Sort by position (descending) and apply.
             // Ideally, we should use texide_core::fixer, but here we construct TextEdits.
 
-            let mut fixable_diags: Vec<_> = diagnostics
-                .into_iter()
-                .filter(|d| d.fix.is_some())
-                .collect();
+            let mut fixable_diags: Vec<_> =
+                diagnostics.iter().filter(|d| d.fix.is_some()).collect();
 
             // Sort descending by start position to avoid offset shifting issues if applied sequentially
             // But LSP TextEdits are applied simultaneously by the client, so standard order often doesn't matter
@@ -468,13 +484,13 @@ impl LanguageServer for Backend {
             fixable_diags.sort_by(|a, b| b.span.start.cmp(&a.span.start));
 
             for diag in fixable_diags {
-                if let Some(fix) = diag.fix
+                if let Some(ref fix) = diag.fix
                     && let Some(range) =
                         self.offset_to_range(fix.span.start as usize, fix.span.end as usize, &text)
                 {
                     edits.push(TextEdit {
                         range,
-                        new_text: fix.text,
+                        new_text: fix.text.clone(),
                     });
                 }
             }
@@ -495,9 +511,9 @@ impl LanguageServer for Backend {
             }
         }
 
-        for diag in self.lint_text(&text, &path) {
-            // Re-lint is expensive but correct for fresh context
-            if let Some(fix) = diag.fix
+        // Generate QUICKFIX actions for diagnostics in the requested range
+        for diag in &diagnostics {
+            if let Some(ref fix) = diag.fix
                 && let Some(range) =
                     self.offset_to_range(fix.span.start as usize, fix.span.end as usize, &text)
                 && self.positions_le(range.start, params.range.end)
@@ -512,7 +528,7 @@ impl LanguageServer for Backend {
                             uri.clone(),
                             vec![TextEdit {
                                 range,
-                                new_text: fix.text,
+                                new_text: fix.text.clone(),
                             }],
                         )])),
                         ..Default::default()
