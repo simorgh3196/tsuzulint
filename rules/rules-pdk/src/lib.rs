@@ -465,9 +465,15 @@ pub fn get_sentences(text: &str) -> Vec<Sentence> {
             let trimmed = sentence_text.trim();
 
             if !trimmed.is_empty() {
+                // Calculate byte offset of trimmed substring within original range
+                let original_slice = &text[current_start..end];
+                let leading_bytes = original_slice.len() - original_slice.trim_start().len();
+                let new_start = current_start + leading_bytes;
+                let new_end = new_start + trimmed.len();
+
                 sentences.push(Sentence {
-                    start: current_start,
-                    end,
+                    start: new_start,
+                    end: new_end,
                     text: trimmed.to_string(),
                     char_count: trimmed.chars().count(), // Count characters, not bytes
                 });
@@ -482,9 +488,14 @@ pub fn get_sentences(text: &str) -> Vec<Sentence> {
         let remaining = &text[current_start..];
         let trimmed = remaining.trim();
         if !trimmed.is_empty() {
+            // Calculate byte offset of trimmed substring within original range
+            let leading_bytes = remaining.len() - remaining.trim_start().len();
+            let new_start = current_start + leading_bytes;
+            let new_end = new_start + trimmed.len();
+
             sentences.push(Sentence {
-                start: current_start,
-                end: text.len(),
+                start: new_start,
+                end: new_end,
                 text: trimmed.to_string(),
                 char_count: trimmed.chars().count(),
             });
@@ -510,6 +521,11 @@ pub fn find_matches(text: &str, patterns: &[String], case_sensitive: bool) -> Ve
     let mut matches = Vec::new();
 
     for pattern in patterns {
+        // Skip empty patterns to avoid infinite loops
+        if pattern.is_empty() {
+            continue;
+        }
+
         if case_sensitive {
             // Case-sensitive search: use byte-level matching directly
             let mut search_start = 0;
