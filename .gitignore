@@ -27,7 +27,10 @@ TODO.md
 .agent/
 .claude/
 .cursor/
+.gemini/
+.kilocode/
 .kiro/
+.opencode/
 .windsurf/
 
 # Cache directories

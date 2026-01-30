@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - "v*"
+    paths:
+      - "crates/**"
+      - "rules/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/**"
 
 env:
   CARGO_TERM_COLOR: always
