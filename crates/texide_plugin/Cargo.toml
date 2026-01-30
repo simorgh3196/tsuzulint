@@ -29,4 +29,4 @@ wasmi = { workspace = true, optional = true }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 insta = { workspace = true }
-wat = "1.24"
+wat = "1.244.0"
