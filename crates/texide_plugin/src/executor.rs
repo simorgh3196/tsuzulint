@@ -7,6 +7,7 @@
 use crate::{PluginError, RuleManifest};
 
 /// Result from loading a WASM rule.
+#[derive(Debug)]
 pub struct LoadResult {
     /// The rule name extracted from the manifest.
     pub name: String,

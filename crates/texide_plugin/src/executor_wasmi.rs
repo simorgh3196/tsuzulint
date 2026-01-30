@@ -292,6 +292,41 @@ impl RuleExecutor for WasmiExecutor {
 mod tests {
     use super::*;
 
+    /// Helper to compile WAT to WASM bytes
+    fn wat_to_wasm(wat: &str) -> Vec<u8> {
+        wat::parse_str(wat).expect("Invalid WAT")
+    }
+
+    /// Helper to create a basic valid rule in WAT
+    fn valid_rule_wat() -> String {
+        let json = r#"{"name":"test-rule","version":"1.0.0","description":"Test rule"}"#;
+        let len = json.len();
+        format!(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "get_manifest") (result i32 i32)
+                    (i32.const 0) ;; ptr
+                    (i32.const {}) ;; len
+                )
+                (func (export "lint") (param i32 i32) (result i32 i32)
+                    (i32.const 100) ;; ptr to "[]" (move past manifest)
+                    (i32.const 2)   ;; len
+                )
+                (func (export "alloc") (param i32) (result i32)
+                    (i32.const 128) ;; return a fixed pointer
+                )
+                ;; Write manifest to memory at offset 0
+                (data (i32.const 0) "{}")
+                ;; Write empty array to memory at offset 100
+                (data (i32.const 100) "[]")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"") // Escape quotes for WAT string
+        )
+    }
+
     #[test]
     fn test_executor_new() {
         let executor = WasmiExecutor::new();
@@ -299,9 +334,132 @@ mod tests {
     }
 
     #[test]
+    fn test_executor_load_valid_rule() {
+        let mut executor = WasmiExecutor::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        let result = executor.load(&wasm);
+        assert!(result.is_ok());
+
+        let loaded = result.unwrap();
+        assert_eq!(loaded.name, "test-rule");
+        assert_eq!(loaded.manifest.version, "1.0.0");
+
+        assert_eq!(executor.loaded_rules(), vec!["test-rule"]);
+    }
+
+    #[test]
+    fn test_executor_lint_valid() {
+        let mut executor = WasmiExecutor::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+        executor.load(&wasm).expect("Failed to load rule");
+
+        let result = executor.call_lint("test-rule", "{\"text\":\"hello\"}");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "[]");
+    }
+
+    #[test]
     fn test_executor_call_not_found() {
         let mut executor = WasmiExecutor::new();
         let result = executor.call_lint("nonexistent", "{}");
         assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    fn test_executor_missing_exports() {
+        let mut executor = WasmiExecutor::new();
+        // Missing lint function
+        let wasm = wat_to_wasm(
+            r#"
+        (module
+            (memory (export "memory") 1)
+            (func (export "get_manifest") (result i32 i32) (i32.const 0) (i32.const 0))
+            (func (export "alloc") (param i32) (result i32) (i32.const 0))
+        )
+        "#,
+        );
+
+        let result = executor.load(&wasm);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("lint not found"));
+    }
+
+    #[test]
+    fn test_executor_invalid_manifest() {
+        let mut executor = WasmiExecutor::new();
+        // Manifest returns invalid JSON
+        let wasm = wat_to_wasm(
+            r#"
+        (module
+            (memory (export "memory") 1)
+            (func (export "get_manifest") (result i32 i32)
+                (i32.const 0) ;; ptr
+                (i32.const 5) ;; len
+            )
+            (func (export "lint") (param i32 i32) (result i32 i32) (i32.const 0) (i32.const 0))
+            (func (export "alloc") (param i32) (result i32) (i32.const 0))
+
+            (data (i32.const 0) "INVALID")
+        )
+        "#,
+        );
+
+        let result = executor.load(&wasm);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid manifest"));
+    }
+
+    #[test]
+    fn test_executor_lint_error() {
+        let mut executor = WasmiExecutor::new();
+        // Lint function traps (unreachable)
+        let json = r#"{"name":"error-rule","version":"1.0.0","description":"Error rule"}"#;
+        let len = json.len();
+        let wasm = wat_to_wasm(&format!(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "get_manifest") (result i32 i32)
+                    (i32.const 0)
+                    (i32.const {})
+                )
+                (func (export "lint") (param i32 i32) (result i32 i32)
+                    unreachable
+                )
+                (func (export "alloc") (param i32) (result i32) (i32.const 128))
+
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        ));
+
+        executor.load(&wasm).expect("Failed to load rule");
+
+        let result = executor.call_lint("error-rule", "{}");
+        assert!(result.is_err());
+        // Verify it captures the runtime error
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("failed") || err_msg.contains("Trap"));
+    }
+
+    #[test]
+    fn test_executor_large_input() {
+        // Test handling of larger input (simulating a real file)
+        let mut executor = WasmiExecutor::new();
+
+        // A rule that echoes back the input length as a string in the output (for verification)
+        // Note: implementing full echo in WAT is tedious, so we'll just accept the input
+        // and return a static success to prove it didn't crash on allocation/write.
+        let wasm = wat_to_wasm(&valid_rule_wat());
+        executor.load(&wasm).expect("Failed to load rule");
+
+        let large_input = "a".repeat(1024 * 10); // 10KB
+        let input_json = format!("{{\"text\":\"{}\"}}", large_input);
+
+        let result = executor.call_lint("test-rule", &input_json);
+        assert!(result.is_ok());
     }
 }
