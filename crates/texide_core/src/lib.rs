@@ -25,6 +25,7 @@
 mod config;
 mod error;
 mod fixer;
+pub mod formatters;
 mod linter;
 pub mod resolver;
 mod result;
@@ -32,6 +33,7 @@ mod result;
 pub use config::LinterConfig;
 pub use error::LinterError;
 pub use fixer::{FixerResult, apply_fixes_to_content, apply_fixes_to_file};
+pub use formatters::generate_sarif;
 pub use linter::Linter;
 pub use result::LintResult;
 
