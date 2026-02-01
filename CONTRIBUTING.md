@@ -64,6 +64,14 @@ git checkout -b feature/your-feature-name
 # or fix/bug-name, docs/update-readme, etc.
 ```
 
+> [!TIP]
+> **Use Git Worktrees for multitasking**
+> If you need to switch between branches frequently, consider using worktrees:
+> ```bash
+> make worktree name=feature/your-next-task
+> ```
+> This creates a new directory in `.worktrees/feature/your-next-task` linked to the branch.
+
 ### 2. Make Your Changes
 
 - Write code with English comments

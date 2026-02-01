@@ -20,6 +20,17 @@ Texide is a high-performance natural language linter written in Rust, inspired b
     - PR description must be clear.
 5.  **Tests must pass** before requesting review.
 
+## Worktree Management
+
+When working on multiple tasks or expecting to switch contexts often, use **git worktrees** configured in the `.worktrees/` directory.
+
+- **Create a new worktree**: Use the make command.
+  ```bash
+  make worktree name=feat/my-feature
+  ```
+- **Directory**: All worktrees should be located in `.worktrees/`.
+- **Reason**: This keeps the main workspace clean and allows for parallel task execution without switching branches in the main directory.
+
 ## Common Commands
 
 ```bash

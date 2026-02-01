@@ -59,3 +59,14 @@ release-all: release wasm
 clean:
 	cargo clean
 	cd rules && cargo clean
+
+# =============================================================================
+# Git Configuration
+# =============================================================================
+
+# Create a new git worktree
+# Usage: make worktree name=my-branch [base=main]
+BASE ?= main
+worktree:
+	@if [ -z "$(name)" ]; then echo "Error: name is required. Usage: make worktree name=<branch-name>"; exit 1; fi
+	git worktree add -b $(name) .worktrees/$(name) $(BASE)
