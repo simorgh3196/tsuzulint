@@ -1,0 +1,17 @@
+{
+  "name": "texide-benchmark-textlint",
+  "version": "1.0.0",
+  "private": true,
+  "description": "textlint environment for Texide benchmarks",
+  "scripts": {
+    "lint": "textlint",
+    "benchmark": "node scripts/benchmark-textlint.js"
+  },
+  "dependencies": {
+    "textlint": "^14.0.0",
+    "textlint-rule-helper": "^2.3.1"
+  },
+  "devDependencies": {
+    "benchmark": "^2.1.4"
+  }
+}

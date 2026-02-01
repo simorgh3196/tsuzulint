@@ -1,0 +1,130 @@
+name: Benchmark
+
+on:
+  # Run on pull requests that modify performance-critical code
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'rules/**'
+      - 'Cargo.toml'
+      - 'benches/**'
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      run_full_benchmark:
+        description: 'Run full benchmark (100MB file + 1000 files)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  benchmark:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: benchmark
+
+      - name: Cache corpus
+        id: cache-corpus
+        uses: actions/cache@v4
+        with:
+          path: benches/corpus
+          key: benchmark-corpus-${{ hashFiles('benches/scripts/corpus_generator.rs') }}
+
+      - name: Install dependencies
+        run: |
+          cd benches/rules/textlint
+          npm install
+
+      - name: Generate corpus (if needed)
+        if: steps.cache-corpus.outputs.cache-hit != 'true'
+        run: |
+          cargo run --bin corpus-generator --release
+
+      - name: Build Texide (release)
+        run: cargo build --bin texide --release
+
+      - name: Run quick benchmark (PR)
+        if: github.event_name == 'pull_request' && !inputs.run_full_benchmark
+        run: |
+          echo "Running quick benchmark (100 files)..."
+          # Run only a subset for PRs to save time
+          ./benches/scripts/run-quick.sh
+
+      - name: Run full benchmark (manual or if requested)
+        if: github.event_name == 'workflow_dispatch' || inputs.run_full_benchmark
+        run: |
+          echo "Running full benchmark..."
+          ./benches/scripts/run.sh
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: benches/results/
+          retention-days: 30
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            const resultsDir = 'benches/results';
+            const files = fs.readdirSync(resultsDir).filter(f => f.endsWith('.json'));
+            
+            if (files.length === 0) {
+              console.log('No benchmark results found');
+              return;
+            }
+            
+            const latestFile = files.sort().reverse()[0];
+            const results = JSON.parse(fs.readFileSync(path.join(resultsDir, latestFile), 'utf8'));
+            
+            let body = '## 📊 Benchmark Results\n\n';
+            body += `**Timestamp:** ${results.timestamp}\n`;
+            body += `**Texide:** ${results.texide_version}\n`;
+            body += `**textlint:** ${results.textlint_version}\n\n`;
+            
+            body += '| Scenario | Texide (cold) | Texide (warm) | textlint | Speedup |\n';
+            body += '|----------|---------------|---------------|----------|---------|\n';
+            
+            results.scenarios.forEach(s => {
+              const cold = s.texide.cold_start_seconds?.toFixed(2) || 'N/A';
+              const warm = s.texide.warm_run_seconds?.toFixed(2) || 'N/A';
+              const textlint = s.textlint.execution_seconds?.toFixed(2) || 'N/A';
+              const speedup = s.speedup_warm?.toFixed(2) || 'N/A';
+              body += `| ${s.name} | ${cold}s | ${warm}s | ${textlint}s | ${speedup}x |\n`;
+            });
+            
+            body += '\n<details>\n<summary>System Info</summary>\n\n';
+            body += `- OS: ${results.system_info.os}\n`;
+            body += `- CPU: ${results.system_info.cpu}\n`;
+            body += `- Memory: ${results.system_info.memory}\n`;
+            body += '</details>\n';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
