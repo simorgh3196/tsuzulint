@@ -308,31 +308,31 @@ mod tests {
         assert_eq!(enabled.options(), serde_json::Value::Null);
         assert_eq!(severity.options(), serde_json::Value::Null);
     }
-    #[test]
-    fn test_config_validation_error_unknown_property() {
-        // "ruless" is a typo for "rules" and should be rejected because additionalProperties is false
-        let json = r#"{
-            "ruless": []
-        }"#;
 
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::unknown_property(
+        r#"{ "ruless": [] }"#,
+        "Config validation failed" // Additional properties not allowed
+    )]
+    #[case::type_mismatch(
+        r#"{ "cache": "not-a-bool" }"#,
+        "Config validation failed" // Type mismatch
+    )]
+    #[case::invalid_enum_value(
+        r#"{ "options": { "rule-id": "invalid-severity" } }"#,
+        "Config validation failed" // Enum validation
+    )]
+    fn test_config_validation_errors(#[case] json: &str, #[case] expected_error_part: &str) {
         let result = LinterConfig::from_json(json);
-        assert!(result.is_err());
+        assert!(result.is_err(), "Expected error for JSON: {}", json);
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("Config validation failed"));
-    }
-
-    #[test]
-    fn test_config_validation_error_type_mismatch() {
-        // "max-lines" value is a string that is not a valid severity level
-        let json = r#"{
-            "options": {
-                "max-lines": "not-a-number"
-            }
-        }"#;
-
-        let result = LinterConfig::from_json(json);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("Config validation failed"));
+        assert!(
+            err.to_string().contains(expected_error_part),
+            "Error message '{}' should contain '{}'",
+            err,
+            expected_error_part
+        );
     }
 }
