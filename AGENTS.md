@@ -21,7 +21,7 @@ Texide is a high-performance natural language linter written in Rust, inspired b
     - Branch naming: `feat/name`, `fix/name`, `docs/name`
     - PR description must be clear.
 7. **Tests must pass** before requesting review.
-8. **Propose New Issues**: If you identify necessary changes unrelated to the current task during implementation, propose creating a Github Issue.
+8. **Propose New Issues**: If you identify necessary changes unrelated to the current task during implementation, propose creating a GitHub Issue.
 
 ## Common Commands
 
