@@ -66,57 +66,8 @@ impl Linter {
         // Initialize plugin host
         let mut host = PluginHost::new();
 
-        // Helper to load a rule/plugin by name/path
-        let load_plugin = |name: &str, host: &mut PluginHost| -> Result<(), LinterError> {
-            match PluginResolver::resolve(name, config.base_dir.as_deref()) {
-                Some(path) => {
-                    info!("Loading plugin '{}' from {}", name, path.display());
-                    if let Err(e) = host.load_rule(&path) {
-                        warn!("Failed to load plugin '{}': {}", name, e);
-                    }
-                }
-                None => {
-                    warn!(
-                        "Plugin '{}' not found. Checked .texide/plugins/ and global directories.",
-                        name
-                    );
-                }
-            }
-            Ok(())
-        };
-
-        // Load legacy plugins list
-        for plugin_name in &config.plugins {
-            let _ = load_plugin(plugin_name, &mut host);
-        }
-
-        // Load rules from new rules array
-        for rule_def in &config.rules {
-            use crate::config::RuleDefinition;
-            match rule_def {
-                RuleDefinition::Simple(name) => {
-                    let _ = load_plugin(name, &mut host);
-                }
-                RuleDefinition::Detail(detail) => {
-                    // Prioritize path, then github/url (not fully implemented yet)
-                    if let Some(path) = &detail.path {
-                        // Resolve path relative to base_dir if possible
-                        let path_buf = if let Some(base) = &config.base_dir {
-                            base.join(path)
-                        } else {
-                            PathBuf::from(path)
-                        };
-                        let path_str = path_buf.to_string_lossy();
-                        let _ = load_plugin(&path_str, &mut host);
-                    } else if let Some(github) = &detail.github {
-                        // Placeholder for github fetching
-                        warn!("GitHub rule fetching not yet implemented: {}", github);
-                    } else if let Some(url) = &detail.url {
-                        warn!("URL rule fetching not yet implemented: {}", url);
-                    }
-                }
-            }
-        }
+        // Load configured plugins and rules
+        Self::load_configured_rules(&config, &mut host);
 
         Ok(Self {
             config,
@@ -164,9 +115,12 @@ impl Linter {
         }
 
         // Record dynamic rule for parallel processing (after releasing plugin_host lock)
-        match self.dynamic_rules.lock() {
-            Ok(mut list) => list.push(path_buf),
-            Err(_) => warn!("Failed to record dynamic rule path due to poisoned lock"),
+        {
+            let mut list = self
+                .dynamic_rules
+                .lock()
+                .map_err(|_| LinterError::Internal("Dynamic rules mutex poisoned".to_string()))?;
+            list.push(path_buf);
         }
         Ok(())
     }
@@ -278,69 +232,81 @@ impl Linter {
     fn create_plugin_host(&self) -> Result<PluginHost, LinterError> {
         let mut host = PluginHost::new();
 
-        // Helper to load a rule/plugin by name/path
-        let load_plugin = |name: &str, host: &mut PluginHost| -> Result<(), LinterError> {
-            match PluginResolver::resolve(name, self.config.base_dir.as_deref()) {
-                Some(path) => {
-                    debug!("Loading plugin '{}' from {}", name, path.display());
-                    if let Err(e) = host.load_rule(&path) {
-                        warn!("Failed to load plugin '{}': {}", name, e);
-                    }
-                }
-                None => {
-                    debug!(
-                        "Plugin '{}' not found. Checked .texide/plugins/ and global directories.",
-                        name
-                    );
+        // Load configured plugins and rules
+        Self::load_configured_rules(&self.config, &mut host);
+
+        // Load dynamically added rules (via load_rule API)
+        {
+            let dynamic = self
+                .dynamic_rules
+                .lock()
+                .map_err(|_| LinterError::Internal("Dynamic rules mutex poisoned".to_string()))?;
+            for path in dynamic.iter() {
+                debug!("Loading dynamic plugin from {}", path.display());
+                if let Err(e) = host.load_rule(path) {
+                    warn!("Failed to load dynamic plugin '{}': {}", path.display(), e);
                 }
             }
-            Ok(())
+        }
+
+        Ok(host)
+    }
+
+    /// Loads plugins and rules into the given PluginHost based on config.
+    ///
+    /// This is a shared helper used by both `new()` and `create_plugin_host()`.
+    fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
+        // Helper to load a rule/plugin by name/path
+        let load_plugin = |name: &str, host: &mut PluginHost| match PluginResolver::resolve(
+            name,
+            config.base_dir.as_deref(),
+        ) {
+            Some(path) => {
+                debug!("Loading plugin '{}' from {}", name, path.display());
+                if let Err(e) = host.load_rule(&path) {
+                    warn!("Failed to load plugin '{}': {}", name, e);
+                }
+            }
+            None => {
+                debug!(
+                    "Plugin '{}' not found. Checked .texide/plugins/ and global directories.",
+                    name
+                );
+            }
         };
 
         // Load legacy plugins list
-        for plugin_name in &self.config.plugins {
-            let _ = load_plugin(plugin_name, &mut host);
+        for plugin_name in &config.plugins {
+            load_plugin(plugin_name, host);
         }
 
         // Load rules from new rules array
-        for rule_def in &self.config.rules {
+        for rule_def in &config.rules {
             use crate::config::RuleDefinition;
             match rule_def {
                 RuleDefinition::Simple(name) => {
-                    let _ = load_plugin(name, &mut host);
+                    load_plugin(name, host);
                 }
                 RuleDefinition::Detail(detail) => {
+                    // Prioritize path, then github/url (not fully implemented yet)
                     if let Some(path) = &detail.path {
-                        let path_buf = if let Some(base) = &self.config.base_dir {
+                        // Resolve path relative to base_dir if possible
+                        let path_buf = if let Some(base) = &config.base_dir {
                             base.join(path)
                         } else {
                             PathBuf::from(path)
                         };
                         let path_str = path_buf.to_string_lossy();
-                        let _ = load_plugin(&path_str, &mut host);
+                        load_plugin(&path_str, host);
                     } else if let Some(github) = &detail.github {
-                        debug!("GitHub rule fetching not yet implemented: {}", github);
+                        // Placeholder for github fetching
+                        warn!("GitHub rule fetching not yet implemented: {}", github);
                     } else if let Some(url) = &detail.url {
-                        debug!("URL rule fetching not yet implemented: {}", url);
+                        warn!("URL rule fetching not yet implemented: {}", url);
                     }
                 }
             }
         }
-
-        // Load dynamically added rules (via load_rule API)
-        match self.dynamic_rules.lock() {
-            Ok(dynamic) => {
-                for path in dynamic.iter() {
-                    debug!("Loading dynamic plugin from {}", path.display());
-                    if let Err(e) = host.load_rule(path) {
-                        warn!("Failed to load dynamic plugin '{}': {}", path.display(), e);
-                    }
-                }
-            }
-            Err(_) => warn!("Dynamic rule list lock poisoned; skipping runtime rules"),
-        }
-
-        Ok(host)
     }
 
     /// Selects an appropriate parser for the file extension.
@@ -833,5 +799,59 @@ mod tests {
         assert_eq!(json["type"], "Document");
         assert!(json["range"].is_array());
         assert!(json["children"].is_array());
+    }
+
+    #[test]
+    fn test_lint_files_parallel_empty() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        let paths: Vec<PathBuf> = vec![];
+        let result = linter.lint_files(&paths);
+        assert!(result.is_ok());
+
+        let (successes, failures) = result.unwrap();
+        assert!(successes.is_empty());
+        assert!(failures.is_empty());
+    }
+
+    #[test]
+    fn test_lint_files_parallel_nonexistent_files() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        let paths = vec![
+            PathBuf::from("/nonexistent/file1.md"),
+            PathBuf::from("/nonexistent/file2.txt"),
+        ];
+        let result = linter.lint_files(&paths);
+        assert!(result.is_ok());
+
+        let (successes, failures) = result.unwrap();
+        // All files should fail since they don't exist
+        assert!(successes.is_empty());
+        assert_eq!(failures.len(), 2);
+    }
+
+    #[test]
+    fn test_create_plugin_host() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        // create_plugin_host should succeed even with no plugins configured
+        let result = linter.create_plugin_host();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_load_configured_rules_static() {
+        // Test that load_configured_rules can be called as a static method
+        let config = LinterConfig::new();
+        let mut host = PluginHost::new();
+
+        // This should not panic even with empty config
+        Linter::load_configured_rules(&config, &mut host);
+        // With no plugins configured, no rules should be loaded
+        assert!(host.loaded_rules().is_empty());
     }
 }
