@@ -201,21 +201,22 @@ impl Linter {
 
     /// Lints a list of files in parallel using rayon.
     ///
-    /// Each worker thread creates its own `PluginHost` instance to avoid
-    /// lock contention. This allows full utilization of multi-core processors.
+    /// Creates a new `PluginHost` instance for each file to ensure thread safety.
+    /// While this incurs some overhead from plugin reloading, it avoids lock
+    /// contention and allows full utilization of multi-core processors.
     ///
     /// Returns a tuple of (successful results, failed files with errors).
     pub fn lint_files(&self, paths: &[PathBuf]) -> LintFilesResult {
         // Parallel processing using rayon
-        // Each thread creates its own PluginHost for thread safety
+        // Each file gets its own PluginHost to avoid shared mutable state
         // Collect both successes and failures
         let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
             .par_iter()
             .map(|path| {
-                // Create thread-local PluginHost
-                let mut thread_host = self.create_plugin_host().map_err(|e| (path.clone(), e))?;
+                // Create PluginHost for this file
+                let mut file_host = self.create_plugin_host().map_err(|e| (path.clone(), e))?;
 
-                self.lint_file_with_host(path, &mut thread_host)
+                self.lint_file_with_host(path, &mut file_host)
                     .map_err(|e| (path.clone(), e))
             })
             .collect();
