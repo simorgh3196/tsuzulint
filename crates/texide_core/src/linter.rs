@@ -147,7 +147,10 @@ impl Linter {
 
     /// Loads a WASM rule.
     pub fn load_rule(&self, path: impl AsRef<Path>) -> Result<(), LinterError> {
-        let mut host = self.plugin_host.lock().unwrap();
+        let mut host = self
+            .plugin_host
+            .lock()
+            .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
         host.load_rule(path)?;
         Ok(())
     }
@@ -367,7 +370,10 @@ impl Linter {
 
         // 1. Check full cache first
         {
-            let cache = self.cache.lock().unwrap();
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
             if cache.is_valid(path, &content_hash, &config_hash, &rule_versions)
                 && let Some(entry) = cache.get(path)
             {
@@ -395,7 +401,10 @@ impl Linter {
         // 2. Incremental Caching Strategy
         // If file changed, try to reuse diagnostics for unchanged blocks
         let (reused_diagnostics, matched_mask) = {
-            let cache = self.cache.lock().unwrap();
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
             cache.reconcile_blocks(path, &current_blocks, &config_hash, &rule_versions)
         };
 
@@ -521,7 +530,10 @@ impl Linter {
             .collect();
 
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
             let entry = CacheEntry::new(
                 content_hash,
                 config_hash,
@@ -640,7 +652,16 @@ impl Linter {
 
     /// Gets the versions of all loaded rules.
     fn get_rule_versions(&self) -> HashMap<String, String> {
-        let host = self.plugin_host.lock().unwrap();
+        // Note: Using unwrap here is acceptable as this is an internal method
+        // and mutex poisoning would indicate a serious bug that should panic
+        let host = match self.plugin_host.lock() {
+            Ok(host) => host,
+            Err(poisoned) => {
+                // If mutex is poisoned, still try to get versions from the poisoned guard
+                warn!("Plugin host mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         let mut versions = HashMap::new();
 
         for name in host.loaded_rules() {
