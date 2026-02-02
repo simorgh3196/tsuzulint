@@ -290,14 +290,17 @@ impl Linter {
                 RuleDefinition::Detail(detail) => {
                     // Prioritize path, then github/url (not fully implemented yet)
                     if let Some(path) = &detail.path {
-                        // Resolve path relative to base_dir if possible
+                        // detail.path is an explicit file path, so load it directly
+                        // without going through PluginResolver (which only accepts simple names)
                         let path_buf = if let Some(base) = &config.base_dir {
                             base.join(path)
                         } else {
                             PathBuf::from(path)
                         };
-                        let path_str = path_buf.to_string_lossy();
-                        load_plugin(&path_str, host);
+                        debug!("Loading rule from explicit path: {}", path_buf.display());
+                        if let Err(e) = host.load_rule(&path_buf) {
+                            warn!("Failed to load rule from '{}': {}", path_buf.display(), e);
+                        }
                     } else if let Some(github) = &detail.github {
                         // Placeholder for github fetching
                         warn!("GitHub rule fetching not yet implemented: {}", github);
