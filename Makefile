@@ -25,6 +25,10 @@ test-verbose:
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
 
+# Run markdownlint
+lint-md:
+	npx markdownlint-cli2 ".github/**/*.md" "README.md" "AGENTS.md" "docs/**/*.md" "editors/vscode/README.md" "rules/**/*.md" "schemas/**/*.md" "templates/**/*.md"
+
 # Format code
 fmt:
 	cargo fmt --all
@@ -32,6 +36,10 @@ fmt:
 # Format check (for CI)
 fmt-check:
 	cargo fmt --all -- --check
+
+# Format markdown
+fmt-md:
+	npx markdownlint-cli2 ".github/**/*.md" "README.md" "AGENTS.md" "docs/**/*.md" "editors/vscode/README.md" "rules/**/*.md" "schemas/**/*.md" "templates/**/*.md" --fix
 
 # =============================================================================
 # Release

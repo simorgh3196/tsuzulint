@@ -23,7 +23,7 @@ cd my-rule
 Replace these placeholders in all files:
 
 | Placeholder | Replace With |
-|-------------|--------------|
+| :--- | :--- |
 | `{{RULE_NAME}}` | Your rule ID (e.g., `no-todo`) |
 | `{{RULE_DESCRIPTION}}` | Short description |
 
@@ -64,7 +64,7 @@ texide lint --plugin ./build/release.wasm test.md
 
 ## Files
 
-```
+```text
 my-rule/
 ├── assembly/
 │   └── index.ts    # Rule implementation

@@ -71,11 +71,13 @@ texide plugin install https://example.com/rules/texide-rule.json
 4. Adds all rule options with default values to the `options` section
 
 Example - first install:
+
 ```bash
 texide plugin install simorgh3196/texide-rule-sentence-length
 ```
 
 Generated `.texide.jsonc`:
+
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
@@ -111,7 +113,7 @@ Generated `.texide.jsonc`:
 ### 1.2 Plugin Specification Formats
 
 | Format | Example | Description |
-|--------|---------|-------------|
+| :--- | :--- | :--- |
 | GitHub | `"owner/repo"` | Fetch latest release |
 | GitHub + version | `"owner/repo@1.0.0"` | Fetch specific version (pinned) |
 | GitHub + alias | `{ "github": "owner/repo", "as": "alias" }` | With explicit alias |
@@ -152,7 +154,7 @@ texide plugin remove simorgh3196/texide-rule-no-doubled-joshi
 
 ### 1.4 Cache and Storage
 
-```
+```text
 ~/.texide/
 ├── plugins/                      # Global plugins (manually placed)
 │   └── my-local-rule.wasm
@@ -191,7 +193,7 @@ Configure security policy in `.texide.jsonc`:
 ```
 
 | Option | Default | Description |
-|--------|---------|-------------|
+| :--- | :--- | :--- |
 | `confirm_install` | `true` | Show confirmation prompt on first install |
 | `trusted_repositories` | `[]` | List of trusted repositories |
 
@@ -199,7 +201,7 @@ Configure security policy in `.texide.jsonc`:
 
 When `confirm_install: true`, new plugins require confirmation:
 
-```
+```text
 ╭──────────────────────────────────────────────────────────────────╮
 │ New plugin installation                                          │
 ├──────────────────────────────────────────────────────────────────┤
@@ -217,7 +219,7 @@ When `confirm_install: true`, new plugins require confirmation:
 
 For plugins requesting additional permissions:
 
-```
+```text
 ╭──────────────────────────────────────────────────────────────────╮
 │ New plugin installation                                          │
 ├──────────────────────────────────────────────────────────────────┤
@@ -260,6 +262,7 @@ Each rule has two forms of identification:
 - **Alias**: Explicitly specified via `as` field, or auto-constructed as `{owner}/{name}` for GitHub sources
 
 The manifest only requires the short name:
+
 ```json
 {
   "rule": {
@@ -274,6 +277,7 @@ For GitHub sources, Texide automatically constructs the identifier from the repo
 #### Using Aliases
 
 **Basic usage** - No alias needed for simple cases:
+
 ```json
 {
   "rules": [
@@ -288,6 +292,7 @@ For GitHub sources, Texide automatically constructs the identifier from the repo
 ```
 
 **With explicit alias** - Use `as` to specify a custom identifier:
+
 ```json
 {
   "rules": [
@@ -310,6 +315,7 @@ For GitHub sources, Texide automatically constructs the identifier from the repo
 When multiple rules have the same short name, you **must** use explicit aliases to disambiguate. Texide will raise an error if conflicting rules are not aliased.
 
 **With conflict** - Use `as` to assign unique aliases:
+
 ```json
 {
   "rules": [
@@ -329,7 +335,8 @@ When multiple rules have the same short name, you **must** use explicit aliases 
 3. If conflict exists and no `as`, **raise an error**
 
 When a conflict is detected without explicit aliases, Texide raises an error:
-```
+
+```text
 Error: Rule name "sentence-length" is ambiguous (multiple plugins provide this rule):
    - alice/texide-rule-sentence-length
    - bob/texide-rule-sentence-length
@@ -382,7 +389,7 @@ To distribute a plugin, place `texide-rule.json` in your repository. Using JSON 
 **[rule] section**
 
 | Field | Required | Description |
-|-------|----------|-------------|
+| :--- | :--- | :--- |
 | `name` | ✓ | Rule ID (`no-doubled-joshi` format) |
 | `version` | ✓ | Semantic version |
 | `description` | | Description text |
@@ -396,18 +403,20 @@ To distribute a plugin, place `texide-rule.json` in your repository. Using JSON 
 **[artifacts] section**
 
 | Field | Required | Description |
-|-------|----------|-------------|
+| :--- | :--- | :--- |
 | `wasm` | ✓ | WASM file download URL |
 | `sha256` | ✓ | SHA256 hash of WASM file (for tampering/corruption detection) |
+| `permissions` | | Filesystem/network permissions (future) |
 
 **permissions** (Future Extension)
 
 | Field | Required | Description |
-|-------|----------|-------------|
+| :--- | :--- | :--- |
 | `filesystem` | | Array of filesystem access declarations |
 | `network` | | Array of network access declarations (future, low priority) |
 
 Filesystem permission format:
+
 ```json
 {
   "permissions": {
@@ -440,11 +449,13 @@ texide plugin hash my_rule.wasm
 #### Manual Release
 
 1. Build WASM
+
    ```bash
    cargo build --target wasm32-wasip1 --release
    ```
 
 2. Calculate hash
+
    ```bash
    shasum -a 256 target/wasm32-wasip1/release/my_rule.wasm
    ```
@@ -525,7 +536,7 @@ git push origin v1.0.0
 
 ### 2.5 Directory Structure Example
 
-```
+```text
 texide-rule-no-doubled-joshi/
 ├── .github/
 │   └── workflows/
@@ -575,7 +586,7 @@ flowchart TB
 ### 3.2 What WASM Sandbox Prevents
 
 | Threat | Defense Status |
-|--------|----------------|
+| :--- | :--- |
 | File reading | ✓ Blocked by default (allowed only for declared paths) |
 | File writing | ✓ Blocked by default (allowed only for declared paths) |
 | Network communication | ✓ Blocked (future: may allow declared hosts) |
@@ -588,7 +599,7 @@ flowchart TB
 ### 3.3 What Sandbox Cannot Prevent
 
 | Threat | Description | Mitigation |
-|--------|-------------|------------|
+| :--- | :--- | :--- |
 | Data leakage | Embedding input data in diagnostic messages | Use only trusted plugins |
 | Malicious diagnostics | Outputting large amounts of unrelated warnings | Review, use only trusted repositories |
 | Supply chain attacks | Takeover of legitimate repositories | Hash verification, exact version pinning |
@@ -630,35 +641,42 @@ Plugins from trusted repositories are installed without confirmation.
 
 ### Installation Errors
 
-**"Plugin not found"**
-```
+### "Plugin not found"
+
+```text
 Error: Plugin 'owner/repo' not found
 ```
+
 - Verify repository name is correct
 - Verify release is published
 - Verify `texide-rule.json` exists in repository
 
-**"Hash mismatch"**
-```
+### "Hash mismatch"
+
+```text
 Error: SHA256 hash mismatch
   Expected: a1b2c3...
   Actual:   x9y8z7...
 ```
+
 - Download may have been corrupted → Retry
 - Hash in `texide-rule.json` may be outdated → Report to author
 - WASM file may have been tampered with → Verify trusted source
 
 ### Runtime Errors
 
-**"Minimum version not satisfied"**
-```
+### "Minimum version not satisfied"
+
+```text
 Error: Plugin requires Texide >= 0.3.0, but current version is 0.2.0
 ```
+
 - Update Texide: `cargo install texide`
 
 ### Cache Issues
 
 Clear cache and retry:
+
 ```bash
 texide plugin cache clean
 texide plugin install  # Re-install plugins
@@ -670,7 +688,7 @@ texide plugin install  # Re-install plugins
 
 ### texide plugin install
 
-```
+```text
 texide plugin install [OPTIONS] <PLUGIN>
 
 Arguments:
@@ -683,7 +701,7 @@ Options:
 
 ### texide plugin list
 
-```
+```text
 texide plugin list [OPTIONS]
 
 Options:
@@ -694,7 +712,7 @@ Options:
 
 ### texide plugin update
 
-```
+```text
 texide plugin update [OPTIONS] [PLUGIN]
 
 Arguments:
@@ -707,7 +725,7 @@ Options:
 
 ### texide plugin remove
 
-```
+```text
 texide plugin remove <PLUGIN>
 
 Arguments:
@@ -716,7 +734,7 @@ Arguments:
 
 ### texide plugin verify
 
-```
+```text
 texide plugin verify [PLUGIN]
 
 Arguments:
@@ -725,7 +743,7 @@ Arguments:
 
 ### texide plugin cache
 
-```
+```text
 texide plugin cache <COMMAND>
 
 Commands:
@@ -735,7 +753,7 @@ Commands:
 
 ### texide plugin trust
 
-```
+```text
 texide plugin trust <COMMAND>
 
 Commands:
@@ -746,7 +764,7 @@ Commands:
 
 ### texide plugin hash
 
-```
+```text
 texide plugin hash <WASM_FILE>
 
 Arguments:

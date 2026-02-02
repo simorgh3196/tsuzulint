@@ -1,5 +1,7 @@
 # Texide
 
+A high-performance natural language linter written in Rust, inspired by [textlint](https://textlint.github.io/).
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/simorgh3196/texide/actions/workflows/ci.yml/badge.svg)](https://github.com/simorgh3196/texide/actions/workflows/ci.yml)
@@ -11,8 +13,6 @@
 > APIs and configuration formats may change without notice. Not ready for production use.
 >
 > 現在、研究開発段階のプロジェクトです。実用段階ではありません。
-
-> A high-performance natural language linter written in Rust, inspired by [textlint](https://textlint.github.io/).
 
 ## Goals
 
@@ -92,7 +92,7 @@ Create `.texide.jsonc` in your project root:
 ### Configuration Options
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| :--- | :--- | :--- | :--- |
 | `$schema` | string | - | JSON Schema URL |
 | `rules` | (string \| object)[] | `[]` | List of rules to load |
 | `options` | object | `{}` | Rule configurations (name -> enabled/options) |
@@ -176,6 +176,8 @@ make test
 # Run linter on test fixtures
 make lint
 make fmt-check
+make lint-md
+make fmt-md
 ```
 
 ## Agent Skills

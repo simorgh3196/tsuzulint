@@ -18,7 +18,7 @@ Every rule WASM module must export these two functions:
 
 Returns metadata about the rule.
 
-```
+```text
 Signature: () -> i32 (pointer to JSON string)
 ```
 
@@ -28,7 +28,7 @@ Signature: () -> i32 (pointer to JSON string)
 
 Performs linting on AST nodes. Nodes are passed as a batch (array) for efficiency.
 
-```
+```text
 Signature: (input_ptr: i32, input_len: i32) -> i32 (pointer to JSON string)
 ```
 
@@ -49,7 +49,7 @@ When using Extism PDK, memory management is handled automatically:
 
 If implementing without Extism PDK, export these functions:
 
-```
+```text
 alloc(size: i32) -> i32    // Allocate memory, return pointer
 dealloc(ptr: i32, size: i32)  // Free memory (optional)
 ```
@@ -114,7 +114,7 @@ dealloc(ptr: i32, size: i32)  // Free memory (optional)
 > **Note**: `cache_scope` and `exclude_contexts` are not yet implemented. They are reserved for future incremental linting optimization.
 
 | Value | Description | Use Case |
-|-------|-------------|----------|
+| :--- | :--- | :--- |
 | `"node"` | Each node can be cached independently | Rules that only look at individual nodes (e.g., `sentence-length`) |
 | `"node_type"` | All nodes of the same type are re-linted together | Rules that compare nodes of the same type (e.g., `no-duplicate-headers`) |
 | `"document"` | Entire document is re-linted on any change | Rules that need full document context (e.g., `consistent-terminology`) |
@@ -235,7 +235,7 @@ Rules receive AST nodes as a batch based on their `node_types` manifest field.
 ### Block Elements
 
 | Type | Description | Has Children |
-|------|-------------|--------------|
+| :--- | :--- | :--- |
 | `Document` | Root node | Yes |
 | `Paragraph` | Text paragraph | Yes |
 | `Header` | Heading (h1-h6) | Yes |
@@ -252,7 +252,7 @@ Rules receive AST nodes as a batch based on their `node_types` manifest field.
 ### Inline Elements
 
 | Type | Description | Has Children |
-|------|-------------|--------------|
+| :--- | :--- | :--- |
 | `Str` | Plain text | No |
 | `Break` | Line break | No |
 | `Emphasis` | Italic text | Yes |
@@ -437,5 +437,5 @@ export function lint(): i32 {
 This specification follows semantic versioning. Breaking changes increment the major version.
 
 | Spec Version | Changes |
-|--------------|---------|
+| :--- | :--- |
 | 1.0.0 | Initial specification |
