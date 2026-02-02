@@ -29,7 +29,7 @@ Texide uses a similar JSON configuration format, with `options` for rule configu
 Supported config files:
 
 | Format | Status |
-|--------|--------|
+| :--- | :--- |
 | `.texide.jsonc` | Supported (default, supports comments) |
 | `.texide.json` | Supported |
 
@@ -100,7 +100,7 @@ pub fn lint(input: String) -> FnResult<String> {
 ## CLI Commands
 
 | textlint | Texide | Notes |
-|----------|--------|-------|
+| :--- | :--- | :--- |
 | `textlint file.md` | `texide lint file.md` | |
 | `textlint --fix file.md` | `texide lint --fix file.md` | |
 | `textlint --init` | `texide init` | |
@@ -144,7 +144,7 @@ null_ls.builtins.diagnostics.texide.with({
 ## Performance Comparison
 
 | Metric | textlint | Texide |
-|--------|----------|--------|
+| :--- | :--- | :--- |
 | Startup time | ~500ms | ~10ms |
 | Memory (100 files) | ~200MB | ~50MB |
 | Parallel processing | Limited | Full rayon |

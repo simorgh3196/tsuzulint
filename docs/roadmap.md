@@ -9,7 +9,7 @@ Texideは、textlintにインスパイアされた高性能な自然言語リン
 ### ✅ 実装完了
 
 | コンポーネント | 状態 | 説明 |
-|--------------|------|------|
+| :--- | :--- | :--- |
 | **texide_ast** | ✅ 完成 | Arena allocator (bumpalo)、TxtNode、Span、NodeType |
 | **texide_parser** | ✅ 完成 | Markdown (markdown-rs)、PlainText パーサー |
 | **texide_plugin** | ✅ 完成 | Extism (native) / wasmi (browser) のデュアルバックエンド |
@@ -23,7 +23,7 @@ Texideは、textlintにインスパイアされた高性能な自然言語リン
 ### ルール実装
 
 | ルール | 状態 | 説明 |
-|--------|------|------|
+| :--- | :--- | :--- |
 | `no-todo` | ✅ 完成 | TODO/FIXME コメント検出 |
 | `sentence-length` | ✅ 完成 | 文長チェック |
 | `no-doubled-joshi` | ✅ 完成 | 日本語助詞重複検出（Fixable） |
@@ -31,7 +31,7 @@ Texideは、textlintにインスパイアされた高性能な自然言語リン
 ### テンプレート
 
 | 言語 | 状態 | 説明 |
-|------|------|------|
+| :--- | :--- | :--- |
 | Rust | ✅ 完成 | `templates/rust/` |
 | AssemblyScript | ⏳ Experimental | `templates/assemblyscript/` |
 
@@ -141,6 +141,7 @@ graph LR
 #### a) LintRequest の設計
 
 `LintRequest` はマッチするノードをバッチ（配列）で渡す設計:
+
 ```json
 {
   "nodes": [
@@ -269,6 +270,7 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 3. 競合があり `as` もない場合は**エラー**
 
 競合時のエラーメッセージ:
+
 ```text
 Error: Rule name "sentence-length" is ambiguous:
    - alice/texide-rule-sentence-length
@@ -359,6 +361,7 @@ flowchart TB
 ```
 
 将来の拡張（優先度低）:
+
 ```json
 {
   "permissions": {
@@ -372,7 +375,7 @@ flowchart TB
 **パーミッションの種類:**
 
 | パーミッション | 説明 | 優先度 |
-|--------------|------|-------|
+| :--- | :--- | :--- |
 | `filesystem.read` | 指定パスからの読み取り | 高（辞書ルール用） |
 | `filesystem.write` | 指定パスへの書き込み | 中（学習辞書用） |
 | `network` | 外部API呼び出し | 低（将来検討） |
@@ -553,6 +556,7 @@ graph TB
 - 極端にスコアが低い箇所を検出
 
 **検出例:**
+
 ```text
 ❌ ユーザー「を」ログインします  → 「が」が自然
 ❌ サーバーを「起勤」する        → 「起動」の誤字
@@ -573,6 +577,7 @@ graph TB
 - 接続詞の欠如や話題の唐突な変化を警告
 
 **検出例:**
+
 ```text
 ❌ このAPIはJSONを返します。お昼ご飯はカレーでした。
    → 文脈スコア急降下：「論理のつながりが希薄です」
@@ -593,6 +598,7 @@ graph TB
 - 見出しタイプと内容カテゴリの照合
 
 **検出例:**
+
 ```markdown
 > [!WARNING]
 > 今日はいい天気ですね。  ← 警告ブロックに警告内容がない
@@ -616,6 +622,7 @@ graph TB
 - 表現は違うが意味が同じペアを検出
 
 **検出例:**
+
 ```text
 P.1: APIキーは設定画面から取得できます
 P.10: 設定画面に行くとAPIキーが入手可能です
