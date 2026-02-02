@@ -19,6 +19,13 @@ use texide_plugin::{IsolationLevel, PluginHost};
 use crate::resolver::PluginResolver;
 use crate::{LintResult, LinterConfig, LinterError};
 
+/// Result type for lint_files and lint_patterns methods.
+///
+/// Contains a tuple of:
+/// - Successful lint results
+/// - Failed files with their errors (path and error)
+pub type LintFilesResult = Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>), LinterError>;
+
 /// The core linter engine.
 ///
 /// Orchestrates file discovery, parsing, rule execution, and caching.
@@ -148,10 +155,7 @@ impl Linter {
     /// Lints files matching the given patterns.
     ///
     /// Returns a tuple of (successful results, failed files with errors).
-    pub fn lint_patterns(
-        &self,
-        patterns: &[String],
-    ) -> Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>), LinterError> {
+    pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
         let files = self.discover_files(patterns)?;
         self.lint_files(&files)
     }
@@ -201,10 +205,7 @@ impl Linter {
     /// lock contention. This allows full utilization of multi-core processors.
     ///
     /// Returns a tuple of (successful results, failed files with errors).
-    pub fn lint_files(
-        &self,
-        paths: &[PathBuf],
-    ) -> Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>), LinterError> {
+    pub fn lint_files(&self, paths: &[PathBuf]) -> LintFilesResult {
         // Parallel processing using rayon
         // Each thread creates its own PluginHost for thread safety
         // Collect both successes and failures
