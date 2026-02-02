@@ -231,7 +231,7 @@ Specify which nodes your rule receives in `node_types`:
 ### Block Elements
 
 | Type | Use Case |
-|------|----------|
+| :--- | :--- |
 | `Document` | Process entire document |
 | `Paragraph` | Check paragraph structure |
 | `Header` | Validate headings |
@@ -244,7 +244,7 @@ Specify which nodes your rule receives in `node_types`:
 ### Inline Elements
 
 | Type | Use Case |
-|------|----------|
+| :--- | :--- |
 | `Str` | **Most common** - plain text analysis |
 | `Emphasis` | Check emphasized text |
 | `Strong` | Check bold text |
@@ -423,7 +423,7 @@ texide lint --config test-config.json test.md
 ### Severity Levels
 
 | Level | Use Case |
-|-------|----------|
+| :--- | :--- |
 | `error` | Must fix before commit |
 | `warning` | Should fix, but not blocking |
 | `info` | Suggestion or style preference |
@@ -480,6 +480,7 @@ gh release create v1.0.0 \
 ```
 
 Users can install with:
+
 ```bash
 texide plugin install yourname/texide-rule-my-rule
 ```
@@ -538,12 +539,14 @@ Generate types from [JSON Schema](../schemas/rule-types.json).
 
 ### Build Errors
 
-**"wasm32-wasip1 target not found"**
+### "wasm32-wasip1 target not found"
+
 ```bash
 rustup target add wasm32-wasip1
 ```
 
-**"crate-type cdylib required"**
+### "crate-type cdylib required"
+
 ```toml
 [lib]
 crate-type = ["cdylib"]
@@ -551,11 +554,13 @@ crate-type = ["cdylib"]
 
 ### Runtime Errors
 
-**"get_manifest function not found"**
+### "get_manifest function not found"
+
 - Ensure `#[plugin_fn]` attribute is present
 - Check function name spelling
 
-**"invalid JSON response"**
+### "invalid JSON response"
+
 - Verify serde serialization
 - Check for valid UTF-8 in messages
 

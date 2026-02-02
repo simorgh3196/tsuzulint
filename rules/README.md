@@ -80,7 +80,7 @@ cargo test --workspace
 
 Built WASM files are located at:
 
-```
+```text
 rules/target/wasm32-wasip1/release/
 ├── texide_rule_no_todo.wasm
 ├── texide_rule_sentence_length.wasm
@@ -90,7 +90,7 @@ rules/target/wasm32-wasip1/release/
 ## Available Rules
 
 | Rule | Description | Fixable |
-|------|-------------|---------|
+| :--- | :--- | :--- |
 | [no-todo](no-todo/) | Disallow TODO/FIXME comments | No |
 | [sentence-length](sentence-length/) | Check sentence length | No |
 | [no-doubled-joshi](no-doubled-joshi/) | Detect repeated Japanese particles | Yes |
@@ -188,7 +188,7 @@ pub fn lint(input: String) -> FnResult<String> {
 
 ## Directory Structure
 
-```
+```text
 rules/
 ├── Cargo.toml              # Workspace manifest
 ├── README.md               # This file

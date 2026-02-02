@@ -7,20 +7,21 @@ This directory contains JSON Schema definitions for Texide configuration and rul
 ### Configuration Schemas (Versioned)
 
 | Schema | Description | Usage |
-|--------|-------------|-------|
+| :--- | :--- | :--- |
 | [v1/rule.json](v1/rule.json) | Rule manifest schema | `texide-rule.json` in rule repositories |
 | [v1/config.json](v1/config.json) | Project configuration schema | `.texide.jsonc` in user projects |
 
 ### Type Definitions
 
 | Schema | Description | Usage |
-|--------|-------------|-------|
+| :--- | :--- | :--- |
 | [rule-types.json](rule-types.json) | WASM rule type definitions | Code generation for rule development |
 
 ## Schema Versioning
 
 Schemas follow semantic versioning with the URL format:
-```
+
+```text
 https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v{major}/schema.json
 ```
 
@@ -114,7 +115,7 @@ Use any JSON Schema code generator for your target language:
 ### v1/rule.json - Rule Manifest
 
 | Section | Required | Description |
-|---------|----------|-------------|
+| :--- | :--- | :--- |
 | `rule` | Yes | Rule metadata (name, version, description, fixable, node_types, etc.) |
 | `artifacts` | Yes | Download URLs (wasm) |
 | `security` | Yes | SHA256 hash for verification |
@@ -125,7 +126,7 @@ Use any JSON Schema code generator for your target language:
 ### v1/config.json - Project Configuration
 
 | Field | Required | Description |
-|-------|----------|-------------|
+| :--- | :--- | :--- |
 | `rules` | No | List of rules to load |
 | `options` | No | Rule options |
 | `security` | No | Security settings |
@@ -137,7 +138,7 @@ Use any JSON Schema code generator for your target language:
 ### rule-types.json - WASM Rule Types
 
 | Type | Description |
-|------|-------------|
+| :--- | :--- |
 | `RuleManifest` | Returned by `get_manifest()` function |
 | `LintRequest` | Input to `lint()` function |
 | `LintResponse` | Output from `lint()` function |
