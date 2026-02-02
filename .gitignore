@@ -36,3 +36,4 @@ TODO.md
 # Cache directories
 .texide-cache/
 .worktrees/
+.markdownlint.yaml
