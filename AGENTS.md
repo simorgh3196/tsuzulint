@@ -58,14 +58,15 @@ make wasm
 ### Crate Structure
 
 ```text
-texide_cli          # CLI application (binary)
-    └── texide_core     # Linter orchestration, config, parallel processing
-            ├── texide_parser   # Parser trait + Markdown/PlainText parsers
+texide_cli                              # CLI application (binary)
+    └── texide_core                     # Linter orchestration, config, parallel processing
+            ├── texide_parser           # Parser trait + Markdown/PlainText parsers
             │       └── texide_ast      # TxtAST types, Arena allocator (bumpalo)
-            ├── texide_plugin   # WASM plugin system (Extism/wasmi)
-            └── texide_cache    # File-level caching with BLAKE3
-texide_lsp          # LSP server (basic implementation using tower-lsp)
-texide_wasm         # Browser WASM bindings
+            ├── texide_plugin           # WASM plugin system (Extism/wasmi)
+            └── texide_cache            # File-level caching with BLAKE3
+texide_lsp                              # LSP server (basic implementation using tower-lsp)
+texide_registry                         # Rule registry and package management
+texide_wasm                             # Browser WASM bindings
 ```
 
 ### Data Flow
