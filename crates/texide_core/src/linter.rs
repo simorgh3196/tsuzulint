@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use rayon::prelude::*;
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
@@ -18,6 +19,13 @@ use texide_plugin::{IsolationLevel, PluginHost};
 use crate::resolver::PluginResolver;
 use crate::{LintResult, LinterConfig, LinterError};
 
+/// Result type for lint_files and lint_patterns methods.
+///
+/// Contains a tuple of:
+/// - Successful lint results
+/// - Failed files with their errors (path and error)
+pub type LintFilesResult = Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>), LinterError>;
+
 /// The core linter engine.
 ///
 /// Orchestrates file discovery, parsing, rule execution, and caching.
@@ -28,6 +36,8 @@ pub struct Linter {
     plugin_host: Mutex<PluginHost>,
     /// Cache manager.
     cache: Mutex<CacheManager>,
+    /// Rules added via load_rule at runtime.
+    dynamic_rules: Mutex<Vec<PathBuf>>,
     /// Include glob patterns.
     include_globs: Option<GlobSet>,
     /// Exclude glob patterns.
@@ -56,62 +66,14 @@ impl Linter {
         // Initialize plugin host
         let mut host = PluginHost::new();
 
-        // Helper to load a rule/plugin by name/path
-        let load_plugin = |name: &str, host: &mut PluginHost| -> Result<(), LinterError> {
-            match PluginResolver::resolve(name, config.base_dir.as_deref()) {
-                Some(path) => {
-                    info!("Loading plugin '{}' from {}", name, path.display());
-                    if let Err(e) = host.load_rule(&path) {
-                        warn!("Failed to load plugin '{}': {}", name, e);
-                    }
-                }
-                None => {
-                    warn!(
-                        "Plugin '{}' not found. Checked .texide/plugins/ and global directories.",
-                        name
-                    );
-                }
-            }
-            Ok(())
-        };
-
-        // Load legacy plugins list
-        for plugin_name in &config.plugins {
-            let _ = load_plugin(plugin_name, &mut host);
-        }
-
-        // Load rules from new rules array
-        for rule_def in &config.rules {
-            use crate::config::RuleDefinition;
-            match rule_def {
-                RuleDefinition::Simple(name) => {
-                    let _ = load_plugin(name, &mut host);
-                }
-                RuleDefinition::Detail(detail) => {
-                    // Prioritize path, then github/url (not fully implemented yet)
-                    if let Some(path) = &detail.path {
-                        // Resolve path relative to base_dir if possible
-                        let path_buf = if let Some(base) = &config.base_dir {
-                            base.join(path)
-                        } else {
-                            PathBuf::from(path)
-                        };
-                        let path_str = path_buf.to_string_lossy();
-                        let _ = load_plugin(&path_str, &mut host);
-                    } else if let Some(github) = &detail.github {
-                        // Placeholder for github fetching
-                        warn!("GitHub rule fetching not yet implemented: {}", github);
-                    } else if let Some(url) = &detail.url {
-                        warn!("URL rule fetching not yet implemented: {}", url);
-                    }
-                }
-            }
-        }
+        // Load configured plugins and rules
+        Self::load_configured_rules(&config, &mut host);
 
         Ok(Self {
             config,
             plugin_host: Mutex::new(host),
             cache: Mutex::new(cache),
+            dynamic_rules: Mutex::new(Vec::new()),
             include_globs,
             exclude_globs,
         })
@@ -138,14 +100,35 @@ impl Linter {
     }
 
     /// Loads a WASM rule.
+    ///
+    /// This rule will also be loaded for parallel processing in `lint_files()`.
     pub fn load_rule(&self, path: impl AsRef<Path>) -> Result<(), LinterError> {
-        let mut host = self.plugin_host.lock().unwrap();
-        host.load_rule(path)?;
+        let path_buf = path.as_ref().to_path_buf();
+
+        // Load rule into the shared PluginHost (scope to release lock before acquiring dynamic_rules lock)
+        {
+            let mut host = self
+                .plugin_host
+                .lock()
+                .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
+            host.load_rule(&path_buf)?;
+        }
+
+        // Record dynamic rule for parallel processing (after releasing plugin_host lock)
+        {
+            let mut list = self
+                .dynamic_rules
+                .lock()
+                .map_err(|_| LinterError::Internal("Dynamic rules mutex poisoned".to_string()))?;
+            list.push(path_buf);
+        }
         Ok(())
     }
 
     /// Lints files matching the given patterns.
-    pub fn lint_patterns(&self, patterns: &[String]) -> Result<Vec<LintResult>, LinterError> {
+    ///
+    /// Returns a tuple of (successful results, failed files with errors).
+    pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
         let files = self.discover_files(patterns)?;
         self.lint_files(&files)
     }
@@ -189,29 +172,144 @@ impl Linter {
         Ok(files)
     }
 
-    /// Lints a list of files.
+    /// Lints a list of files in parallel using rayon.
     ///
-    /// Note: Currently processes files sequentially. For parallel processing,
-    /// parsers need to implement Send + Sync, which requires changes to
-    /// the markdown-rs crate's ParseOptions.
-    pub fn lint_files(&self, paths: &[PathBuf]) -> Result<Vec<LintResult>, LinterError> {
-        let mut results = Vec::with_capacity(paths.len());
+    /// Creates a new `PluginHost` instance for each file to ensure thread safety.
+    /// While this incurs some overhead from plugin reloading, it avoids lock
+    /// contention and allows full utilization of multi-core processors.
+    ///
+    /// Returns a tuple of (successful results, failed files with errors).
+    pub fn lint_files(&self, paths: &[PathBuf]) -> LintFilesResult {
+        // Parallel processing using rayon
+        // Each file gets its own PluginHost to avoid shared mutable state
+        // Collect both successes and failures
+        let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
+            .par_iter()
+            .map(|path| {
+                // Create PluginHost for this file
+                let mut file_host = self.create_plugin_host().map_err(|e| (path.clone(), e))?;
 
-        for path in paths {
-            match self.lint_file(path) {
-                Ok(result) => results.push(result),
-                Err(e) => {
-                    warn!("Failed to lint {}: {}", path.display(), e);
+                self.lint_file_with_host(path, &mut file_host)
+                    .map_err(|e| (path.clone(), e))
+            })
+            .collect();
+
+        // Separate successes and failures
+        let mut successes = Vec::new();
+        let mut failures = Vec::new();
+        for result in results {
+            match result {
+                Ok(lint_result) => successes.push(lint_result),
+                Err((path, error)) => {
+                    warn!("Failed to lint {}: {}", path.display(), error);
+                    failures.push((path, error));
                 }
             }
         }
 
-        // Save cache
-        if let Err(e) = self.cache.lock().unwrap().save() {
-            warn!("Failed to save cache: {}", e);
+        // Save cache (handle mutex poison error gracefully)
+        match self.cache.lock() {
+            Ok(cache) => {
+                if let Err(e) = cache.save() {
+                    warn!("Failed to save cache: {}", e);
+                }
+            }
+            Err(poison) => {
+                warn!("Cache mutex poisoned, attempting recovery: {}", poison);
+                // Still try to save via the poisoned guard
+                if let Err(e) = poison.into_inner().save() {
+                    warn!("Failed to save cache after recovery: {}", e);
+                }
+            }
         }
 
-        Ok(results)
+        Ok((successes, failures))
+    }
+
+    /// Creates a new PluginHost with the same configuration as the linter.
+    ///
+    /// Used for parallel processing where each thread needs its own PluginHost.
+    fn create_plugin_host(&self) -> Result<PluginHost, LinterError> {
+        let mut host = PluginHost::new();
+
+        // Load configured plugins and rules
+        Self::load_configured_rules(&self.config, &mut host);
+
+        // Load dynamically added rules (via load_rule API)
+        {
+            let dynamic = self
+                .dynamic_rules
+                .lock()
+                .map_err(|_| LinterError::Internal("Dynamic rules mutex poisoned".to_string()))?;
+            for path in dynamic.iter() {
+                debug!("Loading dynamic plugin from {}", path.display());
+                if let Err(e) = host.load_rule(path) {
+                    warn!("Failed to load dynamic plugin '{}': {}", path.display(), e);
+                }
+            }
+        }
+
+        Ok(host)
+    }
+
+    /// Loads plugins and rules into the given PluginHost based on config.
+    ///
+    /// This is a shared helper used by both `new()` and `create_plugin_host()`.
+    fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
+        // Helper to load a rule/plugin by name/path
+        let load_plugin = |name: &str, host: &mut PluginHost| match PluginResolver::resolve(
+            name,
+            config.base_dir.as_deref(),
+        ) {
+            Some(path) => {
+                debug!("Loading plugin '{}' from {}", name, path.display());
+                if let Err(e) = host.load_rule(&path) {
+                    warn!("Failed to load plugin '{}': {}", name, e);
+                }
+            }
+            None => {
+                debug!(
+                    "Plugin '{}' not found. Checked .texide/plugins/ and global directories.",
+                    name
+                );
+            }
+        };
+
+        // Load legacy plugins list
+        for plugin_name in &config.plugins {
+            load_plugin(plugin_name, host);
+        }
+
+        // Load rules from new rules array
+        for rule_def in &config.rules {
+            use crate::config::RuleDefinition;
+            match rule_def {
+                RuleDefinition::Simple(name) => {
+                    load_plugin(name, host);
+                }
+                RuleDefinition::Detail(detail) => {
+                    // Prioritize path, then github/url (not fully implemented yet)
+                    if let Some(path) = &detail.path {
+                        // detail.path is an explicit file path, so load it directly
+                        // without going through PluginResolver (which only accepts simple names)
+                        let path_buf = if let Some(base) = &config.base_dir {
+                            base.join(path)
+                        } else {
+                            PathBuf::from(path)
+                        };
+                        debug!("Loading rule from explicit path: {}", path_buf.display());
+                        if let Err(e) = host.load_rule(&path_buf) {
+                            warn!("Failed to load rule from '{}': {}", path_buf.display(), e);
+                        }
+                    } else if let Some(github) = &detail.github {
+                        // Placeholder for github fetching
+                        warn!("GitHub rule fetching not yet implemented: {}", github);
+                    } else if let Some(url) = &detail.url {
+                        warn!("URL rule fetching not yet implemented: {}", url);
+                    }
+                }
+            }
+        }
     }
 
     /// Selects an appropriate parser for the file extension.
@@ -229,8 +327,35 @@ impl Linter {
         }
     }
 
-    /// Lints a single file.
+    /// Lints a single file using the shared PluginHost.
+    ///
+    /// For sequential processing or when using the linter's shared PluginHost.
+    #[allow(dead_code)]
     fn lint_file(&self, path: &Path) -> Result<LintResult, LinterError> {
+        let mut host = self
+            .plugin_host
+            .lock()
+            .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
+        self.lint_file_internal(path, &mut host)
+    }
+
+    /// Lints a single file with a provided PluginHost.
+    ///
+    /// Used for parallel processing where each thread has its own PluginHost.
+    fn lint_file_with_host(
+        &self,
+        path: &Path,
+        host: &mut PluginHost,
+    ) -> Result<LintResult, LinterError> {
+        self.lint_file_internal(path, host)
+    }
+
+    /// Internal implementation for linting a single file.
+    fn lint_file_internal(
+        &self,
+        path: &Path,
+        host: &mut PluginHost,
+    ) -> Result<LintResult, LinterError> {
         debug!("Linting {}", path.display());
 
         // Read file content
@@ -239,11 +364,14 @@ impl Linter {
 
         let content_hash = CacheManager::hash_content(&content);
         let config_hash = self.config.hash();
-        let rule_versions = self.get_rule_versions();
+        let rule_versions = Self::get_rule_versions_from_host(host);
 
         // 1. Check full cache first
         {
-            let cache = self.cache.lock().unwrap();
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
             if cache.is_valid(path, &content_hash, &config_hash, &rule_versions)
                 && let Some(entry) = cache.get(path)
             {
@@ -271,7 +399,10 @@ impl Linter {
         // 2. Incremental Caching Strategy
         // If file changed, try to reuse diagnostics for unchanged blocks
         let (reused_diagnostics, matched_mask) = {
-            let cache = self.cache.lock().unwrap();
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
             cache.reconcile_blocks(path, &current_blocks, &config_hash, &rule_versions)
         };
 
@@ -283,12 +414,10 @@ impl Linter {
 
         // Run rules
         {
-            let mut host = self.plugin_host.lock().unwrap();
-
             // A. Run Global Rules
             // Global rules must always run on the full document if anything changed
             // because they depend on the full context.
-            let global_rule_names = self.get_rule_names_by_isolation(&host, IsolationLevel::Global);
+            let global_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Global);
             if !global_rule_names.is_empty() {
                 let ast_json = self.ast_to_json(&ast, &content);
                 for rule in global_rule_names {
@@ -304,7 +433,7 @@ impl Linter {
             }
 
             // B. Run Block Rules on CHANGED/NEW blocks
-            let block_rule_names = self.get_rule_names_by_isolation(&host, IsolationLevel::Block);
+            let block_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Block);
             if !block_rule_names.is_empty() {
                 // Collect AST nodes for changed blocks
                 // We map `matched_mask` back to actual AST nodes by traversing.
@@ -399,7 +528,10 @@ impl Linter {
             .collect();
 
         {
-            let mut cache = self.cache.lock().unwrap();
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
             let entry = CacheEntry::new(
                 content_hash,
                 config_hash,
@@ -516,9 +648,8 @@ impl Linter {
         Ok(diagnostics)
     }
 
-    /// Gets the versions of all loaded rules.
-    fn get_rule_versions(&self) -> HashMap<String, String> {
-        let host = self.plugin_host.lock().unwrap();
+    /// Gets the versions of all loaded rules from a PluginHost.
+    fn get_rule_versions_from_host(host: &PluginHost) -> HashMap<String, String> {
         let mut versions = HashMap::new();
 
         for name in host.loaded_rules() {
@@ -671,5 +802,59 @@ mod tests {
         assert_eq!(json["type"], "Document");
         assert!(json["range"].is_array());
         assert!(json["children"].is_array());
+    }
+
+    #[test]
+    fn test_lint_files_parallel_empty() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        let paths: Vec<PathBuf> = vec![];
+        let result = linter.lint_files(&paths);
+        assert!(result.is_ok());
+
+        let (successes, failures) = result.unwrap();
+        assert!(successes.is_empty());
+        assert!(failures.is_empty());
+    }
+
+    #[test]
+    fn test_lint_files_parallel_nonexistent_files() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        let paths = vec![
+            PathBuf::from("/nonexistent/file1.md"),
+            PathBuf::from("/nonexistent/file2.txt"),
+        ];
+        let result = linter.lint_files(&paths);
+        assert!(result.is_ok());
+
+        let (successes, failures) = result.unwrap();
+        // All files should fail since they don't exist
+        assert!(successes.is_empty());
+        assert_eq!(failures.len(), 2);
+    }
+
+    #[test]
+    fn test_create_plugin_host() {
+        let config = LinterConfig::new();
+        let linter = Linter::new(config).unwrap();
+
+        // create_plugin_host should succeed even with no plugins configured
+        let result = linter.create_plugin_host();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_load_configured_rules_static() {
+        // Test that load_configured_rules can be called as a static method
+        let config = LinterConfig::new();
+        let mut host = PluginHost::new();
+
+        // This should not panic even with empty config
+        Linter::load_configured_rules(&config, &mut host);
+        // With no plugins configured, no rules should be loaded
+        assert!(host.loaded_rules().is_empty());
     }
 }
