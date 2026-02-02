@@ -1,0 +1,10 @@
+{
+    "$schema": "https://json.schemastore.org/markdownlint.json",
+    "MD004": false,
+    "MD012": false,
+    "MD013": false,
+    "MD025": false,
+    "MD026": false,
+    "MD032": false,
+    "MD033": false
+}
