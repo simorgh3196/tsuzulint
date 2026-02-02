@@ -256,9 +256,9 @@ impl Region {
     fn from_location(loc: &texide_ast::Location) -> Self {
         Self {
             start_line: Some(loc.start.line),
-            start_column: Some(loc.start.column),
+            start_column: Some(loc.start.column + 1),
             end_line: Some(loc.end.line),
-            end_column: Some(loc.end.column),
+            end_column: Some(loc.end.column + 1),
         }
     }
 }
@@ -366,9 +366,9 @@ mod tests {
         let location = &parsed["runs"][0]["results"][0]["locations"][0];
         let region = &location["physicalLocation"]["region"];
         assert_eq!(region["startLine"], 5);
-        assert_eq!(region["startColumn"], 10);
+        assert_eq!(region["startColumn"], 11);
         assert_eq!(region["endLine"], 5);
-        assert_eq!(region["endColumn"], 20);
+        assert_eq!(region["endColumn"], 21);
     }
 
     #[test]
