@@ -924,10 +924,8 @@ mod tests {
         // Test with case-sensitive instead
         let matches = find_matches(text, &patterns, true);
 
-        // Empty pattern should match at position 0
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].start, 0);
-        assert_eq!(matches[0].matched_text, "");
+        // Empty pattern should be skipped to avoid infinite loops
+        assert!(matches.is_empty());
     }
 
     /// Test no match with Unicode text
