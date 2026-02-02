@@ -308,4 +308,31 @@ mod tests {
         assert_eq!(enabled.options(), serde_json::Value::Null);
         assert_eq!(severity.options(), serde_json::Value::Null);
     }
+
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::unknown_property(
+        r#"{ "ruless": [] }"#,
+        "Config validation failed" // Additional properties not allowed
+    )]
+    #[case::type_mismatch(
+        r#"{ "cache": "not-a-bool" }"#,
+        "Config validation failed" // Type mismatch
+    )]
+    #[case::invalid_enum_value(
+        r#"{ "options": { "rule-id": "invalid-severity" } }"#,
+        "Config validation failed" // Enum validation
+    )]
+    fn test_config_validation_errors(#[case] json: &str, #[case] expected_error_part: &str) {
+        let result = LinterConfig::from_json(json);
+        assert!(result.is_err(), "Expected error for JSON: {}", json);
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains(expected_error_part),
+            "Error message '{}' should contain '{}'",
+            err,
+            expected_error_part
+        );
+    }
 }
