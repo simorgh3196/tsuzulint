@@ -15,7 +15,7 @@ Texide is a high-performance natural language linter written in Rust, inspired b
 1. **Do NOT commit directly to `main` branch.**
 2. **Use Git Worktrees**: Use the `using-git-worktrees` skill to create isolated environments for each task.
 3. **Confirm before Push**: After committing changes, ALWAYS ask the user for permission before pushing to the remote repository.
-4. **Verify before Commit**: Always run `make lint` and `make fmt-check` before committing to ensure there are no errors.
+4. **Verify before Commit**: Always run `make lint`, `make fmt-check` and `make test` before committing to ensure there are no errors.
 5. **Always create a Pull Request.**
     - Branch naming: `feat/name`, `fix/name`, `docs/name`
     - PR description must be clear.
