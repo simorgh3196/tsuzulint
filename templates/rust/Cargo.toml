@@ -1,18 +1,18 @@
 [package]
-name = "texide-rule-{{RULE_NAME}}"
+name = "tsuzulint-rule-{{RULE_NAME}}"
 version = "0.1.0"
 edition = "2024"
-description = "Texide rule: {{RULE_DESCRIPTION}}"
+description = "TsuzuLint rule: {{RULE_DESCRIPTION}}"
 license = "MIT"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-# Texide common types (provides LintRequest, LintResponse, Diagnostic, etc.)
-texide-rule-pdk = { path = "../rules-pdk" }
+# TsuzuLint common types (provides LintRequest, LintResponse, Diagnostic, etc.)
+tsuzulint-rule-pdk = { path = "../rules-pdk" }
 # Or use git dependency for standalone rules:
-# texide-rule-pdk = { git = "https://github.com/simorgh3196/texide", branch = "main" }
+# tsuzulint-rule-pdk = { git = "https://github.com/simorgh3196/tsuzulint", branch = "main" }
 
 # Extism PDK for WASM plugin development
 extism-pdk = "1.3"

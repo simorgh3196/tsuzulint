@@ -1,6 +1,6 @@
-# Texide Rules
+# TsuzuLint Rules
 
-WASM-based lint rules for Texide.
+WASM-based lint rules for TsuzuLint.
 
 ## Quick Start: Create a New Rule
 
@@ -35,7 +35,7 @@ mkdir my-rule && cd my-rule
 
 cat > Cargo.toml << 'EOF'
 [package]
-name = "texide-rule-my-rule"
+name = "tsuzulint-rule-my-rule"
 version = "0.1.0"
 edition = "2024"
 
@@ -43,7 +43,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-texide-rule-pdk = { path = "../rules-pdk" }
+tsuzulint-rule-pdk = { path = "../rules-pdk" }
 extism-pdk = "1.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -70,7 +70,7 @@ cd rules
 cargo build --target wasm32-wasip1 --release
 
 # Build specific rule
-cargo build --target wasm32-wasip1 --release -p texide-rule-no-todo
+cargo build --target wasm32-wasip1 --release -p tsuzulint-rule-no-todo
 
 # Run tests
 cargo test --workspace
@@ -82,9 +82,9 @@ Built WASM files are located at:
 
 ```text
 rules/target/wasm32-wasip1/release/
-├── texide_rule_no_todo.wasm
-├── texide_rule_sentence_length.wasm
-└── texide_rule_no_doubled_joshi.wasm
+├── tsuzulint_rule_no_todo.wasm
+├── tsuzulint_rule_sentence_length.wasm
+└── tsuzulint_rule_no_doubled_joshi.wasm
 ```
 
 ## Available Rules
@@ -168,7 +168,7 @@ Returns JSON metadata:
 Receives lint request, returns diagnostics:
 
 ```rust
-use texide_rule_pdk::{
+use tsuzulint_rule_pdk::{
     extract_node_text, is_node_type,
     Diagnostic, LintRequest, LintResponse, RuleManifest, Span,
 };

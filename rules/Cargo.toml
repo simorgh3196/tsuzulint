@@ -6,7 +6,7 @@ members = ["rules-pdk", "no-todo", "sentence-length", "no-doubled-joshi"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/simorgh3196/texide"
+repository = "https://github.com/simorgh3196/tsuzulint"
 rust-version = "1.93"
 
 [workspace.dependencies]
@@ -21,7 +21,7 @@ serde_json = "1.0"
 thiserror = "2.0"
 
 # Common types (internal crate)
-texide-rule-pdk = { path = "rules-pdk" }
+tsuzulint-rule-pdk = { path = "rules-pdk" }
 
 # Testing
 pretty_assertions = "1.4"

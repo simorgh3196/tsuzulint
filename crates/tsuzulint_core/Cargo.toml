@@ -1,0 +1,35 @@
+[package]
+name = "tsuzulint_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Core linter engine for TsuzuLint"
+
+[features]
+default = ["native"]
+native = ["tsuzulint_plugin/native"]
+browser = ["tsuzulint_plugin/browser"]
+
+[dependencies]
+tsuzulint_ast = { workspace = true }
+tsuzulint_parser = { workspace = true }
+tsuzulint_plugin = { workspace = true, default-features = false }
+tsuzulint_cache = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+blake3 = { workspace = true }
+rayon = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+walkdir = { workspace = true }
+globset = { workspace = true }
+jsonschema.workspace = true
+dirs = "6.0"
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+insta = { workspace = true }
+tempfile = { workspace = true }

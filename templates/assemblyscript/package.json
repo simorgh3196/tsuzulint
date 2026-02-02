@@ -1,7 +1,7 @@
 {
-  "name": "texide-rule-{{RULE_NAME}}",
+  "name": "tsuzulint-rule-{{RULE_NAME}}",
   "version": "0.1.0",
-  "description": "Texide rule: {{RULE_DESCRIPTION}}",
+  "description": "TsuzuLint rule: {{RULE_DESCRIPTION}}",
   "type": "module",
   "scripts": {
     "build": "asc assembly/index.ts --target release",

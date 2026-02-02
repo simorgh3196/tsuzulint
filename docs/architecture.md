@@ -1,6 +1,6 @@
-# Texide Architecture
+# TsuzuLint Architecture
 
-This document describes the internal architecture of Texide.
+This document describes the internal architecture of TsuzuLint.
 
 ## Overview
 
@@ -12,24 +12,24 @@ graph TB
         Editor["Editor Plugins"]
     end
 
-    subgraph Core["texide_core"]
+    subgraph Core["tsuzulint_core"]
         Linter["Linter Engine"]
         Config["Config Loader"]
         Cache["Cache Manager"]
         Parallel["Parallel Scheduler"]
     end
 
-    subgraph Parser["texide_parser"]
+    subgraph Parser["tsuzulint_parser"]
         Markdown["Markdown (markdown-rs)"]
         PlainText["Plain Text"]
     end
 
-    subgraph AST["texide_ast"]
+    subgraph AST["tsuzulint_ast"]
         TxtNode["TxtNode<'a>"]
         Arena["AstArena (bumpalo)"]
     end
 
-    subgraph Plugin["texide_plugin"]
+    subgraph Plugin["tsuzulint_plugin"]
         Host["PluginHost (Extism)"]
         Rule1["Rule 1 (WASM)"]
         Rule2["Rule 2 (WASM)"]
@@ -47,7 +47,7 @@ graph TB
 
 ## Crates
 
-### texide_ast
+### tsuzulint_ast
 
 **Purpose**: TxtAST type definitions and memory management.
 
@@ -63,7 +63,7 @@ graph TB
 - No `Box`, `Rc`, or `Arc` for child nodes
 - Maximizes cache locality
 
-### texide_parser
+### tsuzulint_parser
 
 **Purpose**: Parse source text into TxtAST.
 
@@ -77,7 +77,7 @@ graph TB
 - Parser trait enables custom parsers via WASM plugins
 - Each parser handles specific file extensions
 
-### texide_plugin
+### tsuzulint_plugin
 
 **Purpose**: WASM plugin system for rules.
 
@@ -92,7 +92,7 @@ graph TB
 - JSON serialization for host↔plugin communication
 - Potential future migration to direct wasmtime use
 
-### texide_cache
+### tsuzulint_cache
 
 **Purpose**: Cache lint results for unchanged files.
 
@@ -105,7 +105,7 @@ graph TB
 - JSON storage (rkyv planned for zero-copy)
 - Invalidates on: content change, config change, rule version change
 
-### texide_core
+### tsuzulint_core
 
 **Purpose**: Core linter orchestration.
 
@@ -119,7 +119,7 @@ graph TB
 - Glob patterns for file discovery
 - Integrates parsers, plugins, and cache
 
-### texide_cli
+### tsuzulint_cli
 
 **Purpose**: Command-line interface.
 
@@ -129,7 +129,7 @@ graph TB
 - `create-rule`: Generate rule project
 - `add-rule`: Register a WASM rule
 
-### texide_lsp
+### tsuzulint_lsp
 
 **Purpose**: Language Server Protocol implementation.
 

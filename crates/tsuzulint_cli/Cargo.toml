@@ -1,0 +1,28 @@
+[package]
+name = "tsuzulint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "High-performance natural language linter written in Rust"
+
+[[bin]]
+name = "tzlint"
+path = "src/main.rs"
+
+[dependencies]
+tsuzulint_core = { workspace = true, features = ["native"] }
+clap = { workspace = true }
+miette = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+tsuzulint_lsp = { version = "0.1.0", path = "../tsuzulint_lsp" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+assert_fs = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }

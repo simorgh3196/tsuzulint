@@ -27,7 +27,7 @@
 
 use extism_pdk::*;
 use serde::Deserialize;
-use texide_rule_pdk::{
+use tsuzulint_rule_pdk::{
     Diagnostic, Fix, LintRequest, LintResponse, RuleManifest, Span, extract_node_text, is_node_type,
 };
 

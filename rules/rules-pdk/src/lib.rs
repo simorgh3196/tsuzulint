@@ -1,4 +1,4 @@
-//! Common types for Texide WASM rules.
+//! Common types for TsuzuLint WASM rules.
 //!
 //! This crate provides shared type definitions used across all rule implementations.
 

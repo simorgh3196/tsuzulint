@@ -1,7 +1,7 @@
-# Arena Allocation in Texide
+# Arena Allocation in TsuzuLint
 
 This document explains Arena Allocation, a memory management technique used in
-Texide's AST (Abstract Syntax Tree) implementation. It is inspired by the
+TsuzuLint's AST (Abstract Syntax Tree) implementation. It is inspired by the
 [Oxc](https://oxc.rs/) project and designed to be understandable for software
 engineers who may not be familiar with Rust or systems programming.
 
@@ -10,7 +10,7 @@ engineers who may not be familiar with Rust or systems programming.
 - [What is Arena Allocation?](#what-is-arena-allocation)
 - [Why Use Arena Allocation?](#why-use-arena-allocation)
 - [Comparison with Traditional Memory Allocation](#comparison-with-traditional-memory-allocation)
-- [Arena Allocation in Texide](#arena-allocation-in-texide)
+- [Arena Allocation in TsuzuLint](#arena-allocation-in-tsuzulint)
 - [How It Works](#how-it-works)
 - [Code Examples](#code-examples)
 - [Benefits in Practice](#benefits-in-practice)
@@ -47,7 +47,7 @@ characteristics:
 3. **Performance critical**: When allocation overhead needs to be minimized
 4. **Tree structures**: When building ASTs or other hierarchical data structures
 
-In Texide's case, we parse a file into an AST where:
+In TsuzuLint's case, we parse a file into an AST where:
 
 - All nodes are created during parsing
 - All nodes live until linting is complete
@@ -128,9 +128,9 @@ Arena Allocation:
 
 ---
 
-## Arena Allocation in Texide Implementation
+## Arena Allocation in TsuzuLint Implementation
 
-Texide uses the [`bumpalo`](https://docs.rs/bumpalo/) crate for arena allocation.
+TsuzuLint uses the [`bumpalo`](https://docs.rs/bumpalo/) crate for arena allocation.
 This is the same approach used by Oxc and other high-performance Rust compiler
 projects.
 
@@ -155,9 +155,9 @@ graph TB
 
 ### Key Components
 
-1. **[`AstArena`](crates/texide_ast/src/arena.rs)**: A wrapper around
+1. **[`AstArena`](crates/tsuzulint_ast/src/arena.rs)**: A wrapper around
    `bumpalo::Bump`
-2. **[`TxtNode<'a>`](crates/texide_ast/src/node.rs)**: AST nodes tied to the
+2. **[`TxtNode<'a>`](crates/tsuzulint_ast/src/node.rs)**: AST nodes tied to the
    arena's lifetime
 3. **Lifetime parameter `'a`**: Ensures nodes cannot outlive their arena
 
@@ -168,7 +168,7 @@ graph TB
 ### 1. Creating an Arena
 
 ```rust
-use texide_ast::AstArena;
+use tsuzulint_ast::AstArena;
 
 // Create a new arena with default capacity
 let arena = AstArena::new();
@@ -193,7 +193,7 @@ let numbers = arena.alloc_slice_copy(&[1, 2, 3, 4, 5]);
 ### 3. Building an AST
 
 ```rust
-use texide_ast::{AstArena, TxtNode, NodeType, Span};
+use tsuzulint_ast::{AstArena, TxtNode, NodeType, Span};
 
 let arena = AstArena::new();
 
@@ -242,8 +242,8 @@ fn parse_document<'a>(arena: &'a AstArena, source: &str) -> TxtNode<'a> {
 ### Example 1: Parser Usage
 
 ```rust
-use texide_parser::{MarkdownParser, Parser};
-use texide_ast::AstArena;
+use tsuzulint_parser::{MarkdownParser, Parser};
+use tsuzulint_ast::AstArena;
 
 // Create arena and parser
 let arena = AstArena::new();
@@ -261,8 +261,8 @@ let ast = parser.parse(&arena, source).unwrap();
 ### Example 2: Plain Text Parser
 
 ```rust
-use texide_parser::{PlainTextParser, Parser};
-use texide_ast::AstArena;
+use tsuzulint_parser::{PlainTextParser, Parser};
+use tsuzulint_ast::AstArena;
 
 let arena = AstArena::new();
 let parser = PlainTextParser::new();
@@ -283,7 +283,7 @@ let ast = parser.parse(&arena, source).unwrap();
 ### Example 3: Visitor Pattern with Arena
 
 ```rust
-use texide_ast::{Visitor, TxtNode, VisitResult};
+use tsuzulint_ast::{Visitor, TxtNode, VisitResult};
 
 struct TextCollector {
     texts: Vec<String>,
@@ -393,7 +393,7 @@ let resource = arena.alloc(Resource { file });
 // WARNING: Drop is NOT called when arena is dropped!
 ```
 
-**Solution**: Only allocate POD (Plain Old Data) types in arenas. For Texide's
+**Solution**: Only allocate POD (Plain Old Data) types in arenas. For TsuzuLint's
 AST, this is fine because nodes are just data.
 
 ### 3. Fixed Lifetime
@@ -409,7 +409,7 @@ let node_b = create_long_lived_node(&arena);
 // Cannot free node_a early while keeping node_b
 ```
 
-**Solution**: This matches Texide's use case perfectly - all AST nodes live for
+**Solution**: This matches TsuzuLint's use case perfectly - all AST nodes live for
 the duration of linting.
 
 ---
@@ -437,7 +437,7 @@ the duration of linting.
 
 ## Summary
 
-Arena allocation in Texide provides:
+Arena allocation in TsuzuLint provides:
 
 1. **Speed**: O(1) allocation by bumping a pointer
 2. **Efficiency**: Batch deallocation instead of individual frees

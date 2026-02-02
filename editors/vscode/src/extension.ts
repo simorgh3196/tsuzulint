@@ -24,8 +24,8 @@ function getTraceLevel(traceValue: string | undefined): Trace {
 }
 
 export function activate(context: ExtensionContext) {
-  const config = workspace.getConfiguration('texide');
-  const command = config.get<string>('executablePath', 'texide');
+  const config = workspace.getConfiguration('tsuzulint');
+  const command = config.get<string>('executablePath', 'tzlint');
   const traceServer = config.get<string>('trace.server');
 
   const serverOptions: ServerOptions = {
@@ -39,13 +39,13 @@ export function activate(context: ExtensionContext) {
       { scheme: 'file', language: 'plaintext' },
     ],
     synchronize: {
-      fileEvents: workspace.createFileSystemWatcher('**/.texide.{json,jsonc}'),
+      fileEvents: workspace.createFileSystemWatcher('**/.tzlint.{json,jsonc}'),
     },
   };
 
   client = new LanguageClient(
-    'texide',
-    'Texide Language Server',
+    'tsuzulint',
+    'TsuzuLint Language Server',
     serverOptions,
     clientOptions
   );

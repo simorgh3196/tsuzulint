@@ -497,51 +497,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "texide-rule-no-doubled-joshi"
-version = "0.1.0"
-dependencies = [
- "extism-pdk",
- "pretty_assertions",
- "rstest",
- "serde",
- "serde_json",
- "texide-rule-pdk",
-]
-
-[[package]]
-name = "texide-rule-no-todo"
-version = "0.1.0"
-dependencies = [
- "extism-pdk",
- "pretty_assertions",
- "rstest",
- "serde",
- "serde_json",
- "texide-rule-pdk",
-]
-
-[[package]]
-name = "texide-rule-pdk"
-version = "0.1.0"
-dependencies = [
- "pretty_assertions",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "texide-rule-sentence-length"
-version = "0.1.0"
-dependencies = [
- "extism-pdk",
- "pretty_assertions",
- "rstest",
- "serde",
- "serde_json",
- "texide-rule-pdk",
-]
-
-[[package]]
 name = "toml_datetime"
 version = "0.7.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -569,6 +524,51 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3198b4b0a8e11f09dd03e133c0280504d0801269e9afa46362ffde1cbeebf44"
 dependencies = [
  "winnow",
+]
+
+[[package]]
+name = "tsuzulint-rule-no-doubled-joshi"
+version = "0.1.0"
+dependencies = [
+ "extism-pdk",
+ "pretty_assertions",
+ "rstest",
+ "serde",
+ "serde_json",
+ "tsuzulint-rule-pdk",
+]
+
+[[package]]
+name = "tsuzulint-rule-no-todo"
+version = "0.1.0"
+dependencies = [
+ "extism-pdk",
+ "pretty_assertions",
+ "rstest",
+ "serde",
+ "serde_json",
+ "tsuzulint-rule-pdk",
+]
+
+[[package]]
+name = "tsuzulint-rule-pdk"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "tsuzulint-rule-sentence-length"
+version = "0.1.0"
+dependencies = [
+ "extism-pdk",
+ "pretty_assertions",
+ "rstest",
+ "serde",
+ "serde_json",
+ "tsuzulint-rule-pdk",
 ]
 
 [[package]]

@@ -8,7 +8,7 @@ A guide for installing and managing plugins published on GitHub, as well as a di
 
 ## Overview
 
-Texide's plugin system has the following features:
+TsuzuLint's plugin system has the following features:
 
 - **GitHub Integration**: Install directly from GitHub Releases using `owner/repo` format
 - **Version Management**: Reproducibility through semantic versioning and exact version pinning (owner/repo@1.0.0)
@@ -25,7 +25,7 @@ flowchart LR
     end
 
     subgraph GitHub["GitHub Releases"]
-        GH[texide-rule.json<br/>+ rule.wasm]
+        GH[tsuzulint-rule.json<br/>+ rule.wasm]
     end
 
     subgraph User["User"]
@@ -35,7 +35,7 @@ flowchart LR
         U1 --> U2 --> U3
     end
 
-    subgraph Cache["~/.texide/cache/"]
+    subgraph Cache["~/.tsuzulint/cache/"]
         C[Downloaded<br/>plugins]
     end
 
@@ -54,18 +54,18 @@ flowchart LR
 
 ```bash
 # GitHub format (latest version)
-texide plugin install simorgh3196/texide-rule-no-doubled-joshi
+tzlint plugin install simorgh3196/tsuzulint-rule-no-doubled-joshi
 
 # With version specification
-texide plugin install simorgh3196/texide-rule-no-doubled-joshi@1.2.0
+tsuzulint plugin install simorgh3196/tsuzulint-rule-no-doubled-joshi@1.2.0
 
-# Direct URL specification
-texide plugin install https://example.com/rules/texide-rule.json
+# From URL
+tsuzulint plugin install https://example.com/rules/tsuzulint-rule.json
 ```
 
 **What `plugin install` Does:**
 
-1. If `.texide.jsonc` doesn't exist, creates it from template with JSON Schema reference
+1. If `.tzlint.jsonc` doesn't exist, creates it from template with JSON Schema reference
 2. Adds rule declaration to the `rules` array
 3. Retrieves configuration schema from `get_manifest()` returned manifest
 4. Adds all rule options with default values to the `options` section
@@ -73,16 +73,18 @@ texide plugin install https://example.com/rules/texide-rule.json
 Example - first install:
 
 ```bash
-texide plugin install simorgh3196/texide-rule-sentence-length
+tsuzulint plugin install simorgh3196/tsuzulint-rule-sentence-length
 ```
 
-Generated `.texide.jsonc`:
+**What happens:**
+
+1. `.tzlint.jsonc` is created:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/config.json",
   "rules": [
-    "simorgh3196/texide-rule-sentence-length"
+    "simorgh3196/tsuzulint-rule-sentence-length"
   ],
   "options": {
     "sentence-length": {
@@ -95,13 +97,13 @@ Generated `.texide.jsonc`:
 
 #### Specify in Configuration File
 
-`.texide.jsonc`:
+`.tsuzulint.jsonc`:
 
 ```json
 {
   "rules": [
-    "simorgh3196/texide-rule-no-doubled-joshi",
-    "simorgh3196/texide-rule-sentence-length@1.2.0"
+    "simorgh3196/tsuzulint-rule-no-doubled-joshi",
+    "simorgh3196/tsuzulint-rule-sentence-length@1.2.0"
   ],
   "options": {
     "no-doubled-joshi": true,
@@ -128,65 +130,66 @@ Generated `.texide.jsonc`:
 
 ```bash
 # List installed plugins
-texide plugin list
+tsuzulint plugin list
 
 # Example output:
 # NAME                                       VERSION  SOURCE
-# simorgh3196/texide-rule-no-doubled-joshi   1.2.3    github
-# simorgh3196/texide-rule-sentence-length    1.0.0    github
+# simorgh3196/tsuzulint-rule-no-doubled-joshi   1.2.3    github
+# simorgh3196/tsuzulint-rule-sentence-length    1.0.0    github
 
 # Check for updatable plugins
-texide plugin list --outdated
+tsuzulint plugin list --outdated
 
 # Example output:
 # NAME                                    CURRENT  LATEST
-# simorgh3196/texide-rule-no-doubled-joshi  1.2.3    1.3.0
+# simorgh3196/tsuzulint-rule-no-doubled-joshi  1.2.3    1.3.0
 
 # Update all plugins
-texide plugin update
+tsuzulint plugin update
 
 # Update specific plugin
-texide plugin update simorgh3196/texide-rule-no-doubled-joshi
+tsuzulint plugin update simorgh3196/tsuzulint-rule-no-doubled-joshi
 
 # Remove plugin
-texide plugin remove simorgh3196/texide-rule-no-doubled-joshi
+tsuzulint plugin remove simorgh3196/tsuzulint-rule-no-doubled-joshi
 ```
 
 ### 1.4 Cache and Storage
 
 ```text
-~/.texide/
+~/.tsuzulint/
 ├── plugins/                      # Global plugins (manually placed)
 │   └── my-local-rule.wasm
 ├── cache/
 │   └── plugins/                  # Download cache
 │       └── simorgh3196/
-│           └── texide-rule-no-doubled-joshi/
-│               ├── 1.2.3/
-│               │   ├── no_doubled_joshi.wasm
-│               │   └── texide-rule.json
-│               └── 1.2.2/
-│                   └── ...
-└── trust.json                    # Trusted repository list
+│           └── tsuzulint-crates/
+└── tsuzulint_registry/        # NEW: プラグイン解決・取得・セキュリティ
+    ├── resolver.rs         # GitHub/URL/Local の解析
+    ├── source.rs           # ダウンロード・キャッシュ
+    ├── manifest.rs         # tsuzulint-rule.json パース
+    ├── hash.rs             # SHA256検証
+    ├── trust.rs            # 信頼済みリポジトリ管理
+    └── permissions.rs      # パーミッション検証・ホスト関数
 ```
 
 To clear the cache:
 
 ```bash
-texide plugin cache clean
+tsuzulint plugin cache clean
 ```
 
 ### 1.5 Security Settings
 
-Configure security policy in `.texide.jsonc`:
+Configure security policy in `.tzlint.jsonc`:
 
 ```json
 {
   "security": {
     "confirm_install": true,
     "trusted_repositories": [
-      "simorgh3196/texide-rule-no-doubled-joshi",
-      "simorgh3196/texide-rule-sentence-length"
+      "simorgh3196/tsuzulint-rule-no-doubled-joshi",
+      "simorgh3196/tsuzulint-rule-sentence-length"
     ]
   }
 }
@@ -205,9 +208,9 @@ When `confirm_install: true`, new plugins require confirmation:
 ╭──────────────────────────────────────────────────────────────────╮
 │ New plugin installation                                          │
 ├──────────────────────────────────────────────────────────────────┤
-│ Plugin: simorgh3196/texide-rule-no-doubled-joshi                 │
+│ Plugin: simorgh3196/tsuzulint-rule-no-doubled-joshi                 │
 │ Version: 1.2.3                                                   │
-│ Repository: https://github.com/simorgh3196/texide-rule-no-doubled-joshi │
+│ Repository: https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi │
 │ SHA256: a1b2c3d4e5f6...                                          │
 │                                                                  │
 │ ⚠️  This plugin will run in a WASM sandbox, but you should only  │
@@ -223,13 +226,13 @@ For plugins requesting additional permissions:
 ╭──────────────────────────────────────────────────────────────────╮
 │ New plugin installation                                          │
 ├──────────────────────────────────────────────────────────────────┤
-│ Plugin: simorgh3196/texide-rule-custom-dict                      │
+│ Plugin: simorgh3196/tsuzulint-rule-custom-dict                      │
 │ Version: 1.0.0                                                   │
 │                                                                  │
 │ ⚠️  This plugin requests additional permissions:                 │
 │                                                                  │
-│   📁 Read: ~/.texide/dictionaries/                               │
-│   📝 Write: ~/.texide/dictionaries/user-terms.txt                │
+│   📁 Read: ~/.tsuzulint/dictionaries/                               │
+│   📝 Write: ~/.tsuzulint/dictionaries/user-terms.txt                │
 │                                                                  │
 │ [T]rust this repository | [I]nstall once | [C]ancel              │
 ╰──────────────────────────────────────────────────────────────────╯
@@ -242,17 +245,17 @@ For plugins requesting additional permissions:
 For CI/CD, skip with `--yes` flag:
 
 ```bash
-texide plugin install --yes simorgh3196/texide-rule-foo
+tsuzulint plugin install --yes simorgh3196/tsuzulint-rule-foo
 ```
 
 ### 1.6 Configuration File Priority and Rule Conflicts
 
 #### Config File Priority
 
-Texide supports two configuration file formats. When both exist, `.texide.jsonc` takes precedence:
+TsuzuLint supports two configuration file formats. When both exist, `.tzlint.jsonc` takes precedence:
 
-1. `.texide.jsonc` (default, supports comments)
-2. `.texide.json`
+1. `.tzlint.jsonc` (default, supports comments)
+2. `.tzlint.json`
 
 #### Rule Identifier and Alias
 
@@ -272,7 +275,7 @@ The manifest only requires the short name:
 }
 ```
 
-For GitHub sources, Texide automatically constructs the identifier from the repository owner and the rule name. For URL/Path sources, an explicit alias via `as` is required.
+For GitHub sources, TsuzuLint automatically constructs the identifier from the repository owner and the rule name. For URL/Path sources, an explicit alias via `as` is required.
 
 #### Using Aliases
 
@@ -281,8 +284,8 @@ For GitHub sources, Texide automatically constructs the identifier from the repo
 ```json
 {
   "rules": [
-    "simorgh3196/texide-rule-no-todo",
-    "alice/texide-rule-sentence-length"
+    "simorgh3196/tsuzulint-rule-no-todo",
+    "alice/tsuzulint-rule-sentence-length"
   ],
   "options": {
     "no-todo": true,
@@ -296,9 +299,9 @@ For GitHub sources, Texide automatically constructs the identifier from the repo
 ```json
 {
   "rules": [
-    { "github": "alice/texide-rule-sentence-length", "as": "alice-sl" },
+    { "github": "alice/tsuzulint-rule-sentence-length", "as": "alice-sl" },
     { "path": "./local-rules/my-rule", "as": "my-local" },
-    { "url": "https://example.com/texide-rule.json", "as": "external" }
+    { "url": "https://example.com/tsuzulint-rule.json", "as": "external" }
   ],
   "options": {
     "alice-sl": { "max": 100 },
@@ -312,15 +315,15 @@ For GitHub sources, Texide automatically constructs the identifier from the repo
 
 #### Same-Name Rule Resolution
 
-When multiple rules have the same short name, you **must** use explicit aliases to disambiguate. Texide will raise an error if conflicting rules are not aliased.
+When multiple rules have the same short name, you **must** use explicit aliases to disambiguate. TsuzuLint will raise an error if conflicting rules are not aliased.
 
 **With conflict** - Use `as` to assign unique aliases:
 
 ```json
 {
   "rules": [
-    { "github": "alice/texide-rule-sentence-length", "as": "alice-sl" },
-    { "github": "bob/texide-rule-sentence-length", "as": "bob-sl" }
+    { "github": "alice/tsuzulint-rule-sentence-length", "as": "alice-sl" },
+    { "github": "bob/tsuzulint-rule-sentence-length", "as": "bob-sl" }
   ],
   "options": {
     "alice-sl": { "max": 100 },
@@ -334,12 +337,12 @@ When multiple rules have the same short name, you **must** use explicit aliases 
 2. If no conflict exists, use the short name
 3. If conflict exists and no `as`, **raise an error**
 
-When a conflict is detected without explicit aliases, Texide raises an error:
+When a conflict is detected without explicit aliases, TsuzuLint raises an error:
 
 ```text
 Error: Rule name "sentence-length" is ambiguous (multiple plugins provide this rule):
-   - alice/texide-rule-sentence-length
-   - bob/texide-rule-sentence-length
+   - alice/tsuzulint-rule-sentence-length
+   - bob/tsuzulint-rule-sentence-length
    Use 'as' to specify unique aliases for each rule.
 ```
 
@@ -347,27 +350,27 @@ Error: Rule name "sentence-length" is ambiguous (multiple plugins provide this r
 
 ## Part 2: Plugin Author Guide
 
-### 2.1 Plugin Spec File (texide-rule.json)
+### 2.1 Plugin Spec File (tsuzulint-rule.json)
 
-To distribute a plugin, place `texide-rule.json` in your repository. Using JSON Schema provides auto-completion, validation, and inline documentation in IDEs.
+To distribute a plugin, place `tsuzulint-rule.json` in your repository. Using JSON Schema provides auto-completion, validation, and inline documentation in IDEs.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
   "rule": {
     "name": "no-doubled-joshi",
     "version": "1.0.0",
     "description": "Detects duplicate Japanese particles",
-    "repository": "https://github.com/simorgh3196/texide-rule-no-doubled-joshi",
+    "repository": "https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi",
     "license": "MIT",
     "authors": ["Tomoya Hayakawa <simorgh3196@gmail.com>"],
     "keywords": ["japanese", "grammar", "joshi"]
   },
   "artifacts": {
-    "wasm": "https://github.com/simorgh3196/texide-rule-no-doubled-joshi/releases/download/v{version}/no_doubled_joshi.wasm",
+    "wasm": "https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi/releases/download/v{version}/no_doubled_joshi.wasm",
     "sha256": "a1b2c3d4e5f6789..."
   },
-  "texide": {
+  "tsuzulint": {
     "min_version": "0.2.0"
   }
 }
@@ -421,8 +424,8 @@ Filesystem permission format:
 {
   "permissions": {
     "filesystem": [
-      { "path": "~/.texide/dictionaries/", "access": "read" },
-      { "path": "~/.texide/data/cache.json", "access": "write" }
+      { "path": "~/.tsuzulint/dictionaries/", "access": "read" },
+      { "path": "~/.tsuzulint/data/cache.json", "access": "write" }
     ]
   }
 }
@@ -440,8 +443,8 @@ shasum -a 256 my_rule.wasm
 # Or
 openssl dgst -sha256 my_rule.wasm
 
-# Texide CLI (future implementation)
-texide plugin hash my_rule.wasm
+# TsuzuLint CLI (future implementation)
+tzlint plugin hash my_rule.wasm
 ```
 
 ### 2.3 Publishing on GitHub Releases
@@ -460,7 +463,7 @@ texide plugin hash my_rule.wasm
    shasum -a 256 target/wasm32-wasip1/release/my_rule.wasm
    ```
 
-3. Update `texide-rule.json` (set sha256)
+3. Update `tsuzulint-rule.json` (set sha256)
 
 4. Create GitHub Release
    - Tag: `v1.0.0`
@@ -504,19 +507,19 @@ jobs:
           HASH=$(shasum -a 256 target/wasm32-wasip1/release/*.wasm | cut -d' ' -f1)
           echo "sha256=$HASH" >> $GITHUB_OUTPUT
 
-      - name: Update texide-rule.json
+      - name: Update tsuzulint-rule.json
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           jq --arg ver "$VERSION" --arg hash "${{ steps.hash.outputs.sha256 }}" \
             '.rule.version = $ver | .artifacts.sha256 = $hash' \
-            texide-rule.json > tmp.json && mv tmp.json texide-rule.json
+            tsuzulint-rule.json > tmp.json && mv tmp.json tsuzulint-rule.json
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             target/wasm32-wasip1/release/*.wasm
-            texide-rule.json
+            tsuzulint-rule.json
           generate_release_notes: true
 ```
 
@@ -537,14 +540,14 @@ git push origin v1.0.0
 ### 2.5 Directory Structure Example
 
 ```text
-texide-rule-no-doubled-joshi/
+tsuzulint-rule-no-doubled-joshi/
 ├── .github/
 │   └── workflows/
 │       └── release.yml           # Automated release workflow
 ├── src/
 │   └── lib.rs                    # Rule implementation
 ├── Cargo.toml
-├── texide-rule.json            # Plugin spec (required)
+├── tsuzulint-rule.json            # Plugin spec (required)
 ├── README.md
 └── LICENSE
 ```
@@ -555,7 +558,7 @@ texide-rule-no-doubled-joshi/
 
 ### 3.1 Security Model
 
-Texide adopts a defense-in-depth approach:
+TsuzuLint adopts a defense-in-depth approach:
 
 ```mermaid
 flowchart TB
@@ -610,7 +613,7 @@ flowchart TB
 flowchart TB
     WASM[Downloaded WASM file]
     CALC[Calculated hash]
-    TOML[texide-rule.json]
+    TOML[tsuzulint-rule.json]
 
     WASM -->|SHA256| CALC
     CALC --> CHECK{Hash match?}
@@ -624,13 +627,13 @@ flowchart TB
 
 ```bash
 # Add repository to trust list
-texide plugin trust add simorgh3196/texide-rule-no-doubled-joshi
+tsuzulint plugin trust add simorgh3196/tsuzulint-rule-no-doubled-joshi
 
 # Show trust list
-texide plugin trust list
+tsuzulint plugin trust list
 
 # Remove repository from trust list
-texide plugin trust remove simorgh3196/texide-rule-no-doubled-joshi
+tsuzulint plugin trust remove simorgh3196/tsuzulint-rule-no-doubled-joshi
 ```
 
 Plugins from trusted repositories are installed without confirmation.
@@ -649,7 +652,7 @@ Error: Plugin 'owner/repo' not found
 
 - Verify repository name is correct
 - Verify release is published
-- Verify `texide-rule.json` exists in repository
+- Verify `tsuzulint-rule.json` exists in repository
 
 ### "Hash mismatch"
 
@@ -660,7 +663,7 @@ Error: SHA256 hash mismatch
 ```
 
 - Download may have been corrupted → Retry
-- Hash in `texide-rule.json` may be outdated → Report to author
+- Hash in `tsuzulint-rule.json` may be outdated → Report to author
 - WASM file may have been tampered with → Verify trusted source
 
 ### Runtime Errors
@@ -668,28 +671,28 @@ Error: SHA256 hash mismatch
 ### "Minimum version not satisfied"
 
 ```text
-Error: Plugin requires Texide >= 0.3.0, but current version is 0.2.0
+Error: Plugin requires TsuzuLint >= 0.3.0, but current version is 0.2.0
 ```
 
-- Update Texide: `cargo install texide`
+- Update TsuzuLint: `cargo install tsuzulint`
 
 ### Cache Issues
 
 Clear cache and retry:
 
 ```bash
-texide plugin cache clean
-texide plugin install  # Re-install plugins
+tsuzulint plugin cache clean
+tsuzulint plugin install  # Re-install plugins
 ```
 
 ---
 
 ## Part 5: CLI Reference
 
-### texide plugin install
+### tsuzulint plugin install
 
 ```text
-texide plugin install [OPTIONS] <PLUGIN>
+tsuzulint plugin install [OPTIONS] <PLUGIN>
 
 Arguments:
   <PLUGIN>  Plugin specification (owner/repo, owner/repo@version, manifest URL/path)
@@ -699,10 +702,10 @@ Options:
   -h, --help       Show help
 ```
 
-### texide plugin list
+### tsuzulint plugin list
 
 ```text
-texide plugin list [OPTIONS]
+tsuzulint plugin list [OPTIONS]
 
 Options:
   --outdated       Show only updatable plugins
@@ -710,10 +713,10 @@ Options:
   -h, --help       Show help
 ```
 
-### texide plugin update
+### tsuzulint plugin update
 
 ```text
-texide plugin update [OPTIONS] [PLUGIN]
+tsuzulint plugin update [OPTIONS] [PLUGIN]
 
 Arguments:
   [PLUGIN]  Plugin to update (all if omitted)
@@ -723,38 +726,38 @@ Options:
   -h, --help       Show help
 ```
 
-### texide plugin remove
+### tsuzulint plugin remove
 
 ```text
-texide plugin remove <PLUGIN>
+tsuzulint plugin remove <PLUGIN>
 
 Arguments:
   <PLUGIN>  Plugin name to remove
 ```
 
-### texide plugin verify
+### tsuzulint plugin verify
 
 ```text
-texide plugin verify [PLUGIN]
+tsuzulint plugin verify [PLUGIN]
 
 Arguments:
   [PLUGIN]  Plugin to verify (all if omitted)
 ```
 
-### texide plugin cache
+### tsuzulint plugin cache
 
 ```text
-texide plugin cache <COMMAND>
+tsuzulint plugin cache <COMMAND>
 
 Commands:
   clean    Clear cache
   list     Show cache contents
 ```
 
-### texide plugin trust
+### tsuzulint plugin trust
 
 ```text
-texide plugin trust <COMMAND>
+tsuzulint plugin trust <COMMAND>
 
 Commands:
   add <REPO>     Add repository to trust list (e.g., owner/repo)
@@ -762,17 +765,17 @@ Commands:
   remove <REPO>  Remove repository from trust list
 ```
 
-### texide plugin hash
+### tsuzulint plugin hash
 
 ```text
-texide plugin hash <WASM_FILE>
+tsuzulint plugin hash <WASM_FILE>
 
 Arguments:
   <WASM_FILE>  WASM file to calculate hash for
 
 Description:
   Calculates SHA256 hash of a WASM file.
-  Use this to set the sha256 field in the [artifacts] section of texide-rule.json.
+  Use this to set the sha256 field in the [artifacts] serde_json = "1.0"  # tsuzulint-rule.json パース.
 ```
 
 ---

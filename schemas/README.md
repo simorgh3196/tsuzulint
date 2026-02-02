@@ -1,6 +1,6 @@
-# Texide JSON Schemas
+# TsuzuLint JSON Schemas
 
-This directory contains JSON Schema definitions for Texide configuration and rule development.
+This directory contains JSON Schema definitions for TsuzuLint configuration and rule development.
 
 ## Schema Files
 
@@ -8,8 +8,8 @@ This directory contains JSON Schema definitions for Texide configuration and rul
 
 | Schema | Description | Usage |
 | :--- | :--- | :--- |
-| [v1/rule.json](v1/rule.json) | Rule manifest schema | `texide-rule.json` in rule repositories |
-| [v1/config.json](v1/config.json) | Project configuration schema | `.texide.jsonc` in user projects |
+| [v1/rule.json](v1/rule.json) | Rule manifest schema | `tsuzulint-rule.json` in rule repositories |
+| [v1/config.json](v1/config.json) | Project configuration schema | `.tzlint.jsonc` in user projects |
 
 ### Type Definitions
 
@@ -22,7 +22,7 @@ This directory contains JSON Schema definitions for Texide configuration and rul
 Schemas follow semantic versioning with the URL format:
 
 ```text
-https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v{major}/schema.json
+https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v{major}/schema.json
 ```
 
 - **Major version increments** for backward-incompatible changes (adding required fields, removing fields)
@@ -33,11 +33,11 @@ https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v{major}/schem
 
 ### Rule Authors
 
-Add `$schema` to your `texide-rule.json` for IDE auto-completion and validation:
+Add `$schema` to your `tsuzulint-rule.json` for IDE auto-completion and validation:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
   "rule": {
     "name": "my-rule",
     "version": "1.0.0"
@@ -53,13 +53,13 @@ Add `$schema` to your `texide-rule.json` for IDE auto-completion and validation:
 
 ### Project Configuration
 
-Add `$schema` to your `.texide.jsonc`:
+Add `$schema` to your `.tzlint.jsonc`:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/config.json",
   "rules": [
-    "simorgh3196/texide-rule-no-doubled-joshi"
+    "simorgh3196/tsuzulint-rule-no-doubled-joshi"
   ],
   "options": {
     "no-doubled-joshi": true
@@ -71,10 +71,10 @@ Add `$schema` to your `.texide.jsonc`:
 
 #### Rust
 
-Use the `texide-rule-pdk` crate which implements these types:
+Use the `tsuzulint-rule-pdk` crate which implements these types:
 
 ```rust
-use texide_rule_pdk::{
+use tsuzulint_rule_pdk::{
     LintRequest, LintResponse, Diagnostic, Span, Fix, RuleManifest
 };
 ```
@@ -120,7 +120,7 @@ Use any JSON Schema code generator for your target language:
 | `artifacts` | Yes | Download URLs (wasm) |
 | `security` | Yes | SHA256 hash for verification |
 | `permissions` | No | Filesystem/network permissions (future) |
-| `texide` | No | Texide version requirements |
+| `tsuzulint` | No | TsuzuLint version requirements |
 | `options` | No | JSON Schema for rule configuration options |
 
 ### v1/config.json - Project Configuration
@@ -155,11 +155,11 @@ Validate your files:
 # Using ajv-cli
 npm install -g ajv-cli
 
-# Validate texide-rule.json
-ajv validate -s schemas/v1/rule.json -d texide-rule.json
+# Validate tsuzulint-rule.json
+ajv validate -s schemas/v1/rule.json -d tsuzulint-rule.json
 
-# Validate .texide.jsonc
-ajv validate -s schemas/v1/config.json -d .texide.jsonc
+# Validate .tzlint.jsonc
+ajv validate -s schemas/v1/config.json -d .tzlint.jsonc
 
 # Validate rule manifest output
 ajv validate -s schemas/rule-types.json \

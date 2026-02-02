@@ -1,0 +1,19 @@
+[package]
+name = "tsuzulint_lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "LSP server for TsuzuLint"
+
+
+[dependencies]
+tsuzulint_core = { workspace = true, features = ["native"] }
+tsuzulint_parser = { workspace = true }
+tsuzulint_ast = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tower-lsp = "0.20"
+serde_json = { workspace = true }

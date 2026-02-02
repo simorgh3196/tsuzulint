@@ -1,6 +1,6 @@
-# Texide for VS Code
+# TsuzuLint for VS Code
 
-This extension provides [Texide](https://github.com/simorgh3196/texide) support for Visual Studio Code.
+This extension provides [TsuzuLint](https://github.com/simorgh3196/tsuzulint) support for Visual Studio Code.
 
 ## Features
 
@@ -9,12 +9,12 @@ This extension provides [Texide](https://github.com/simorgh3196/texide) support 
 
 ## Requirements
 
-- **Texide CLI**: You need to have `texide` installed and available in your PATH, or specify the path in settings.
+- **TsuzuLint CLI**: You need to have `tzlint` installed and available in your PATH, or specify the path in settings.
 
 ## Configuration
 
-- `texide.executablePath`: Path to the `texide` executable. Default: `texide`.
-- `texide.trace.server`: Enable debug logging for the language server.
+- `tsuzulint.executablePath`: Path to the `tzlint` executable. Default: `tzlint`.
+- `tsuzulint.trace.server`: Enable debug logging for the language server.
 
 ## Development
 

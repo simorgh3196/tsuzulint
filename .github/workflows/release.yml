@@ -66,7 +66,7 @@ jobs:
         run: sudo apt-get install -y musl-tools
 
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }} --bin texide_cli
+        run: cargo build --release --target ${{ matrix.target }} --bin tzlint
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
@@ -74,26 +74,26 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/texide_cli dist/texide
+          cp target/${{ matrix.target }}/release/tzlint dist/tzlint
           cp README.md LICENSE dist/ 2>/dev/null || true
           cd dist
-          tar -czvf ../texide-${{ matrix.target }}.tar.gz *
+          tar -czvf ../tzlint-${{ matrix.target }}.tar.gz *
 
       - name: Prepare artifacts (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Copy-Item "target/${{ matrix.target }}/release/texide_cli.exe" -Destination "dist/texide.exe"
+          Copy-Item "target/${{ matrix.target }}/release/tzlint.exe" -Destination "dist/tzlint.exe"
           if (Test-Path "README.md") { Copy-Item "README.md" -Destination "dist/" }
           if (Test-Path "LICENSE") { Copy-Item "LICENSE" -Destination "dist/" }
-          Compress-Archive -Path "dist/*" -DestinationPath "texide-${{ matrix.target }}.zip"
+          Compress-Archive -Path "dist/*" -DestinationPath "tzlint-${{ matrix.target }}.zip"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: texide-${{ matrix.target }}
-          path: texide-${{ matrix.target }}.${{ matrix.archive }}
+          name: tzlint-${{ matrix.target }}
+          path: tzlint-${{ matrix.target }}.${{ matrix.archive }}
 
   wasm:
     name: Build WASM
@@ -107,16 +107,16 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build WASM
-        run: wasm-pack build crates/texide_wasm --target web --release
+        run: wasm-pack build crates/tsuzulint_wasm --target web --release
       - name: Package WASM
         run: |
-          cd crates/texide_wasm/pkg
-          tar -czvf ../../../texide-wasm.tar.gz *
+          cd crates/tsuzulint_wasm/pkg
+          tar -czvf ../../../tsuzulint-wasm.tar.gz *
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v6
         with:
-          name: texide-wasm
-          path: texide-wasm.tar.gz
+          name: tsuzulint-wasm
+          path: tsuzulint-wasm.tar.gz
 
   release:
     name: Create Release

@@ -1,8 +1,8 @@
-# Texide TODO・マイルストーン整理
+# TsuzuLint TODO・マイルストーン整理
 
 ## プロジェクト概要
 
-Texideは、textlintにインスパイアされた高性能な自然言語リンターです。Rustで書かれ、WASMベースのルールシステムを採用しています。
+TsuzuLintは、textlintにインスパイアされた高性能な自然言語リンターです。Rustで書かれ、WASMベースのルールシステムを採用しています。
 
 ## 現在の実装状況
 
@@ -10,14 +10,14 @@ Texideは、textlintにインスパイアされた高性能な自然言語リン
 
 | コンポーネント | 状態 | 説明 |
 | :--- | :--- | :--- |
-| **texide_ast** | ✅ 完成 | Arena allocator (bumpalo)、TxtNode、Span、NodeType |
-| **texide_parser** | ✅ 完成 | Markdown (markdown-rs)、PlainText パーサー |
-| **texide_plugin** | ✅ 完成 | Extism (native) / wasmi (browser) のデュアルバックエンド |
-| **texide_cache** | ✅ 完成 | BLAKE3ハッシュ、ファイルレベルキャッシュ |
-| **texide_core** | ✅ 完成 | Linterエンジン、Config、並列処理 (rayon) |
-| **texide_cli** | ✅ 完成 | lint, init, create-rule, add-rule コマンド, --fix |
-| **texide_wasm** | ✅ 完成 | ブラウザ向けWASMバインディング |
-| **texide_lsp** | 🚧 β版 | 初期実装完了 (診断通知, Code Actions) |
+| **tsuzulint_ast** | ✅ 完成 | Arena allocator (bumpalo)、TxtNode、Span、NodeType |
+| **tsuzulint_parser** | ✅ 完成 | Markdown (markdown-rs)、PlainText パーサー |
+| **tsuzulint_plugin** | ✅ 完成 | Extism (native) / wasmi (browser) のデュアルバックエンド |
+| **tsuzulint_cache** | ✅ 完成 | BLAKE3ハッシュ、ファイルレベルキャッシュ |
+| **tsuzulint_core** | ✅ 完成 | Linterエンジン、Config、並列処理 (rayon) |
+| **tsuzulint_cli** | ✅ 完成 | lint, init, create-rule, add-rule コマンド, --fix |
+| **tsuzulint_wasm** | ✅ 完成 | ブラウザ向けWASMバインディング |
+| **tsuzulint_lsp** | 🚧 β版 | 初期実装完了 (診断通知, Code Actions) |
 | **Plugin Loading** | 🚧 部分実装 | ローカルプラグインのロードは完成、外部配布システム（GitHub連携・ハッシュ検証等）は未実装 |
 
 ### ルール実装
@@ -46,8 +46,8 @@ Texideは、textlintにインスパイアされた高性能な自然言語リン
   - `--fix --dry-run` オプション追加
 
 - [ ] **プラグイン管理機能**
-  - 名前ベースのプラグイン解決 (`$PROJECT/.texide/plugins` -> `$HOME/.texide/plugins`)
-  - `texide install <plugin-name>` (将来実装)
+  - 名前ベースのプラグイン解決 (`$PROJECT/.tsuzulint/plugins` -> `$HOME/.tsuzulint/plugins`)
+  - `tzlint install <plugin-name>` (将来実装)
 
 - [ ] **出力フォーマット拡張**
   - SARIF形式 (GitHub Actions連携用)
@@ -132,7 +132,7 @@ graph LR
     end
 
     subgraph ランタイム
-        WASM --> |Extism| HOST[Texide Host]
+        WASM --> |Extism| HOST[TsuzuLint Host]
     end
 ```
 
@@ -161,7 +161,7 @@ graph LR
 
 #### b) 共通ヘルパーライブラリの強化
 
-`texide-rule-pdk` クレートの拡張:
+`tsuzulint-rule-pdk` クレートの拡張:
 
 ```rust
 // 現在
@@ -206,25 +206,25 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 
 ### 1.6.1 プラグイン指定形式
 
-`.texide.jsonc` でのプラグイン指定を拡張:
+`.tzlint.jsonc` でのプラグイン指定を拡張:
 
 ```json
 {
   "rules": [
     // 形式1: GitHub形式（最新バージョン）
-    "simorgh3196/texide-rule-no-doubled-joshi",
+    "simorgh3196/tsuzulint-rule-no-doubled-joshi",
 
     // 形式2: GitHub形式 + 固定バージョン
-    "simorgh3196/texide-rule-sentence-length@1.2.0",
+    "simorgh3196/tsuzulint-rule-sentence-length@1.2.0",
 
     // 形式3: GitHub形式 + エイリアス
-    { "github": "alice/texide-rule-foo", "as": "alice-foo" },
+    { "github": "alice/tsuzulint-rule-foo", "as": "alice-foo" },
 
     // 形式4: URL指定（asは必須）
-    { "url": "https://example.com/rules/texide-rule.json", "as": "external" },
+    { "url": "https://example.com/rules/tsuzulint-rule.json", "as": "external" },
 
     // 形式5: ローカルパス（asは必須、開発用）
-    { "path": "./my-rules/texide-rule.json", "as": "my-local" }
+    { "path": "./my-rules/tsuzulint-rule.json", "as": "my-local" }
   ]
 }
 ```
@@ -236,9 +236,9 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 
 **設定ファイルの優先順位:**
 
-両方存在する場合は `.texide.jsonc` を優先:
-1. `.texide.jsonc`（デフォルト、コメント可）
-2. `.texide.json`
+両方存在する場合は `.tzlint.jsonc` を優先:
+1. `.tzlint.jsonc`（デフォルト、コメント可）
+2. `.tzlint.json`
 
 **ルール識別子とエイリアス:**
 
@@ -252,8 +252,8 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 ```json
 {
   "rules": [
-    { "github": "alice/texide-rule-sentence-length", "as": "alice-sl" },
-    { "github": "bob/texide-rule-sentence-length", "as": "bob-sl" },
+    { "github": "alice/tsuzulint-rule-sentence-length", "as": "alice-sl" },
+    { "github": "bob/tsuzulint-rule-sentence-length", "as": "bob-sl" },
     { "path": "./local-rules/my-rule", "as": "my-local" }
   ],
   "options": {
@@ -273,23 +273,23 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 
 ```text
 Error: Rule name "sentence-length" is ambiguous:
-   - alice/texide-rule-sentence-length
-   - bob/texide-rule-sentence-length
+   - alice/tsuzulint-rule-sentence-length
+   - bob/tsuzulint-rule-sentence-length
    Use 'as' to specify unique aliases for each rule.
 ```
 
-### 1.6.2 プラグインスペックファイル（texide-rule.json）
+### 1.6.2 プラグインスペックファイル（tsuzulint-rule.json）
 
 プラグイン作者がリポジトリに配置する必須ファイル。JSON Schema による補完・検証が可能:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
   "rule": {
     "name": "no-doubled-joshi",
     "version": "1.0.0",
     "description": "日本語助詞の重複を検出するルール",
-    "repository": "https://github.com/simorgh3196/texide-rule-no-doubled-joshi",
+    "repository": "https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi",
     "license": "MIT",
     "authors": ["Author Name <email@example.com>"]
   },
@@ -297,7 +297,7 @@ Error: Rule name "sentence-length" is ambiguous:
     "wasm": "https://github.com/.../releases/download/v{version}/rule.wasm",
     "sha256": "a1b2c3d4e5f6..."
   },
-  "texide": {
+  "tsuzulint": {
     "min_version": "0.2.0"
   }
 }
@@ -327,7 +327,7 @@ flowchart TB
     end
 
     subgraph L2["2. SHA256ハッシュ検証"]
-        L2A["ダウンロード後にtexide-rule.jsonのハッシュと照合"]
+        L2A["ダウンロード後にtsuzulint-rule.jsonのハッシュと照合"]
         L2B["改ざん・破損を検出"]
     end
 
@@ -343,7 +343,7 @@ flowchart TB
 **信頼管理（リポジトリ単位）:**
 - 初回インストール時に確認ダイアログを表示
 - 「Trust this repository」を選択すると、以降そのリポジトリは確認なしでインストール/アップデート
-- 信頼リストは `~/.texide/trust.json` に保存
+- 信頼リストは `~/.tsuzulint/trust.json` に保存
 
 ### 1.6.4 パーミッションシステム（将来拡張）
 
@@ -353,8 +353,8 @@ flowchart TB
 {
   "permissions": {
     "filesystem": [
-      { "path": "~/.texide/dictionaries/", "access": "read" },
-      { "path": "~/.texide/dictionaries/user-terms.txt", "access": "write" }
+      { "path": "~/.tsuzulint/dictionaries/", "access": "read" },
+      { "path": "~/.tsuzulint/dictionaries/user-terms.txt", "access": "write" }
     ]
   }
 }
@@ -386,13 +386,13 @@ flowchart TB
 ╭──────────────────────────────────────────────────────────────────╮
 │ New plugin installation                                          │
 ├──────────────────────────────────────────────────────────────────┤
-│ Plugin: simorgh3196/texide-rule-custom-dict                      │
+│ Plugin: simorgh3196/tsuzulint-rule-custom-dict                      │
 │ Version: 1.0.0                                                   │
 │                                                                  │
 │ ⚠️  This plugin requests additional permissions:                 │
 │                                                                  │
-│   📁 Read: ~/.texide/dictionaries/                               │
-│   📝 Write: ~/.texide/dictionaries/user-terms.txt                │
+│   📁 Read: ~/.tsuzulint/dictionaries/                               │
+│   📝 Write: ~/.tsuzulint/dictionaries/user-terms.txt                │
 │                                                                  │
 │ [T]rust this repository | [I]nstall once | [C]ancel              │
 ╰──────────────────────────────────────────────────────────────────╯
@@ -407,40 +407,39 @@ flowchart TB
 
 ```bash
 # プラグインのインストール
-texide plugin install simorgh3196/texide-rule-no-doubled-joshi
-texide plugin install simorgh3196/texide-rule-foo@1.2.0
-texide plugin install --yes ...  # 確認スキップ（CI用）
+tzlint plugin install simorgh3196/tsuzulint-rule-no-doubled-joshi
+tzlint plugin install simorgh3196/tsuzulint-rule-foo@1.2.0
+tzlint plugin install --yes ...  # 確認スキップ（CI用）
 
 # プラグイン一覧・アップデート
-texide plugin list
-texide plugin list --outdated
-texide plugin update
+tzlint plugin list
+tzlint plugin list --outdated
+tzlint plugin update
 
 # 信頼管理（リポジトリ単位）
-texide plugin trust add simorgh3196/texide-rule-foo
-texide plugin trust list
-texide plugin trust remove simorgh3196/texide-rule-foo
+tzlint plugin trust add simorgh3196/tsuzulint-rule-foo
+tzlint plugin trust list
+tzlint plugin trust remove simorgh3196/tsuzulint-rule-foo
 ```
 
 **`plugin install` の動作詳細:**
 
-1. `.texide.jsonc` が存在しない場合、テンプレートから自動生成
+1. `.tzlint.jsonc` が存在しない場合、テンプレートから自動生成
 2. `rules` 配列にルール宣言を追加
 3. `get_manifest()` から返されるマニフェストの設定スキーマを取得
-4. `options` セクションにルールの全オプションをデフォルト値で追記
 
 ```bash
 # 例: 初回インストール
-texide plugin install simorgh3196/texide-rule-sentence-length
+tsuzulint plugin install simorgh3196/tsuzulint-rule-sentence-length
 ```
 
-生成される `.texide.jsonc`:
+生成される `.tzlint.jsonc`:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/config.json",
   "rules": [
-    "simorgh3196/texide-rule-sentence-length"
+    "simorgh3196/tsuzulint-rule-sentence-length"
   ],
   "options": {
     "sentence-length": {
@@ -453,12 +452,12 @@ texide plugin install simorgh3196/texide-rule-sentence-length
 
 **将来拡張（LSP統合）:**
 - LSPサーバーがインストール済みプラグインのスキーマを動的に認識
-- `.texide.jsonc` 編集時にプラグイン固有オプションの補完・バリデーションを提供
+- `.tzlint.jsonc` 編集時にプラグイン固有オプションの補完・バリデーションを提供
 - プラグインアップデート時に新オプションを自動提案
 
 ### 1.6.6 設定ファイルスキーマ
 
-`.texide.jsonc` 用のJSON Schema（`schemas/v1/config.json`）:
+`.tzlint.jsonc` 用のJSON Schema（`schemas/v1/config.json`）:
 - 基本フィールド（`rules`, `options`, `security`等）の補完・バリデーション
 - `options` セクションは `additionalProperties: true` でルール固有オプションを許容
 - 将来的にLSPで動的補完に移行
@@ -467,10 +466,10 @@ texide plugin install simorgh3196/texide-rule-sentence-length
 
 ```text
 crates/
-└── texide_registry/        # NEW: プラグイン解決・取得・セキュリティ
+└── tsuzulint_registry/        # NEW: プラグイン解決・取得・セキュリティ
     ├── resolver.rs         # GitHub/URL/Local の解析
     ├── source.rs           # ダウンロード・キャッシュ
-    ├── manifest.rs         # texide-rule.json パース
+    ├── manifest.rs         # tsuzulint-rule.json パース
     ├── hash.rs             # SHA256検証
     ├── trust.rs            # 信頼済みリポジトリ管理
     └── permissions.rs      # パーミッション検証・ホスト関数
@@ -482,7 +481,7 @@ crates/
 # Cargo.toml への追加
 reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
 semver = "1.0"
-serde_json = "1.0"  # texide-rule.json パース
+serde_json = "1.0"  # tsuzulint-rule.json パース
 jsonschema = "0.18" # スキーマ検証
 sha2 = "0.10"
 ```
@@ -530,7 +529,7 @@ sha2 = "0.10"
 graph TB
     subgraph 開発フェーズ["開発フェーズ (v0.4)"]
         A[hf-hub クレート] --> B[初回実行時に<br/>Hugging Face Hubからダウンロード]
-        B --> C["~/.cache/texide/models/"]
+        B --> C["~/.cache/tsuzulint/models/"]
     end
 
     subgraph リリースフェーズ["正式リリース (v1.0+)"]
@@ -695,7 +694,7 @@ javy = "2.0"  # TypeScript → WASM
 
 ```mermaid
 gantt
-    title Texide ロードマップ
+    title TsuzuLint ロードマップ
     dateFormat YYYY-MM
 
     section v0.2 基盤強化
@@ -733,6 +732,6 @@ gantt
 
 1. **優先**: LSPサーバーの機能拡充 (VSCode拡張の開発)
 2. **優先**: 並列処理の有効化 (markdown-rs の Send/Sync 問題解決)
-3. **重要**: 外部プラグイン配布システム (texide_registry クレート)
+3. **重要**: 外部プラグイン配布システム (tsuzulint_registry クレート)
 4. **調査必要**: Javy (TypeScript → WASM) の実用性検証
 5. **準備**: AIベースルールのPoC作成

@@ -1,6 +1,6 @@
-# Contributing to Texide
+# Contributing to TsuzuLint
 
-Thank you for your interest in contributing to Texide! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to TsuzuLint! This document provides guidelines and information for contributors.
 
 ## Getting Started
 
@@ -21,8 +21,8 @@ rustup target add wasm32-wasip1
 
 ```bash
 # Clone the repository
-git clone https://github.com/simorgh3196/texide.git
-cd texide
+git clone https://github.com/simorgh3196/tsuzulint.git
+cd tsuzulint
 
 # Build all crates
 cargo build
@@ -31,24 +31,24 @@ cargo build
 cargo test --workspace
 
 # Run with debug logging
-RUST_LOG=debug cargo run --bin texide -- lint tests/fixtures/
+RUST_LOG=debug cargo run --bin tzlint -- lint tests/fixtures/
 ```
 
 ## Project Structure
 
 ```shell
-texide/
+tsuzulint/
 ├── crates/
-│   ├── texide_ast/      # TxtAST definitions and Arena allocator
-│   ├── texide_parser/   # Parser trait and implementations
-│   ├── texide_plugin/   # WASM plugin system (Extism host)
-│   ├── texide_cache/    # Caching system
-│   ├── texide_core/     # Core linter engine
-│   ├── texide_cli/      # CLI application
-│   └── texide_lsp/      # LSP server
-├── rules/                 # Built-in sample rules
-├── docs/                  # Documentation
-└── tests/                 # Integration tests
+│   ├── tsuzulint_ast/      # TxtAST definitions and Arena allocator
+│   ├── tsuzulint_parser/   # Parser trait and implementations
+│   ├── tsuzulint_plugin/   # WASM plugin system (Extism host)
+│   ├── tsuzulint_cache/    # Caching system
+│   ├── tsuzulint_core/     # Core linter engine
+│   ├── tsuzulint_cli/      # CLI application
+│   └── tsuzulint_lsp/      # LSP server
+├── rules/                  # Built-in sample rules
+├── docs/                   # Documentation
+└── tests/                  # Integration tests
 ```
 
 ## Development Workflow
@@ -77,7 +77,7 @@ git checkout -b feature/your-feature-name
 cargo test --workspace
 
 # Run specific crate tests
-cargo test -p texide_ast
+cargo test -p tsuzulint_ast
 
 # Run with coverage (requires cargo-llvm-cov)
 cargo llvm-cov --workspace
@@ -161,7 +161,7 @@ fn parse(input: &str) -> Result<TxtNode, ParseError> {
 
 ## Questions?
 
-- Open a [GitHub Issue](https://github.com/simorgh3196/texide/issues)
-- Start a [Discussion](https://github.com/simorgh3196/texide/discussions)
+- Open a [GitHub Issue](https://github.com/simorgh3196/tsuzulint/issues)
+- Start a [Discussion](https://github.com/simorgh3196/tsuzulint/discussions)
 
 Thank you for contributing!

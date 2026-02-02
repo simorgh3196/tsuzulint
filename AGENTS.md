@@ -1,10 +1,10 @@
 # AGENTS.md
 
-This file provides guidance for AI agents working with the Texide codebase.
+This file provides guidance for AI agents working with the TsuzuLint codebase.
 
 ## Project Overview
 
-Texide is a high-performance natural language linter written in Rust, inspired by textlint. It uses WASM-based rules for extensibility and supports parallel processing with caching.
+TsuzuLint is a high-performance natural language linter written in Rust, inspired by textlint. It uses WASM-based rules for extensibility and supports parallel processing with caching.
 
 > [!WARNING]
 > **This project is currently Research-only / WIP.**
@@ -33,7 +33,7 @@ make build
 make test
 
 # Run specific crate tests
-cargo test -p texide_ast
+cargo test -p tsuzulint_ast
 
 # Format code
 make fmt
@@ -48,10 +48,10 @@ make lint-md
 make fmt-md
 
 # Run the CLI
-cargo run --bin texide -- lint tests/fixtures/
+cargo run --bin tzlint -- lint tests/fixtures/
 
 # Run with debug logging
-RUST_LOG=debug cargo run --bin texide -- lint tests/fixtures/
+RUST_LOG=debug cargo run --bin tzlint -- lint tests/fixtures/
 
 # Build WASM rules
 make wasm
@@ -66,15 +66,15 @@ make wasm
 ### Crate Structure
 
 ```text
-texide_cli                              # CLI application (binary)
-    └── texide_core                     # Linter orchestration, config, parallel processing
-            ├── texide_parser           # Parser trait + Markdown/PlainText parsers
-            │       └── texide_ast      # TxtAST types, Arena allocator (bumpalo)
-            ├── texide_plugin           # WASM plugin system (Extism/wasmi)
-            └── texide_cache            # File-level caching with BLAKE3
-texide_lsp                              # LSP server (basic implementation using tower-lsp)
-texide_registry                         # Rule registry and package management
-texide_wasm                             # Browser WASM bindings
+tsuzulint_cli                              # CLI application (binary)
+    └── tsuzulint_core                     # Linter orchestration, config, parallel processing
+            ├── tsuzulint_parser           # Parser trait + Markdown/PlainText parsers
+            │       └── tsuzulint_ast      # TxtAST types, Arena allocator (bumpalo)
+            ├── tsuzulint_plugin           # WASM plugin system (Extism/wasmi)
+            └── tsuzulint_cache            # File-level caching with BLAKE3
+tsuzulint_lsp                              # LSP server (basic implementation using tower-lsp)
+tsuzulint_registry                         # Rule registry and package management
+tsuzulint_wasm                             # Browser WASM bindings
 ```
 
 ### Data Flow
@@ -89,7 +89,7 @@ texide_wasm                             # Browser WASM bindings
 
 - **Arena Allocation**: All AST nodes use bumpalo for cache-friendly allocation.
 - **WASM Sandbox**: Rules compile to `wasm32-wasip1` and run via Extism (native) or wasmi (browser).
-- **Feature Flags**: `texide_plugin` and `texide_core` use `native` (default) and `browser` features.
+- **Feature Flags**: `tsuzulint_plugin` and `tsuzulint_core` use `native` (default) and `browser` features.
 
 ## Code Style
 

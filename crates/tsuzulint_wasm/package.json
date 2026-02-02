@@ -1,0 +1,36 @@
+{
+  "name": "tsuzulint-wasm",
+  "version": "0.1.0",
+  "description": "High-performance text linter for browsers - WASM build of tsuzulint",
+  "main": "tsuzulint_wasm.js",
+  "module": "tsuzulint_wasm.js",
+  "types": "tsuzulint_wasm.d.ts",
+  "files": [
+    "tsuzulint_wasm_bg.wasm",
+    "tsuzulint_wasm_bg.wasm.d.ts",
+    "tsuzulint_wasm.js",
+    "tsuzulint_wasm.d.ts"
+  ],
+  "sideEffects": [
+    "./tsuzulint_wasm.js",
+    "./snippets/*"
+  ],
+  "keywords": [
+    "tsuzulint",
+    "textlint",
+    "linter",
+    "markdown",
+    "wasm",
+    "webassembly"
+  ],
+  "author": "Tomoya Hayakawa <simorgh3196@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simorgh3196/tsuzulint"
+  },
+  "homepage": "https://github.com/simorgh3196/tsuzulint#readme",
+  "bugs": {
+    "url": "https://github.com/simorgh3196/tsuzulint/issues"
+  }
+}
