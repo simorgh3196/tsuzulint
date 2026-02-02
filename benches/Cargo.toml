@@ -1,3 +1,8 @@
+[package]
+name = "texide-benches"
+version = "0.1.0"
+edition = "2024"
+
 [[bin]]
 name = "corpus-generator"
-path = "benches/scripts/corpus_generator.rs"
+path = "scripts/corpus_generator.rs"

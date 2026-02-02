@@ -3297,6 +3297,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "texide-benches"
+version = "0.1.0"
+
+[[package]]
 name = "texide_ast"
 version = "0.1.0"
 dependencies = [
