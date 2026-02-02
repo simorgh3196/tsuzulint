@@ -36,6 +36,8 @@ pub struct Linter {
     plugin_host: Mutex<PluginHost>,
     /// Cache manager.
     cache: Mutex<CacheManager>,
+    /// Rules added via load_rule at runtime.
+    dynamic_rules: Mutex<Vec<PathBuf>>,
     /// Include glob patterns.
     include_globs: Option<GlobSet>,
     /// Exclude glob patterns.
@@ -120,6 +122,7 @@ impl Linter {
             config,
             plugin_host: Mutex::new(host),
             cache: Mutex::new(cache),
+            dynamic_rules: Mutex::new(Vec::new()),
             include_globs,
             exclude_globs,
         })
@@ -146,12 +149,25 @@ impl Linter {
     }
 
     /// Loads a WASM rule.
+    ///
+    /// This rule will also be loaded for parallel processing in `lint_files()`.
     pub fn load_rule(&self, path: impl AsRef<Path>) -> Result<(), LinterError> {
-        let mut host = self
-            .plugin_host
-            .lock()
-            .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
-        host.load_rule(path)?;
+        let path_buf = path.as_ref().to_path_buf();
+
+        // Load rule into the shared PluginHost (scope to release lock before acquiring dynamic_rules lock)
+        {
+            let mut host = self
+                .plugin_host
+                .lock()
+                .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
+            host.load_rule(&path_buf)?;
+        }
+
+        // Record dynamic rule for parallel processing (after releasing plugin_host lock)
+        match self.dynamic_rules.lock() {
+            Ok(mut list) => list.push(path_buf),
+            Err(_) => warn!("Failed to record dynamic rule path due to poisoned lock"),
+        }
         Ok(())
     }
 
@@ -311,6 +327,19 @@ impl Linter {
             }
         }
 
+        // Load dynamically added rules (via load_rule API)
+        match self.dynamic_rules.lock() {
+            Ok(dynamic) => {
+                for path in dynamic.iter() {
+                    debug!("Loading dynamic plugin from {}", path.display());
+                    if let Err(e) = host.load_rule(path) {
+                        warn!("Failed to load dynamic plugin '{}': {}", path.display(), e);
+                    }
+                }
+            }
+            Err(_) => warn!("Dynamic rule list lock poisoned; skipping runtime rules"),
+        }
+
         Ok(host)
     }
 
@@ -366,7 +395,7 @@ impl Linter {
 
         let content_hash = CacheManager::hash_content(&content);
         let config_hash = self.config.hash();
-        let rule_versions = self.get_rule_versions();
+        let rule_versions = Self::get_rule_versions_from_host(host);
 
         // 1. Check full cache first
         {
@@ -650,17 +679,8 @@ impl Linter {
         Ok(diagnostics)
     }
 
-    /// Gets the versions of all loaded rules.
-    fn get_rule_versions(&self) -> HashMap<String, String> {
-        // If the mutex is poisoned, recover the inner guard to keep linting functional.
-        let host = match self.plugin_host.lock() {
-            Ok(host) => host,
-            Err(poisoned) => {
-                // If mutex is poisoned, still try to get versions from the poisoned guard
-                warn!("Plugin host mutex poisoned, recovering");
-                poisoned.into_inner()
-            }
-        };
+    /// Gets the versions of all loaded rules from a PluginHost.
+    fn get_rule_versions_from_host(host: &PluginHost) -> HashMap<String, String> {
         let mut versions = HashMap::new();
 
         for name in host.loaded_rules() {
