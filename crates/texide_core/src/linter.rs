@@ -146,7 +146,12 @@ impl Linter {
     }
 
     /// Lints files matching the given patterns.
-    pub fn lint_patterns(&self, patterns: &[String]) -> Result<Vec<LintResult>, LinterError> {
+    ///
+    /// Returns a tuple of (successful results, failed files with errors).
+    pub fn lint_patterns(
+        &self,
+        patterns: &[String],
+    ) -> Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>), LinterError> {
         let files = self.discover_files(patterns)?;
         self.lint_files(&files)
     }
@@ -194,37 +199,56 @@ impl Linter {
     ///
     /// Each worker thread creates its own `PluginHost` instance to avoid
     /// lock contention. This allows full utilization of multi-core processors.
-    pub fn lint_files(&self, paths: &[PathBuf]) -> Result<Vec<LintResult>, LinterError> {
+    ///
+    /// Returns a tuple of (successful results, failed files with errors).
+    pub fn lint_files(
+        &self,
+        paths: &[PathBuf],
+    ) -> Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>), LinterError> {
         // Parallel processing using rayon
         // Each thread creates its own PluginHost for thread safety
-        let results: Vec<LintResult> = paths
+        // Collect both successes and failures
+        let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
             .par_iter()
-            .filter_map(|path| {
+            .map(|path| {
                 // Create thread-local PluginHost
-                let mut thread_host = match self.create_plugin_host() {
-                    Ok(host) => host,
-                    Err(e) => {
-                        warn!("Failed to create plugin host: {}", e);
-                        return None;
-                    }
-                };
+                let mut thread_host = self.create_plugin_host().map_err(|e| (path.clone(), e))?;
 
-                match self.lint_file_with_host(path, &mut thread_host) {
-                    Ok(result) => Some(result),
-                    Err(e) => {
-                        warn!("Failed to lint {}: {}", path.display(), e);
-                        None
-                    }
-                }
+                self.lint_file_with_host(path, &mut thread_host)
+                    .map_err(|e| (path.clone(), e))
             })
             .collect();
 
-        // Save cache
-        if let Err(e) = self.cache.lock().unwrap().save() {
-            warn!("Failed to save cache: {}", e);
+        // Separate successes and failures
+        let mut successes = Vec::new();
+        let mut failures = Vec::new();
+        for result in results {
+            match result {
+                Ok(lint_result) => successes.push(lint_result),
+                Err((path, error)) => {
+                    warn!("Failed to lint {}: {}", path.display(), error);
+                    failures.push((path, error));
+                }
+            }
         }
 
-        Ok(results)
+        // Save cache (handle mutex poison error gracefully)
+        match self.cache.lock() {
+            Ok(cache) => {
+                if let Err(e) = cache.save() {
+                    warn!("Failed to save cache: {}", e);
+                }
+            }
+            Err(poison) => {
+                warn!("Cache mutex poisoned, attempting recovery: {}", poison);
+                // Still try to save via the poisoned guard
+                if let Err(e) = poison.into_inner().save() {
+                    warn!("Failed to save cache after recovery: {}", e);
+                }
+            }
+        }
+
+        Ok((successes, failures))
     }
 
     /// Creates a new PluginHost with the same configuration as the linter.
@@ -305,7 +329,10 @@ impl Linter {
     /// For sequential processing or when using the linter's shared PluginHost.
     #[allow(dead_code)]
     fn lint_file(&self, path: &Path) -> Result<LintResult, LinterError> {
-        let mut host = self.plugin_host.lock().unwrap();
+        let mut host = self
+            .plugin_host
+            .lock()
+            .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
         self.lint_file_internal(path, &mut host)
     }
 

@@ -194,7 +194,15 @@ fn run_lint(
     let linter = Linter::new(config).into_diagnostic()?;
 
     // Run linting
-    let results = linter.lint_patterns(patterns).into_diagnostic()?;
+    let (results, failures) = linter.lint_patterns(patterns).into_diagnostic()?;
+
+    // Report failures (already logged as warnings in linter, but also count them)
+    if !failures.is_empty() {
+        eprintln!("\n{} file(s) failed to lint:", failures.len());
+        for (path, error) in &failures {
+            eprintln!("  {}: {}", path.display(), error);
+        }
+    }
 
     // Apply fixes if requested
     if fix {
@@ -204,20 +212,20 @@ fn run_lint(
         if dry_run {
             // In dry-run mode, still output diagnostics
             let has_errors = output_results(&results, format, timings_enabled)?;
-            return Ok(has_errors);
+            return Ok(has_errors || !failures.is_empty());
         }
 
         // After fixing, return based on whether there were unfixable errors
         let unfixable_errors = results
             .iter()
             .any(|r| r.diagnostics.iter().any(|d| d.fix.is_none()));
-        return Ok(unfixable_errors);
+        return Ok(unfixable_errors || !failures.is_empty());
     }
 
     // Output results
     let has_errors = output_results(&results, format, timings_enabled)?;
 
-    Ok(has_errors)
+    Ok(has_errors || !failures.is_empty())
 }
 
 fn find_config() -> Result<LinterConfig> {
