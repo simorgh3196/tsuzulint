@@ -35,3 +35,11 @@ TODO.md
 
 # Cache directories
 .texide-cache/
+
+# Git worktrees
+.worktrees/
+
+# Benchmark corpus and results (generated on-demand)
+benches/corpus/
+benches/results/
+*.benchmark.json

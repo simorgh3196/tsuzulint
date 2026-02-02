@@ -1,0 +1,7 @@
+{
+  "rules": {
+    "no-todo": {
+      "module": "./lib/no-todo.js"
+    }
+  }
+}

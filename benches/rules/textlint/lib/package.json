@@ -1,0 +1,9 @@
+{
+  "name": "textlint-rule-no-todo-benchmark",
+  "version": "1.0.0",
+  "main": "lib/no-todo.js",
+  "description": "textlint no-todo rule for benchmarking",
+  "dependencies": {
+    "textlint-rule-helper": "^2.3.1"
+  }
+}

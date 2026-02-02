@@ -1,0 +1,3 @@
+[[bin]]
+name = "corpus-generator"
+path = "benches/scripts/corpus_generator.rs"
