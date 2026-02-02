@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use rayon::prelude::*;
 use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
@@ -189,22 +190,34 @@ impl Linter {
         Ok(files)
     }
 
-    /// Lints a list of files.
+    /// Lints a list of files in parallel using rayon.
     ///
-    /// Note: Currently processes files sequentially. For parallel processing,
-    /// parsers need to implement Send + Sync, which requires changes to
-    /// the markdown-rs crate's ParseOptions.
+    /// Each worker thread creates its own `PluginHost` instance to avoid
+    /// lock contention. This allows full utilization of multi-core processors.
     pub fn lint_files(&self, paths: &[PathBuf]) -> Result<Vec<LintResult>, LinterError> {
-        let mut results = Vec::with_capacity(paths.len());
+        // Parallel processing using rayon
+        // Each thread creates its own PluginHost for thread safety
+        let results: Vec<LintResult> = paths
+            .par_iter()
+            .filter_map(|path| {
+                // Create thread-local PluginHost
+                let mut thread_host = match self.create_plugin_host() {
+                    Ok(host) => host,
+                    Err(e) => {
+                        warn!("Failed to create plugin host: {}", e);
+                        return None;
+                    }
+                };
 
-        for path in paths {
-            match self.lint_file(path) {
-                Ok(result) => results.push(result),
-                Err(e) => {
-                    warn!("Failed to lint {}: {}", path.display(), e);
+                match self.lint_file_with_host(path, &mut thread_host) {
+                    Ok(result) => Some(result),
+                    Err(e) => {
+                        warn!("Failed to lint {}: {}", path.display(), e);
+                        None
+                    }
                 }
-            }
-        }
+            })
+            .collect();
 
         // Save cache
         if let Err(e) = self.cache.lock().unwrap().save() {
@@ -212,6 +225,64 @@ impl Linter {
         }
 
         Ok(results)
+    }
+
+    /// Creates a new PluginHost with the same configuration as the linter.
+    ///
+    /// Used for parallel processing where each thread needs its own PluginHost.
+    fn create_plugin_host(&self) -> Result<PluginHost, LinterError> {
+        let mut host = PluginHost::new();
+
+        // Helper to load a rule/plugin by name/path
+        let load_plugin = |name: &str, host: &mut PluginHost| -> Result<(), LinterError> {
+            match PluginResolver::resolve(name, self.config.base_dir.as_deref()) {
+                Some(path) => {
+                    debug!("Loading plugin '{}' from {}", name, path.display());
+                    if let Err(e) = host.load_rule(&path) {
+                        warn!("Failed to load plugin '{}': {}", name, e);
+                    }
+                }
+                None => {
+                    debug!(
+                        "Plugin '{}' not found. Checked .texide/plugins/ and global directories.",
+                        name
+                    );
+                }
+            }
+            Ok(())
+        };
+
+        // Load legacy plugins list
+        for plugin_name in &self.config.plugins {
+            let _ = load_plugin(plugin_name, &mut host);
+        }
+
+        // Load rules from new rules array
+        for rule_def in &self.config.rules {
+            use crate::config::RuleDefinition;
+            match rule_def {
+                RuleDefinition::Simple(name) => {
+                    let _ = load_plugin(name, &mut host);
+                }
+                RuleDefinition::Detail(detail) => {
+                    if let Some(path) = &detail.path {
+                        let path_buf = if let Some(base) = &self.config.base_dir {
+                            base.join(path)
+                        } else {
+                            PathBuf::from(path)
+                        };
+                        let path_str = path_buf.to_string_lossy();
+                        let _ = load_plugin(&path_str, &mut host);
+                    } else if let Some(github) = &detail.github {
+                        debug!("GitHub rule fetching not yet implemented: {}", github);
+                    } else if let Some(url) = &detail.url {
+                        debug!("URL rule fetching not yet implemented: {}", url);
+                    }
+                }
+            }
+        }
+
+        Ok(host)
     }
 
     /// Selects an appropriate parser for the file extension.
@@ -229,8 +300,32 @@ impl Linter {
         }
     }
 
-    /// Lints a single file.
+    /// Lints a single file using the shared PluginHost.
+    ///
+    /// For sequential processing or when using the linter's shared PluginHost.
+    #[allow(dead_code)]
     fn lint_file(&self, path: &Path) -> Result<LintResult, LinterError> {
+        let mut host = self.plugin_host.lock().unwrap();
+        self.lint_file_internal(path, &mut host)
+    }
+
+    /// Lints a single file with a provided PluginHost.
+    ///
+    /// Used for parallel processing where each thread has its own PluginHost.
+    fn lint_file_with_host(
+        &self,
+        path: &Path,
+        host: &mut PluginHost,
+    ) -> Result<LintResult, LinterError> {
+        self.lint_file_internal(path, host)
+    }
+
+    /// Internal implementation for linting a single file.
+    fn lint_file_internal(
+        &self,
+        path: &Path,
+        host: &mut PluginHost,
+    ) -> Result<LintResult, LinterError> {
         debug!("Linting {}", path.display());
 
         // Read file content
@@ -283,12 +378,10 @@ impl Linter {
 
         // Run rules
         {
-            let mut host = self.plugin_host.lock().unwrap();
-
             // A. Run Global Rules
             // Global rules must always run on the full document if anything changed
             // because they depend on the full context.
-            let global_rule_names = self.get_rule_names_by_isolation(&host, IsolationLevel::Global);
+            let global_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Global);
             if !global_rule_names.is_empty() {
                 let ast_json = self.ast_to_json(&ast, &content);
                 for rule in global_rule_names {
@@ -304,7 +397,7 @@ impl Linter {
             }
 
             // B. Run Block Rules on CHANGED/NEW blocks
-            let block_rule_names = self.get_rule_names_by_isolation(&host, IsolationLevel::Block);
+            let block_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Block);
             if !block_rule_names.is_empty() {
                 // Collect AST nodes for changed blocks
                 // We map `matched_mask` back to actual AST nodes by traversing.
