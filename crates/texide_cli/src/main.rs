@@ -12,7 +12,9 @@ use miette::{IntoDiagnostic, Result};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-use texide_core::{LintResult, Linter, LinterConfig, Severity, apply_fixes_to_file};
+use texide_core::{
+    LintResult, Linter, LinterConfig, Severity, apply_fixes_to_file, generate_sarif,
+};
 
 /// Texide - High-performance natural language linter
 #[derive(Parser)]
@@ -43,7 +45,7 @@ enum Commands {
         #[arg(required = true)]
         patterns: Vec<String>,
 
-        /// Output format (text, json)
+        /// Output format (text, json, sarif)
         #[arg(short, long, default_value = "text")]
         format: String,
 
@@ -238,6 +240,10 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
     let has_errors = results.iter().any(|r| r.has_errors());
 
     match format {
+        "sarif" => {
+            let sarif_output = generate_sarif(results).into_diagnostic()?;
+            println!("{}", sarif_output);
+        }
         "json" => {
             let output: Vec<_> = results
                 .iter()
