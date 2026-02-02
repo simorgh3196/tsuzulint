@@ -241,7 +241,7 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
 
     match format {
         "sarif" => {
-            let sarif_output = generate_sarif(results);
+            let sarif_output = generate_sarif(results).into_diagnostic()?;
             println!("{}", sarif_output);
         }
         "json" => {

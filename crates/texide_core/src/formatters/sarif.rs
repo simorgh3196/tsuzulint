@@ -3,7 +3,7 @@
 //! Implements SARIF 2.1.0 format for integration with GitHub Advanced Security
 //! and other CI/CD tools.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 
 use texide_plugin::{Diagnostic, Severity};
@@ -17,13 +17,13 @@ const SARIF_VERSION: &str = "2.1.0";
 const TOOL_NAME: &str = "texide";
 
 /// Generates SARIF output from lint results
-pub fn generate_sarif(results: &[LintResult]) -> String {
+pub fn generate_sarif(results: &[LintResult]) -> Result<String, serde_json::Error> {
     let sarif_log = SarifLog::from_results(results);
-    serde_json::to_string_pretty(&sarif_log).unwrap()
+    serde_json::to_string_pretty(&sarif_log)
 }
 
 /// Root SARIF log structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SarifLog {
     #[serde(rename = "$schema")]
@@ -45,7 +45,7 @@ impl SarifLog {
 }
 
 /// A single run of the tool
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Run {
     tool: Tool,
@@ -82,7 +82,7 @@ impl Run {
 }
 
 /// Tool information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Tool {
     driver: ToolComponent,
@@ -98,7 +98,7 @@ impl Tool {
 }
 
 /// Tool component (driver)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ToolComponent {
     name: String,
@@ -121,7 +121,7 @@ impl ToolComponent {
 }
 
 /// Rule descriptor
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReportingDescriptor {
     id: String,
@@ -143,7 +143,7 @@ impl ReportingDescriptor {
 }
 
 /// A message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Message {
     text: String,
@@ -157,7 +157,7 @@ impl Message {
 }
 
 /// A single result (diagnostic)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SarifResult {
     rule_id: String,
@@ -185,7 +185,7 @@ impl SarifResult {
 }
 
 /// Location information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Location {
     physical_location: PhysicalLocation,
@@ -201,7 +201,7 @@ impl Location {
 }
 
 /// Physical location
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PhysicalLocation {
     artifact_location: ArtifactLocation,
@@ -222,7 +222,7 @@ impl PhysicalLocation {
 }
 
 /// Artifact location (file path)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ArtifactLocation {
     uri: String,
@@ -238,7 +238,7 @@ impl ArtifactLocation {
 }
 
 /// Region (line/column information)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Region {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_sarif_empty_results() {
         let results: Vec<LintResult> = vec![];
-        let sarif = generate_sarif(&results);
+        let sarif = generate_sarif(&results).unwrap();
 
         // Verify it's valid JSON
         let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
@@ -298,7 +298,7 @@ mod tests {
         let diagnostic = create_test_diagnostic("no-todo", "Found TODO", Severity::Error, 10, 14);
         let result = LintResult::new(PathBuf::from("test.md"), vec![diagnostic]);
 
-        let sarif = generate_sarif(&[result]);
+        let sarif = generate_sarif(&[result]).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
 
         assert_eq!(parsed["version"], "2.1.0");
@@ -321,7 +321,7 @@ mod tests {
         let result1 = LintResult::new(PathBuf::from("file1.md"), vec![diag1]);
         let result2 = LintResult::new(PathBuf::from("file2.md"), vec![diag2]);
 
-        let sarif = generate_sarif(&[result1, result2]);
+        let sarif = generate_sarif(&[result1, result2]).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
 
         let run = &parsed["runs"][0];
@@ -343,7 +343,7 @@ mod tests {
         let info = create_test_diagnostic("i", "msg", Severity::Info, 0, 1);
 
         let result = LintResult::new(PathBuf::from("test.md"), vec![error, warning, info]);
-        let sarif = generate_sarif(&[result]);
+        let sarif = generate_sarif(&[result]).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
 
         let results = parsed["runs"][0]["results"].as_array().unwrap();
@@ -360,7 +360,7 @@ mod tests {
             .with_location(loc);
 
         let result = LintResult::new(PathBuf::from("test.md"), vec![diagnostic]);
-        let sarif = generate_sarif(&[result]);
+        let sarif = generate_sarif(&[result]).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
 
         let location = &parsed["runs"][0]["results"][0]["locations"][0];
@@ -378,7 +378,7 @@ mod tests {
         let diag3 = create_test_diagnostic("rule-a", "Message A again", Severity::Error, 20, 25);
 
         let result = LintResult::new(PathBuf::from("test.md"), vec![diag1, diag2, diag3]);
-        let sarif = generate_sarif(&[result]);
+        let sarif = generate_sarif(&[result]).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
 
         let rules = parsed["runs"][0]["tool"]["driver"]["rules"]
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn test_sarif_schema_url() {
         let results: Vec<LintResult> = vec![];
-        let sarif = generate_sarif(&results);
+        let sarif = generate_sarif(&results).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
 
         assert!(
