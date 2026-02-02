@@ -35,3 +35,4 @@ TODO.md
 
 # Cache directories
 .texide-cache/
+.worktrees/
