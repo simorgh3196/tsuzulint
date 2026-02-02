@@ -652,8 +652,7 @@ impl Linter {
 
     /// Gets the versions of all loaded rules.
     fn get_rule_versions(&self) -> HashMap<String, String> {
-        // Note: Using unwrap here is acceptable as this is an internal method
-        // and mutex poisoning would indicate a serious bug that should panic
+        // If the mutex is poisoned, recover the inner guard to keep linting functional.
         let host = match self.plugin_host.lock() {
             Ok(host) => host,
             Err(poisoned) => {
