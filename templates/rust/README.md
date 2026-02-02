@@ -17,7 +17,7 @@ cd my-rule
 Replace these placeholders in all files:
 
 | Placeholder | Replace With |
-|-------------|--------------|
+| :--- | :--- |
 | `{{RULE_NAME}}` | Your rule ID (e.g., `no-todo`, `max-length`) |
 | `{{RULE_DESCRIPTION}}` | Short description of what the rule checks |
 
@@ -72,7 +72,7 @@ texide lint --plugin ./target/wasm32-wasip1/release/texide_rule_my_rule.wasm tes
 
 ## Files
 
-```
+```text
 my-rule/
 ├── Cargo.toml      # Package manifest
 ├── README.md       # This file
