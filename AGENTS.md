@@ -50,7 +50,7 @@ make wasm
 
 ## Resources
 
-- **Rust Implementation**: Refer to the skills in `.agent/skills` for necessary knowledge and patterns when implementing Rust code.
+- **Rust Implementation**: Refer to your available skills for necessary knowledge and patterns when implementing Rust code.
 
 ## Architecture
 
@@ -95,6 +95,8 @@ Rules implement two functions:
 - `lint(ast_json, context, source, config)` → Returns diagnostics JSON
 
 ## TDD Workflow
+
+Refer to the `test-driven-development` skill for detailed instructions.
 
 1. **Test behavior, not implementation**
 2. **Red-Green-Refactor**
