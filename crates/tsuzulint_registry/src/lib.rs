@@ -9,4 +9,3 @@ pub use downloader::{DownloadError, DownloadResult, WasmDownloader};
 pub use error::FetchError;
 pub use fetcher::{ManifestFetcher, PluginSource};
 pub use manifest::{ExternalRuleManifest, ManifestError};
-
