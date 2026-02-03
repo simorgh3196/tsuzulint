@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
-  "title": "Texide Rule Manifest",
-  "description": "Schema for texide-rule.json - Rule distribution manifest",
+  "$id": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
+  "title": "TsuzuLint Rule Manifest",
+  "description": "Schema for tsuzulint-rule.json - Rule distribution manifest",
   "type": "object",
   "required": ["rule", "artifacts"],
   "properties": {
@@ -35,7 +35,7 @@
           "type": "string",
           "format": "uri",
           "description": "GitHub repository URL",
-          "examples": ["https://github.com/simorgh3196/texide-rule-no-doubled-joshi"]
+          "examples": ["https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi"]
         },
         "license": {
           "type": "string",
@@ -152,14 +152,14 @@
       },
       "additionalProperties": false
     },
-    "texide": {
+    "tsuzulint": {
       "type": "object",
-      "description": "Texide compatibility requirements",
+      "description": "TsuzuLint compatibility requirements",
       "properties": {
         "min_version": {
           "type": "string",
           "pattern": "^\\d+\\.\\d+\\.\\d+$",
-          "description": "Minimum required Texide version",
+          "description": "Minimum required TsuzuLint version",
           "examples": ["0.2.0", "1.0.0"]
         }
       },

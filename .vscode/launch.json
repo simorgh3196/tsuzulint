@@ -4,11 +4,11 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug texide_cli",
+            "name": "Debug tsuzulint_cli",
             "cargo": {
-                "args": ["build", "--bin=texide_cli", "--package=texide_cli"],
+                "args": ["build", "--bin=tzlint", "--package=tsuzulint_cli"],
                 "filter": {
-                    "name": "texide_cli",
+                    "name": "tzlint",
                     "kind": "bin"
                 }
             },
@@ -42,14 +42,14 @@
             "type": "pickString",
             "description": "Select a package",
             "options": [
-                "texide_ast",
-                "texide_parser",
-                "texide_plugin",
-                "texide_cache",
-                "texide_core",
-                "texide_cli",
-                "texide_lsp",
-                "texide_wasm"
+                "tsuzulint_ast",
+                "tsuzulint_parser",
+                "tsuzulint_plugin",
+                "tsuzulint_cache",
+                "tsuzulint_core",
+                "tsuzulint_cli",
+                "tsuzulint_lsp",
+                "tsuzulint_wasm"
             ]
         }
     ]

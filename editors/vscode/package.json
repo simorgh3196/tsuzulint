@@ -1,7 +1,7 @@
 {
-    "name": "texide-vscode",
-    "displayName": "Texide",
-    "description": "Texide integration for VS Code",
+    "name": "tsuzulint-vscode",
+    "displayName": "TsuzuLint",
+    "description": "TsuzuLint integration for VS Code",
     "version": "0.1.0",
     "publisher": "simorgh3196",
     "engines": {
@@ -18,14 +18,14 @@
     "contributes": {
         "configuration": {
             "type": "object",
-            "title": "Texide",
+            "title": "TsuzuLint",
             "properties": {
-                "texide.executablePath": {
+                "tsuzulint.executablePath": {
                     "type": "string",
-                    "default": "texide",
-                    "description": "Path to the texide executable. If not specified, look for 'texide' in PATH."
+                    "default": "tzlint",
+                    "description": "Path to the tzlint executable. If not specified, look for 'tzlint' in PATH."
                 },
-                "texide.trace.server": {
+                "tsuzulint.trace.server": {
                     "type": "string",
                     "enum": [
                         "off",

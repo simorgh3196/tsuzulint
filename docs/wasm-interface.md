@@ -1,10 +1,10 @@
 # WASM Rule Interface Specification
 
-This document defines the language-agnostic interface that all Texide WASM rules must implement.
+This document defines the language-agnostic interface that all TsuzuLint WASM rules must implement.
 
 ## Overview
 
-Texide rules are compiled to WebAssembly (WASM) and run in a sandboxed environment. This specification enables rule development in any language that compiles to WASM (Rust, AssemblyScript, Go, etc.).
+TsuzuLint rules are compiled to WebAssembly (WASM) and run in a sandboxed environment. This specification enables rule development in any language that compiles to WASM (Rust, AssemblyScript, Go, etc.).
 
 ## Target
 
@@ -155,7 +155,7 @@ All matching nodes are passed as a batch (array) in a single `lint` call. This d
     },
     "config": {
       "type": "object",
-      "description": "Rule-specific configuration from .texide.json"
+      "description": "Rule-specific configuration from .tsuzulint.json"
     },
     "source": {
       "type": "string",

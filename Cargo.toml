@@ -1,15 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/texide_ast",
-    "crates/texide_parser",
-    "crates/texide_plugin",
-    "crates/texide_cache",
-    "crates/texide_core",
-    "crates/texide_cli",
-    "crates/texide_lsp",
-    "crates/texide_registry",
-    "crates/texide_wasm",
+    "crates/tsuzulint_ast",
+    "crates/tsuzulint_parser",
+    "crates/tsuzulint_plugin",
+    "crates/tsuzulint_cache",
+    "crates/tsuzulint_core",
+    "crates/tsuzulint_cli",
+    "crates/tsuzulint_lsp",
+    "crates/tsuzulint_registry",
+    "crates/tsuzulint_wasm",
 ]
 
 [workspace.package]
@@ -17,18 +17,18 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Tomoya Hayakawa <simorgh3196@gmail.com>"]
 license = "MIT"
-homepage = "https://github.com/simorgh3196/texide"
-repository = "https://github.com/simorgh3196/texide"
+homepage = "https://github.com/simorgh3196/tsuzulint"
+repository = "https://github.com/simorgh3196/tsuzulint"
 keywords = ["linter", "markdown", "lsp", "wasm"]
 rust-version = "1.92"
 
 [workspace.dependencies]
 # Internal crates
-texide_ast = { path = "crates/texide_ast" }
-texide_parser = { path = "crates/texide_parser" }
-texide_plugin = { path = "crates/texide_plugin", default-features = false }
-texide_cache = { path = "crates/texide_cache" }
-texide_core = { path = "crates/texide_core", default-features = false }
+tsuzulint_ast = { path = "crates/tsuzulint_ast" }
+tsuzulint_parser = { path = "crates/tsuzulint_parser" }
+tsuzulint_plugin = { path = "crates/tsuzulint_plugin", default-features = false }
+tsuzulint_cache = { path = "crates/tsuzulint_cache" }
+tsuzulint_core = { path = "crates/tsuzulint_core", default-features = false }
 
 # WASM Runtime - Extism uses wasmtime internally (native)
 extism = "1.7"

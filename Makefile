@@ -15,7 +15,7 @@ build:
 TARGET ?=
 test:
 	cargo test --workspace
-	cd rules && cargo test $(if $(TARGET),--target $(TARGET),) -p texide-rule-pdk
+	cd rules && cargo test $(if $(TARGET),--target $(TARGET),) -p tsuzulint-rule-pdk
 
 # Run tests with output
 test-verbose:

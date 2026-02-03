@@ -34,6 +34,7 @@ TODO.md
 .windsurf/
 
 # Cache directories
-.texide-cache/
+.tsuzulint-cache/
+
 .worktrees/
 

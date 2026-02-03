@@ -1,6 +1,6 @@
 # Rule Development Guide
 
-Create custom lint rules for Texide in any language that compiles to WebAssembly.
+Create custom lint rules for TsuzuLint in any language that compiles to WebAssembly.
 
 ## Quick Start (Rust)
 
@@ -16,7 +16,7 @@ mkdir my-rule && cd my-rule
 # Initialize Cargo.toml
 cat > Cargo.toml << 'EOF'
 [package]
-name = "texide-rule-my-rule"
+name = "tsuzulint-rule-my-rule"
 version = "0.1.0"
 edition = "2024"
 
@@ -24,7 +24,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-texide-rule-pdk = { path = "../rules-pdk" }
+tsuzulint-rule-pdk = { path = "../rules-pdk" }
 extism-pdk = "1.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -44,7 +44,7 @@ Create `src/lib.rs`:
 ```rust
 use extism_pdk::*;
 use serde::Deserialize;
-use texide_rule_pdk::{
+use tsuzulint_rule_pdk::{
     extract_node_text, is_node_type,
     Diagnostic, LintRequest, LintResponse, RuleManifest, Span,
 };
@@ -108,7 +108,7 @@ rustup target add wasm32-wasip1
 # Build the rule
 cargo build --target wasm32-wasip1 --release
 
-# Output: target/wasm32-wasip1/release/texide_rule_my_rule.wasm
+# Output: target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm
 
 # Run unit tests
 cargo test
@@ -118,12 +118,12 @@ cargo test
 
 ```bash
 # Copy to your project
-cp target/wasm32-wasip1/release/texide_rule_my_rule.wasm ~/.texide/rules/
+cp target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm ~/.tsuzulint/rules/
 
-# Configure in .texide.jsonc
-cat > .texide.jsonc << 'EOF'
+# Configure in .tsuzulint.jsonc
+cat > .tsuzulint.jsonc << 'EOF'
 {
-  "rules": ["~/.texide/rules/texide_rule_my_rule.wasm"],
+  "rules": ["~/.tsuzulint/rules/tsuzulint_rule_my_rule.wasm"],
   "options": {
     "my-rule": true
   }
@@ -131,7 +131,7 @@ cat > .texide.jsonc << 'EOF'
 EOF
 
 # Run linting
-texide lint .
+tzlint lint .
 ```
 
 ---
@@ -186,7 +186,7 @@ Returns diagnostics:
 
 ## Helper Functions
 
-The `texide-rule-pdk` crate provides utilities:
+The `tsuzulint-rule-pdk` crate provides utilities:
 
 ### `extract_node_text(node, source)`
 
@@ -281,7 +281,7 @@ fn default_max() -> usize { 100 }
 
 ### User Configuration
 
-In `.texide.jsonc`:
+In `.tsuzulint.jsonc`:
 
 ```json
 {
@@ -305,7 +305,7 @@ To provide auto-fixes:
 2. Include `fix` in diagnostics
 
 ```rust
-use texide_rule_pdk::Fix;
+use tsuzulint_rule_pdk::Fix;
 
 #[plugin_fn]
 pub fn get_manifest() -> FnResult<String> {
@@ -392,7 +392,7 @@ mod tests {
 echo "This has BAD_PATTERN in it" > test.md
 
 # Run with your rule
-texide lint --config test-config.json test.md
+tzlint lint --config test-config.json test.md
 ```
 
 ---
@@ -451,23 +451,23 @@ By publishing on GitHub Releases, users can easily install your plugin using the
 cargo build --target wasm32-wasip1 --release
 
 # Calculate hash
-HASH=$(shasum -a 256 target/wasm32-wasip1/release/texide_rule_my_rule.wasm | cut -d' ' -f1)
+HASH=$(shasum -a 256 target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm | cut -d' ' -f1)
 
-# Create texide-rule.json (required for GitHub distribution)
-cat > texide-rule.json << EOF
+# Create tsuzulint-rule.json (required for GitHub distribution)
+cat > tsuzulint-rule.json << EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/rule.json",
+  "\$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
   "rule": {
     "name": "my-rule",
     "version": "1.0.0",
     "description": "My custom lint rule",
-    "repository": "https://github.com/yourname/texide-rule-my-rule",
+    "repository": "https://github.com/yourname/tsuzulint-rule-my-rule",
     "license": "MIT",
     "fixable": false,
     "node_types": ["Str"]
   },
   "artifacts": {
-    "wasm": "https://github.com/yourname/texide-rule-my-rule/releases/download/v{version}/texide_rule_my_rule.wasm",
+    "wasm": "https://github.com/yourname/tsuzulint-rule-my-rule/releases/download/v{version}/tsuzulint_rule_my_rule.wasm",
     "sha256": "$HASH"
   }
 }
@@ -475,21 +475,21 @@ EOF
 
 # Create GitHub release with .wasm file
 gh release create v1.0.0 \
-  target/wasm32-wasip1/release/texide_rule_my_rule.wasm \
-  texide-rule.json
+  target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm \
+  tsuzulint-rule.json
 ```
 
 Users can install with:
 
 ```bash
-texide plugin install yourname/texide-rule-my-rule
+tzlint plugin install yourname/tsuzulint-rule-my-rule
 ```
 
 See [Plugin Distribution Guide](./plugin-distribution.md) for details.
 
 ### Option 2: Direct Distribution
 
-Share the `.wasm` file directly. Users add to `.texide.jsonc`:
+Share the `.wasm` file directly. Users add to `.tsuzulint.jsonc`:
 
 ```json
 {
@@ -503,11 +503,11 @@ Share the `.wasm` file directly. Users add to `.texide.jsonc`:
 
 ### Rust (Recommended)
 
-Use `extism-pdk` and `texide-rule-pdk`:
+Use `extism-pdk` and `tsuzulint-rule-pdk` (renaming pending):
 
 ```toml
 [dependencies]
-texide-rule-pdk = { git = "https://github.com/simorgh3196/texide" }
+tsuzulint-rule-pdk = { git = "https://github.com/simorgh3196/tsuzulint" }
 extism-pdk = "1.3"
 ```
 
@@ -568,11 +568,16 @@ crate-type = ["cdylib"]
 
 ```bash
 # Enable debug logging
-RUST_LOG=debug texide lint file.md
+RUST_LOG=debug tzlint lint file.md
+```
 
-# Test with specific input
+### Use Testing Tool
+
+TsuzuLint provides a dedicated test runner:
+
+```bash
 echo '{"node":{"type":"Str","range":[0,5]},"config":{},"source":"hello","file_path":null}' | \
-  texide test-rule my-rule.wasm
+  tzlint test-rule my-rule.wasm
 ```
 
 ---

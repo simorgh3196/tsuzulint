@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/rule-types.json",
-  "title": "Texide Rule Types",
-  "description": "Type definitions for Texide WASM rules",
+  "$id": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/rule-types.json",
+  "title": "TsuzuLint Rule Types",
+  "description": "Type definitions for TsuzuLint WASM rules",
 
   "$defs": {
     "RuleManifest": {
@@ -56,7 +56,7 @@
         },
         "config": {
           "type": "object",
-          "description": "Rule configuration from .texide.json"
+          "description": "Rule configuration from .tsuzulint.json"
         },
         "source": {
           "type": "string",

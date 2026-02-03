@@ -1,6 +1,6 @@
 # AssemblyScript Rule Template
 
-This is a template for creating Texide rules in AssemblyScript.
+This is a template for creating TsuzuLint rules in AssemblyScript.
 
 > **Note**: AssemblyScript support is experimental. Rust is recommended for production rules.
 
@@ -58,8 +58,8 @@ npm run build:debug
 # Run tests
 npm test
 
-# Test with Texide
-texide lint --plugin ./build/release.wasm test.md
+# Test with TsuzuLint
+tzlint lint --plugin ./build/release.wasm test.md
 ```
 
 ## Files

@@ -1,10 +1,10 @@
 # Migration Guide from textlint
 
-This guide helps you migrate from the original textlint to Texide.
+This guide helps you migrate from the original textlint to TsuzuLint.
 
 ## Overview
 
-Texide is a Rust reimplementation of textlint with:
+TsuzuLint is a Rust reimplementation of textlint with:
 - No Node.js dependency
 - WASM-based rules
 - Improved performance
@@ -14,7 +14,7 @@ Texide is a Rust reimplementation of textlint with:
 
 ### Similar Format
 
-Texide uses a similar JSON configuration format, with `options` for rule configuration:
+TsuzuLint uses a similar JSON configuration format, with `options` for rule configuration:
 
 ```json
 {
@@ -30,15 +30,15 @@ Supported config files:
 
 | Format | Status |
 | :--- | :--- |
-| `.texide.jsonc` | Supported (default, supports comments) |
-| `.texide.json` | Supported |
+| `.tsuzulint.jsonc` | Supported (default, supports comments) |
+| `.tsuzulint.json` | Supported |
 
 ## Rules
 
 ### Key Difference
 
 Original textlint uses JavaScript/TypeScript rules.
-Texide uses WASM rules (compiled from Rust, Go, etc.).
+TsuzuLint uses WASM rules (compiled from Rust, Go, etc.).
 
 ### Migration Options
 
@@ -99,12 +99,12 @@ pub fn lint(input: String) -> FnResult<String> {
 
 ## CLI Commands
 
-| textlint | Texide | Notes |
+| textlint | TsuzuLint | Notes |
 | :--- | :--- | :--- |
-| `textlint file.md` | `texide lint file.md` | |
-| `textlint --fix file.md` | `texide lint --fix file.md` | |
-| `textlint --init` | `texide init` | |
-| `textlint --format json` | `texide lint --format json` | |
+| `textlint file.md` | `tzlint lint file.md` | |
+| `textlint --fix file.md` | `tzlint lint --fix file.md` | |
+| `textlint --init` | `tzlint init` | |
+| `textlint --format json` | `tzlint lint --format json` | |
 
 ## Package Management
 
@@ -114,14 +114,14 @@ pub fn lint(input: String) -> FnResult<String> {
 npm install textlint textlint-rule-no-todo
 ```
 
-### After (Texide)
+### After (TsuzuLint)
 
 ```bash
-# Install Texide binary
-cargo install texide
+# Install TsuzuLint binary
+cargo install tsuzulint
 
 # Add rules (WASM files)
-texide add-rule ./rules/no-todo.wasm
+tzlint add-rule ./rules/no-todo.wasm
 ```
 
 ## Editor Integration
@@ -129,21 +129,21 @@ texide add-rule ./rules/no-todo.wasm
 ### VS Code
 
 - **textlint**: Uses vscode-textlint extension
-- **Texide**: Use LSP (planned) or run CLI on save
+- **TsuzuLint**: Use LSP (planned) or run CLI on save
 
 ### Neovim
 
 ```lua
 -- Using null-ls or similar
-null_ls.builtins.diagnostics.texide.with({
-  command = "texide",
+null_ls.builtins.diagnostics.tsuzulint.with({
+  command = "tzlint",
   args = { "lint", "--format", "json", "$FILENAME" },
 })
 ```
 
 ## Performance Comparison
 
-| Metric | textlint | Texide |
+| Metric | textlint | TsuzuLint |
 | :--- | :--- | :--- |
 | Startup time | ~500ms | ~10ms |
 | Memory (100 files) | ~200MB | ~50MB |
@@ -167,8 +167,8 @@ null_ls.builtins.diagnostics.texide.with({
 
 ## Getting Help
 
-- [GitHub Issues](https://github.com/simorgh3196/texide/issues)
-- [Discussions](https://github.com/simorgh3196/texide/discussions)
+- [GitHub Issues](https://github.com/simorgh3196/tsuzulint/issues)
+- [Discussions](https://github.com/simorgh3196/tsuzulint/discussions)
 
 ## Contributing
 

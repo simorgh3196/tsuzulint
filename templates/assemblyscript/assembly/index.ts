@@ -1,7 +1,7 @@
 /**
  * {{RULE_NAME}} rule: {{RULE_DESCRIPTION}}
  *
- * This is an AssemblyScript implementation of a Texide rule.
+ * This is an AssemblyScript implementation of a TsuzuLint rule.
  */
 
 import { JSON } from "json-as";

@@ -1,10 +1,12 @@
-# Texide
+# TsuzuLint (ツヅリント)
 
 A high-performance natural language linter written in Rust, inspired by [textlint](https://textlint.github.io/).
 
+**TsuzuLint** (ツヅリント) is a play on words combining "Tsuzu-ri" (綴り, meaning "spelling") and "lint". This name reflects the tool's core mission: checking spelling and linting text.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](https://www.rust-lang.org)
-[![CI](https://github.com/simorgh3196/texide/actions/workflows/ci.yml/badge.svg)](https://github.com/simorgh3196/texide/actions/workflows/ci.yml)
+[![CI](https://github.com/simorgh3196/tsuzulint/actions/workflows/ci.yml/badge.svg)](https://github.com/simorgh3196/tsuzulint/actions/workflows/ci.yml)
 
 > [!WARNING]
 > **Research-only / WIP (Work In Progress)**
@@ -27,49 +29,49 @@ Since this project is currently in research phase, please install from source:
 
 ```bash
 # Clone the repository
-git clone https://github.com/simorgh3196/texide.git
-cd texide
+git clone https://github.com/simorgh3196/tsuzulint.git
+cd tsuzulint
 
 # Install the binary
-cargo install --path crates/texide_cli
+cargo install --path crates/tsuzulint_cli
 ```
 
 ## Quick Start
 
 ```bash
 # Initialize configuration
-texide init
+tzlint init
 
 # Lint files
-texide lint "**/*.md"
+tzlint lint "**/*.md"
 
 # Lint with auto-fix
-texide lint --fix "**/*.md"
+tzlint lint --fix "**/*.md"
 
 # Lint with performance timings
-texide lint --timings "**/*.md"
+tzlint lint --timings "**/*.md"
 ```
 
 ## Editor Integration (LSP)
 
-Texide includes a Language Server Protocol (LSP) implementation for real-time diagnostics and fixes in editors like VSCode.
+TsuzuLint includes a Language Server Protocol (LSP) implementation for real-time diagnostics and fixes in editors like VSCode.
 
 ```bash
 # Start the LSP server
-texide lsp
+tzlint lsp
 ```
 
-The server automatically loads configuration from `.texide.jsonc` or `.texide.json` in the workspace root.
+The server automatically loads configuration from `.tsuzulint.jsonc` or `.tsuzulint.json` in the workspace root.
 
 ## Configuration
 
-Create `.texide.jsonc` in your project root:
+Create `.tsuzulint.jsonc` in your project root:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/simorgh3196/texide/main/schemas/v1/config.json",
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/config.json",
   "rules": [
-    "owner/texide-rule-sample-rule"
+    "owner/tsuzulint-rule-sample-rule"
   ],
   "options": {
     "sample-rule": {
@@ -80,7 +82,7 @@ Create `.texide.jsonc` in your project root:
   "exclude": ["**/node_modules/**"],
   "cache": {
     "enabled": true,
-    "path": ".texide/cache"
+    "path": ".tsuzulint/cache"
   },
   "output": {
     "format": "pretty",
@@ -105,7 +107,7 @@ Create `.texide.jsonc` in your project root:
 
 ```bash
 # Create a new rule project
-texide rules create -l rust my-custom-rule
+tzlint rules create -l rust my-custom-rule
 ```
 
 See [Rule Development Guide](./docs/rule-development.md) for details.
@@ -164,8 +166,8 @@ Contributions are welcome! Please read our [Contributing Guide](./CONTRIBUTING.m
 
 ```bash
 # Clone the repository
-git clone https://github.com/simorgh3196/texide.git
-cd texide
+git clone https://github.com/simorgh3196/tsuzulint.git
+cd tsuzulint
 
 # Build
 make build

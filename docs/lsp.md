@@ -1,6 +1,6 @@
-# Texide Language Server (LSP)
+# TsuzuLint Language Server (LSP)
 
-The Texide Language Server provides real-time linting, auto-fixes, and document structure analysis for editors (such as VS Code) using the Language Server Protocol (LSP).
+The TsuzuLint Language Server provides real-time linting, auto-fixes, and document structure analysis for editors (such as VS Code) using the Language Server Protocol (LSP).
 
 ## Features
 
@@ -8,7 +8,7 @@ The following features are currently supported:
 
 ### 1. Real-time Diagnostics
 
-Provides feedback as you type or save a document based on Texide rules.
+Provides feedback as you type or save a document based on TsuzuLint rules.
 - Supports Error, Warning, and Info levels.
 - Powered by `markdown-rs` and built-in plain text parsers.
 
@@ -26,25 +26,25 @@ Analyzes document structure to provide the "Outline" view and "Go to Symbol" fun
 
 ### 4. Configuration Hot-Reloading
 
-Automatically reloads configuration when `.texide.json` or `.texide.jsonc` is modified. The server does not need to be restarted for changes to take effect.
+Automatically reloads configuration when `.tsuzulint.jsonc` or `.tsuzulint.json` is modified. The server does not need to be restarted for changes to take effect.
 
 ## Architecture
 
-`texide_lsp` is built using the `tower-lsp` crate. It utilizes `tokio` for asynchronous task management and communicates via standard input/output (stdin/stdout).
+`tsuzulint_lsp` is built using the `tower-lsp` crate. It utilizes `tokio` for asynchronous task management and communicates via standard input/output (stdin/stdout).
 
 ### Technical Highlights
 
-- **Arena Allocation**: Leverages `AstArena` from `texide_ast` to optimize memory allocation during document parsing.
+- **Arena Allocation**: Leverages `AstArena` from `tsuzulint_ast` to optimize memory allocation during document parsing.
 - **Sequential Processing**: Currently processes requests sequentially to handle internal non-thread-safe dependencies (planned for thread-safe optimization in the future).
 
 ## Usage
 
 ### Starting the Server
 
-The LSP server is integrated into the main `texide` CLI. It can be started using the `lsp` subcommand:
+The LSP server is integrated into the main `tsuzulint` CLI. It can be started using the `lsp` subcommand:
 
 ```bash
-texide lsp
+tzlint lsp
 ```
 
 ### VS Code Configuration Example

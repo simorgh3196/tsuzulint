@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/config.json",
+  "rules": [
+    { "path": "./no-todo/tsuzulint-rule.json", "as": "no-todo" },
+    { "path": "./sentence-length/tsuzulint-rule.json", "as": "sentence-length" },
+    { "path": "./no-doubled-joshi/tsuzulint-rule.json", "as": "no-doubled-joshi" }
+  ],
+  "options": {
+    "sentence-length": { "max": 100 }
+  }
+}

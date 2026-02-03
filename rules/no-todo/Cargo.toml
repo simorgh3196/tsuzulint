@@ -1,17 +1,17 @@
 [package]
-name = "texide-rule-no-todo"
+name = "tsuzulint-rule-no-todo"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Texide rule: Disallow TODO/FIXME comments"
+description = "TsuzuLint rule: Disallow TODO/FIXME comments"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-texide-rule-pdk = { workspace = true }
+tsuzulint-rule-pdk = { workspace = true }
 extism-pdk = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

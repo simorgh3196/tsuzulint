@@ -1,4 +1,4 @@
-# rustfmt configuration for texide
+# rustfmt configuration for tsuzulint
 # https://rust-lang.github.io/rustfmt/
 
 edition = "2024"

@@ -1,6 +1,6 @@
 # Rust Rule Template
 
-This is a template for creating Texide rules in Rust.
+This is a template for creating TsuzuLint rules in Rust.
 
 ## Setup
 
@@ -37,7 +37,7 @@ If creating a rule outside the rules workspace:
 
 ```toml
 [dependencies]
-texide-rule-pdk = { git = "https://github.com/simorgh3196/texide", branch = "main" }
+tsuzulint-rule-pdk = { git = "https://github.com/simorgh3196/tsuzulint", branch = "main" }
 ```
 
 ### 4. Implement Your Logic
@@ -57,7 +57,7 @@ rustup target add wasm32-wasip1
 # Build
 cargo build --target wasm32-wasip1 --release
 
-# Output: target/wasm32-wasip1/release/texide_rule_my_rule.wasm
+# Output: target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm
 ```
 
 ## Test
@@ -66,8 +66,8 @@ cargo build --target wasm32-wasip1 --release
 # Run unit tests
 cargo test
 
-# Test with Texide
-texide lint --plugin ./target/wasm32-wasip1/release/texide_rule_my_rule.wasm test.md
+# Test with TsuzuLint
+tzlint lint --plugin ./target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm test.md
 ```
 
 ## Files
