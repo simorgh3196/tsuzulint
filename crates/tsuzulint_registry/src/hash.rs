@@ -96,4 +96,36 @@ mod tests {
             _ => panic!("Expected InvalidFormat error"),
         }
     }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_compute_returns_valid_hash(bytes in any::<Vec<u8>>()) {
+            let hash = HashVerifier::compute(&bytes);
+
+            // Should be 64 characters long
+            prop_assert_eq!(hash.len(), 64);
+
+            // Should be all hex digits
+            prop_assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+
+            // Should be lowercase (implementation detail choice, but good to enforce)
+            prop_assert!(hash.chars().all(|c| !c.is_ascii_uppercase()));
+        }
+
+        #[test]
+        fn test_round_trip_verify(bytes in any::<Vec<u8>>()) {
+            let hash = HashVerifier::compute(&bytes);
+            prop_assert!(HashVerifier::verify(&bytes, &hash).is_ok());
+        }
+
+        #[test]
+        fn test_verify_case_insensitive_proptest(bytes in any::<Vec<u8>>()) {
+            let hash = HashVerifier::compute(&bytes);
+            let upper_hash = hash.to_uppercase();
+
+            prop_assert!(HashVerifier::verify(&bytes, &upper_hash).is_ok());
+        }
+    }
 }
