@@ -9,8 +9,8 @@ use thiserror::Error;
 /// Default maximum file size for WASM downloads (50 MB).
 pub const DEFAULT_MAX_SIZE: u64 = 50 * 1024 * 1024;
 
-/// Default request timeout (30 seconds).
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default request timeout (60 seconds).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Error type for WASM download operations.
 #[derive(Debug, Error)]
@@ -209,9 +209,9 @@ mod tests {
     }
 
     #[test]
-    fn test_default_timeout_is_30_seconds() {
+    fn test_default_timeout_is_60_seconds() {
         let downloader = WasmDownloader::new();
-        assert_eq!(downloader.timeout, Duration::from_secs(30));
+        assert_eq!(downloader.timeout, Duration::from_secs(60));
     }
 
     #[test]
