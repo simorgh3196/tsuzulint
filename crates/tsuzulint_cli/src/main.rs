@@ -187,6 +187,11 @@ fn run_lint(
         config.timings = true;
     }
 
+    // Disable caching if requested
+    if cli.no_cache {
+        config.cache = false;
+    }
+
     // Capture timings flag before config is moved
     let timings_enabled = config.timings;
 

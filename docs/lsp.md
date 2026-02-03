@@ -26,7 +26,7 @@ Analyzes document structure to provide the "Outline" view and "Go to Symbol" fun
 
 ### 4. Configuration Hot-Reloading
 
-Automatically reloads configuration when `.tzlint.json` or `.tsuzulint.jsonc` is modified. The server does not need to be restarted for changes to take effect.
+Automatically reloads configuration when `.tsuzulint.jsonc` or `.tsuzulint.json` is modified. The server does not need to be restarted for changes to take effect.
 
 ## Architecture
 

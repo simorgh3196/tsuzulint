@@ -8,7 +8,9 @@ use predicates::prelude::*;
 
 /// Helper to create a command for the tzlint CLI
 fn tsuzulint_cmd() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_tzlint"))
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_tzlint"));
+    cmd.arg("--no-cache");
+    cmd
 }
 
 mod help_command {

@@ -255,7 +255,7 @@ tzlint plugin install --yes simorgh3196/tsuzulint-rule-foo
 TsuzuLint supports two configuration file formats. When both exist, `.tsuzulint.jsonc` takes precedence:
 
 1. `.tsuzulint.jsonc` (default, supports comments)
-2. `.tzlint.json`
+2. `.tsuzulint.json`
 
 #### Rule Identifier and Alias
 

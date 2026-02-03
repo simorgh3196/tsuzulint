@@ -678,9 +678,16 @@ impl Linter {
 mod tests {
     use super::*;
 
+    fn test_config() -> (LinterConfig, tempfile::TempDir) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config = LinterConfig::new();
+        config.cache_dir = temp_dir.path().to_string_lossy().to_string();
+        (config, temp_dir)
+    }
+
     #[test]
     fn test_linter_new() {
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let linter = Linter::new(config);
         assert!(linter.is_ok());
     }
@@ -710,7 +717,7 @@ mod tests {
 
     #[test]
     fn test_linter_with_cache_disabled() {
-        let mut config = LinterConfig::new();
+        let (mut config, _temp) = test_config();
         config.cache = false;
 
         let linter = Linter::new(config).unwrap();
@@ -720,7 +727,7 @@ mod tests {
 
     #[test]
     fn test_linter_with_include_patterns() {
-        let mut config = LinterConfig::new();
+        let (mut config, _temp) = test_config();
         config.include = vec!["**/*.md".to_string()];
 
         let linter = Linter::new(config).unwrap();
@@ -729,7 +736,7 @@ mod tests {
 
     #[test]
     fn test_linter_with_exclude_patterns() {
-        let mut config = LinterConfig::new();
+        let (mut config, _temp) = test_config();
         config.exclude = vec!["**/node_modules/**".to_string()];
 
         let linter = Linter::new(config).unwrap();
@@ -738,7 +745,7 @@ mod tests {
 
     #[test]
     fn test_linter_select_parser_markdown() {
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
         let parser = linter.select_parser("md");
@@ -750,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_linter_select_parser_text() {
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
         let parser = linter.select_parser("txt");
@@ -762,7 +769,7 @@ mod tests {
 
     #[test]
     fn test_linter_select_parser_unknown_defaults_to_text() {
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
         let parser = linter.select_parser("unknown");
@@ -789,7 +796,7 @@ mod tests {
     fn test_linter_ast_to_json() {
         use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
 
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
         let arena = AstArena::new();
@@ -806,7 +813,7 @@ mod tests {
 
     #[test]
     fn test_lint_files_parallel_empty() {
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
         let paths: Vec<PathBuf> = vec![];
@@ -820,7 +827,7 @@ mod tests {
 
     #[test]
     fn test_lint_files_parallel_nonexistent_files() {
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
         let paths = vec![
@@ -838,7 +845,7 @@ mod tests {
 
     #[test]
     fn test_create_plugin_host() {
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
         // create_plugin_host should succeed even with no plugins configured
@@ -849,7 +856,7 @@ mod tests {
     #[test]
     fn test_load_configured_rules_static() {
         // Test that load_configured_rules can be called as a static method
-        let config = LinterConfig::new();
+        let (config, _temp) = test_config();
         let mut host = PluginHost::new();
 
         // This should not panic even with empty config

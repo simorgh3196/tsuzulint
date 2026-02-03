@@ -16,7 +16,7 @@ TsuzuLint is a high-performance natural language linter written in Rust, inspire
 2. **Use Git Worktrees**: Use the `using-git-worktrees` skill to create isolated environments for each task.
 3. **Confirm before Push**: After committing changes, ALWAYS ask the user for permission before pushing to the remote repository.
 4. **Verify before Commit**: Always run `make lint`, `make fmt-check` and `make test` before committing to ensure there are no errors.
-5. **Verify Markdown**: If you modify any `.md` file, you MUST run `make lint-md` (and `make fmt-md` to fix) to ensure compliance with the documentation standard.
+5. **Verify Markdown**: If you modify any `.md` file, you MUST run `make fmt-md` to ensure compliance with the documentation standard.
 6. **Always create a Pull Request.**
     - Branch naming: `feat/name`, `fix/name`, `docs/name`
     - PR description must be clear.

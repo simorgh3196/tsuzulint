@@ -238,7 +238,7 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 
 両方存在する場合は `.tsuzulint.jsonc` を優先:
 1. `.tsuzulint.jsonc`（デフォルト、コメント可）
-2. `.tzlint.json`
+2. `.tsuzulint.json`
 
 **ルール識別子とエイリアス:**
 
