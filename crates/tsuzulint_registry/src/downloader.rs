@@ -87,7 +87,7 @@ impl WasmDownloader {
     /// This method:
     /// 1. Replaces `{version}` placeholder in the URL with the manifest version
     /// 2. Downloads the WASM binary with streaming (early size limit check)
-    /// 3. Computes the SHA256 hash during download
+    /// 3. Computes the SHA256 hash after download
     ///
     /// Note: Hash verification against `manifest.artifacts.sha256` is the caller's responsibility.
     pub async fn download(
