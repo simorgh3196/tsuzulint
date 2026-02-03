@@ -77,6 +77,12 @@ enum Commands {
 
     /// Start the LSP server
     Lsp,
+
+    /// Manage plugins
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -92,6 +98,21 @@ enum RulesCommands {
         /// Path to WASM file
         path: PathBuf,
     },
+}
+
+#[derive(Subcommand)]
+enum PluginCommands {
+    /// Manage plugin cache
+    Cache {
+        #[command(subcommand)]
+        command: CacheCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CacheCommands {
+    /// Clean the plugin cache
+    Clean,
 }
 
 fn main() -> ExitCode {
@@ -152,6 +173,14 @@ fn run(cli: Cli) -> Result<bool> {
             run_lsp()?;
             Ok(false)
         }
+        Commands::Plugin { command } => match command {
+            PluginCommands::Cache { command } => match command {
+                CacheCommands::Clean => {
+                    run_plugin_cache_clean()?;
+                    Ok(false)
+                }
+            },
+        },
     }
 }
 
@@ -492,6 +521,16 @@ fn run_add_rule(path: &Path) -> Result<()> {
     info!("Rule added: {}", path.display());
     info!("Add the rule to your .tsuzulint.jsonc to enable it");
 
+    Ok(())
+}
+
+fn run_plugin_cache_clean() -> Result<()> {
+    use tsuzulint_registry::cache::PluginCache;
+
+    let cache = PluginCache::new().into_diagnostic()?;
+    cache.clear().into_diagnostic()?;
+
+    info!("Plugin cache cleaned");
     Ok(())
 }
 

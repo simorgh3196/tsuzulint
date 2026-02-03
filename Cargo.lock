@@ -4116,6 +4116,7 @@ dependencies = [
  "tracing-subscriber",
  "tsuzulint_core",
  "tsuzulint_lsp",
+ "tsuzulint_registry",
 ]
 
 [[package]]
@@ -4218,6 +4219,7 @@ dependencies = [
 name = "tsuzulint_registry"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "futures-util",
  "hex",
  "jsonschema",
@@ -4226,6 +4228,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
