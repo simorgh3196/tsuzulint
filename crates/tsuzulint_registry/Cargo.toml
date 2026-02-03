@@ -16,5 +16,5 @@ tokio.workspace = true
 tracing.workspace = true
 
 # Future dependencies for registry interaction
-# sha2.workspace = true
+sha2.workspace = true
 # semver.workspace = true
