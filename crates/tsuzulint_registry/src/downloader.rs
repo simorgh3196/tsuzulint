@@ -1,8 +1,8 @@
 //! WASM downloader for plugin artifacts.
 
+use crate::hash::HashVerifier;
 use crate::manifest::ExternalRuleManifest;
 use futures_util::StreamExt;
-use sha2::{Digest, Sha256};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -129,9 +129,8 @@ impl WasmDownloader {
             });
         }
 
-        // Stream the body while computing hash and checking size
+        // Stream the body while checking size
         let mut stream = response.bytes_stream();
-        let mut hasher = Sha256::new();
         let mut bytes = Vec::new();
         let mut total_size: u64 = 0;
 
@@ -147,24 +146,15 @@ impl WasmDownloader {
                 });
             }
 
-            hasher.update(&chunk);
             bytes.extend_from_slice(&chunk);
         }
 
-        let hash = hasher.finalize();
-        let computed_hash = hex::encode(hash);
+        let computed_hash = HashVerifier::compute(&bytes);
 
         Ok(DownloadResult {
             bytes,
             computed_hash,
         })
-    }
-}
-
-/// Convert a byte slice to lowercase hex string.
-mod hex {
-    pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
     }
 }
 
@@ -222,18 +212,9 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_encode() {
-        let bytes = [0x00, 0x01, 0x02, 0xab, 0xcd, 0xef];
-        assert_eq!(hex::encode(bytes), "000102abcdef");
-    }
-
-    #[test]
     fn test_sha256_computation() {
         // SHA256 of empty bytes
-        let mut hasher = Sha256::new();
-        hasher.update(b"");
-        let hash = hasher.finalize();
-        let computed = hex::encode(hash);
+        let computed = HashVerifier::compute(b"");
 
         // Known SHA256 of empty string
         assert_eq!(
