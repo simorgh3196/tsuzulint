@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/config.json",
   "title": "TsuzuLint Configuration",
-  "description": "Schema for .tzlint.jsonc / .tzlint.json - TsuzuLint project configuration",
+  "description": "Schema for .tsuzulint.jsonc / .tsuzulint.json - TsuzuLint project configuration",
   "type": "object",
   "properties": {
     "$schema": {

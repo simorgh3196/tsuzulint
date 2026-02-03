@@ -229,7 +229,7 @@ fn run_lint(
 }
 
 fn find_config() -> Result<LinterConfig> {
-    let config_files = [".tzlint.jsonc", ".tzlint.json"];
+    let config_files = [".tsuzulint.jsonc", ".tsuzulint.json"];
 
     for name in config_files {
         let path = PathBuf::from(name);
@@ -334,7 +334,7 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
 }
 
 fn run_init(force: bool) -> Result<()> {
-    let config_path = PathBuf::from(".tzlint.jsonc");
+    let config_path = PathBuf::from(".tsuzulint.jsonc");
 
     if config_path.exists() && !force {
         return Err(miette::miette!(
@@ -485,7 +485,7 @@ fn run_add_rule(path: &Path) -> Result<()> {
 
     // For now, just verify the WASM file can be loaded
     info!("Rule added: {}", path.display());
-    info!("Add the rule to your .tzlint.jsonc to enable it");
+    info!("Add the rule to your .tsuzulint.jsonc to enable it");
 
     Ok(())
 }

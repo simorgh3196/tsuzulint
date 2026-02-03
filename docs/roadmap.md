@@ -47,7 +47,7 @@ TsuzuLintは、textlintにインスパイアされた高性能な自然言語リ
 
 - [ ] **プラグイン管理機能**
   - 名前ベースのプラグイン解決 (`$PROJECT/.tsuzulint/plugins` -> `$HOME/.tsuzulint/plugins`)
-  - `tzlint install <plugin-name>` (将来実装)
+  - `tzlint plugin install <plugin-name>` (将来実装)
 
 - [ ] **出力フォーマット拡張**
   - SARIF形式 (GitHub Actions連携用)
@@ -206,7 +206,7 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 
 ### 1.6.1 プラグイン指定形式
 
-`.tzlint.jsonc` でのプラグイン指定を拡張:
+`.tsuzulint.jsonc` でのプラグイン指定を拡張:
 
 ```json
 {
@@ -236,8 +236,8 @@ pub fn find_all_matches(text: &str, pattern: &str) -> Vec<Match>; // パター�
 
 **設定ファイルの優先順位:**
 
-両方存在する場合は `.tzlint.jsonc` を優先:
-1. `.tzlint.jsonc`（デフォルト、コメント可）
+両方存在する場合は `.tsuzulint.jsonc` を優先:
+1. `.tsuzulint.jsonc`（デフォルト、コメント可）
 2. `.tzlint.json`
 
 **ルール識別子とエイリアス:**
@@ -424,7 +424,7 @@ tzlint plugin trust remove simorgh3196/tsuzulint-rule-foo
 
 **`plugin install` の動作詳細:**
 
-1. `.tzlint.jsonc` が存在しない場合、テンプレートから自動生成
+1. `.tsuzulint.jsonc` が存在しない場合、テンプレートから自動生成
 2. `rules` 配列にルール宣言を追加
 3. `get_manifest()` から返されるマニフェストの設定スキーマを取得
 
@@ -433,7 +433,7 @@ tzlint plugin trust remove simorgh3196/tsuzulint-rule-foo
 tsuzulint plugin install simorgh3196/tsuzulint-rule-sentence-length
 ```
 
-生成される `.tzlint.jsonc`:
+生成される `.tsuzulint.jsonc`:
 
 ```json
 {
@@ -452,12 +452,12 @@ tsuzulint plugin install simorgh3196/tsuzulint-rule-sentence-length
 
 **将来拡張（LSP統合）:**
 - LSPサーバーがインストール済みプラグインのスキーマを動的に認識
-- `.tzlint.jsonc` 編集時にプラグイン固有オプションの補完・バリデーションを提供
+- `.tsuzulint.jsonc` 編集時にプラグイン固有オプションの補完・バリデーションを提供
 - プラグインアップデート時に新オプションを自動提案
 
 ### 1.6.6 設定ファイルスキーマ
 
-`.tzlint.jsonc` 用のJSON Schema（`schemas/v1/config.json`）:
+`.tsuzulint.jsonc` 用のJSON Schema（`schemas/v1/config.json`）:
 - 基本フィールド（`rules`, `options`, `security`等）の補完・バリデーション
 - `options` セクションは `additionalProperties: true` でルール固有オプションを許容
 - 将来的にLSPで動的補完に移行

@@ -155,7 +155,7 @@ All matching nodes are passed as a batch (array) in a single `lint` call. This d
     },
     "config": {
       "type": "object",
-      "description": "Rule-specific configuration from .tzlint.json"
+      "description": "Rule-specific configuration from .tsuzulint.json"
     },
     "source": {
       "type": "string",

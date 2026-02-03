@@ -30,8 +30,8 @@ Supported config files:
 
 | Format | Status |
 | :--- | :--- |
-| `.tzlint.jsonc` | Supported (default, supports comments) |
-| `.tzlint.json` | Supported |
+| `.tsuzulint.jsonc` | Supported (default, supports comments) |
+| `.tsuzulint.json` | Supported |
 
 ## Rules
 

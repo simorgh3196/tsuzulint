@@ -128,7 +128,7 @@ impl LinterConfig {
             include: Vec::new(),
             exclude: Vec::new(),
             cache: true,
-            cache_dir: ".tsuzulint-cache".to_string(),
+            cache_dir: default_cache_dir(),
             timings: false,
             base_dir: None,
         }
@@ -136,7 +136,7 @@ impl LinterConfig {
 
     /// Loads configuration from a file.
     ///
-    /// Supports `.tzlint.jsonc`, `.tzlint.json`.
+    /// Supports `.tsuzulint.jsonc`, `.tsuzulint.json`.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, LinterError> {
         let path = path.as_ref();
         let content = fs::read_to_string(path)

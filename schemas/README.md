@@ -9,7 +9,7 @@ This directory contains JSON Schema definitions for TsuzuLint configuration and 
 | Schema | Description | Usage |
 | :--- | :--- | :--- |
 | [v1/rule.json](v1/rule.json) | Rule manifest schema | `tsuzulint-rule.json` in rule repositories |
-| [v1/config.json](v1/config.json) | Project configuration schema | `.tzlint.jsonc` in user projects |
+| [v1/config.json](v1/config.json) | Project configuration schema | `.tsuzulint.jsonc` in user projects |
 
 ### Type Definitions
 
@@ -53,7 +53,7 @@ Add `$schema` to your `tsuzulint-rule.json` for IDE auto-completion and validati
 
 ### Project Configuration
 
-Add `$schema` to your `.tzlint.jsonc`:
+Add `$schema` to your `.tsuzulint.jsonc`:
 
 ```json
 {
@@ -158,8 +158,8 @@ npm install -g ajv-cli
 # Validate tsuzulint-rule.json
 ajv validate -s schemas/v1/rule.json -d tsuzulint-rule.json
 
-# Validate .tzlint.jsonc
-ajv validate -s schemas/v1/config.json -d .tzlint.jsonc
+# Validate .tsuzulint.jsonc
+ajv validate -s schemas/v1/config.json -d .tsuzulint.jsonc
 
 # Validate rule manifest output
 ajv validate -s schemas/rule-types.json \

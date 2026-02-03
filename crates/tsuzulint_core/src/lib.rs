@@ -13,7 +13,7 @@
 //! ```rust,ignore
 //! use tsuzulint_core::{Linter, LinterConfig};
 //!
-//! let config = LinterConfig::from_file(".tzlint.json")?;
+//! let config = LinterConfig::from_file(".tsuzulint.json")?;
 //! let linter = Linter::new(config)?;
 //!
 //! let results = linter.lint_files(&["src/**/*.md"])?;

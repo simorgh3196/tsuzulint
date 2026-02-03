@@ -57,15 +57,15 @@ flowchart LR
 tzlint plugin install simorgh3196/tsuzulint-rule-no-doubled-joshi
 
 # With version specification
-tsuzulint plugin install simorgh3196/tsuzulint-rule-no-doubled-joshi@1.2.0
+tzlint plugin install simorgh3196/tsuzulint-rule-no-doubled-joshi@1.2.0
 
 # From URL
-tsuzulint plugin install https://example.com/rules/tsuzulint-rule.json
+tzlint plugin install https://example.com/rules/tsuzulint-rule.json
 ```
 
 **What `plugin install` Does:**
 
-1. If `.tzlint.jsonc` doesn't exist, creates it from template with JSON Schema reference
+1. If `.tsuzulint.jsonc` doesn't exist, creates it from template with JSON Schema reference
 2. Adds rule declaration to the `rules` array
 3. Retrieves configuration schema from `get_manifest()` returned manifest
 4. Adds all rule options with default values to the `options` section
@@ -73,12 +73,12 @@ tsuzulint plugin install https://example.com/rules/tsuzulint-rule.json
 Example - first install:
 
 ```bash
-tsuzulint plugin install simorgh3196/tsuzulint-rule-sentence-length
+tzlint plugin install simorgh3196/tsuzulint-rule-sentence-length
 ```
 
 **What happens:**
 
-1. `.tzlint.jsonc` is created:
+1. `.tsuzulint.jsonc` is created:
 
 ```json
 {
@@ -181,7 +181,7 @@ tsuzulint plugin cache clean
 
 ### 1.5 Security Settings
 
-Configure security policy in `.tzlint.jsonc`:
+Configure security policy in `.tsuzulint.jsonc`:
 
 ```json
 {
@@ -245,16 +245,16 @@ For plugins requesting additional permissions:
 For CI/CD, skip with `--yes` flag:
 
 ```bash
-tsuzulint plugin install --yes simorgh3196/tsuzulint-rule-foo
+tzlint plugin install --yes simorgh3196/tsuzulint-rule-foo
 ```
 
 ### 1.6 Configuration File Priority and Rule Conflicts
 
 #### Config File Priority
 
-TsuzuLint supports two configuration file formats. When both exist, `.tzlint.jsonc` takes precedence:
+TsuzuLint supports two configuration file formats. When both exist, `.tsuzulint.jsonc` takes precedence:
 
-1. `.tzlint.jsonc` (default, supports comments)
+1. `.tsuzulint.jsonc` (default, supports comments)
 2. `.tzlint.json`
 
 #### Rule Identifier and Alias
@@ -682,17 +682,17 @@ Clear cache and retry:
 
 ```bash
 tsuzulint plugin cache clean
-tsuzulint plugin install  # Re-install plugins
+tzlint plugin install  # Re-install plugins
 ```
 
 ---
 
 ## Part 5: CLI Reference
 
-### tsuzulint plugin install
+### tzlint plugin install
 
 ```text
-tsuzulint plugin install [OPTIONS] <PLUGIN>
+tzlint plugin install [OPTIONS] <PLUGIN>
 
 Arguments:
   <PLUGIN>  Plugin specification (owner/repo, owner/repo@version, manifest URL/path)
@@ -775,7 +775,7 @@ Arguments:
 
 Description:
   Calculates SHA256 hash of a WASM file.
-  Use this to set the sha256 field in the [artifacts] serde_json = "1.0"  # tsuzulint-rule.json パース.
+  Use this to set the sha256 field in the [artifacts].
 ```
 
 ---

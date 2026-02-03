@@ -77,7 +77,7 @@ jobs:
           cp target/${{ matrix.target }}/release/tzlint dist/tzlint
           cp README.md LICENSE dist/ 2>/dev/null || true
           cd dist
-          tar -czvf ../tzlint-${{ matrix.target }}.tar.gz *
+          tar -czvf ../tzlint-${{ matrix.target }}.tar.gz ./*
 
       - name: Prepare artifacts (Windows)
         if: matrix.os == 'windows-latest'
@@ -111,7 +111,7 @@ jobs:
       - name: Package WASM
         run: |
           cd crates/tsuzulint_wasm/pkg
-          tar -czvf ../../../tsuzulint-wasm.tar.gz *
+          tar -czvf ../../../tsuzulint-wasm.tar.gz ./*
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v6
         with:

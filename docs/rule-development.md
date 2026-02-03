@@ -118,12 +118,12 @@ cargo test
 
 ```bash
 # Copy to your project
-cp target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm ~/.tzlint/rules/
+cp target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm ~/.tsuzulint/rules/
 
-# Configure in .tzlint.jsonc
-cat > .tzlint.jsonc << 'EOF'
+# Configure in .tsuzulint.jsonc
+cat > .tsuzulint.jsonc << 'EOF'
 {
-  "rules": ["~/.tzlint/rules/tsuzulint_rule_my_rule.wasm"],
+  "rules": ["~/.tsuzulint/rules/tsuzulint_rule_my_rule.wasm"],
   "options": {
     "my-rule": true
   }
@@ -281,7 +281,7 @@ fn default_max() -> usize { 100 }
 
 ### User Configuration
 
-In `.tzlint.jsonc`:
+In `.tsuzulint.jsonc`:
 
 ```json
 {
@@ -489,7 +489,7 @@ See [Plugin Distribution Guide](./plugin-distribution.md) for details.
 
 ### Option 2: Direct Distribution
 
-Share the `.wasm` file directly. Users add to `.tzlint.jsonc`:
+Share the `.wasm` file directly. Users add to `.tsuzulint.jsonc`:
 
 ```json
 {
@@ -569,6 +569,7 @@ crate-type = ["cdylib"]
 ```bash
 # Enable debug logging
 RUST_LOG=debug tsuzulint lint file.md
+```
 
 ### Use Testing Tool
 

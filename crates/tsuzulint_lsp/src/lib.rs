@@ -253,7 +253,7 @@ impl Backend {
             }
         };
 
-        let config_files = [".tzlint.jsonc", ".tzlint.json"];
+        let config_files = [".tsuzulint.jsonc", ".tsuzulint.json"];
         for name in config_files {
             let config_path = path.join(name);
             if config_path.exists() {
@@ -422,7 +422,7 @@ impl LanguageServer for Backend {
         // Check if any config files changed
         let config_changed = params.changes.iter().any(|change| {
             let path = change.uri.path();
-            path.ends_with(".tzlint.json") || path.ends_with(".tzlint.jsonc")
+            path.ends_with(".tsuzulint.json") || path.ends_with(".tsuzulint.jsonc")
         });
 
         if config_changed {

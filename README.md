@@ -61,11 +61,11 @@ TsuzuLint includes a Language Server Protocol (LSP) implementation for real-time
 tzlint lsp
 ```
 
-The server automatically loads configuration from `.tzlint.jsonc` or `.tzlint.json` in the workspace root.
+The server automatically loads configuration from `.tsuzulint.jsonc` or `.tzlint.json` in the workspace root.
 
 ## Configuration
 
-Create `.tzlint.jsonc` in your project root:
+Create `.tsuzulint.jsonc` in your project root:
 
 ```json
 {
