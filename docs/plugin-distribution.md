@@ -12,7 +12,7 @@ TsuzuLint's plugin system has the following features:
 
 - **GitHub Integration**: Install directly from GitHub Releases using `owner/repo` format
 - **Version Management**: Reproducibility through semantic versioning and exact version pinning (owner/repo@1.0.0)
-- **Security**: WASM sandbox + hash verification + confirmation UI
+- **Security**: WASM sandbox + hash verification
 - **Backward Compatibility**: Continues to support existing local plugin specifications
 
 ```mermaid
@@ -130,7 +130,7 @@ tzlint plugin install simorgh3196/tsuzulint-rule-sentence-length
 
 ```bash
 # List installed plugins
-tsuzulint plugin list
+tzlint plugin list
 
 # Example output:
 # NAME                                       VERSION  SOURCE
@@ -138,26 +138,26 @@ tsuzulint plugin list
 # simorgh3196/tsuzulint-rule-sentence-length    1.0.0    github
 
 # Check for updatable plugins
-tsuzulint plugin list --outdated
+tzlint plugin list --outdated
 
 # Example output:
 # NAME                                    CURRENT  LATEST
 # simorgh3196/tsuzulint-rule-no-doubled-joshi  1.2.3    1.3.0
 
 # Update all plugins
-tsuzulint plugin update
+tzlint plugin update
 
 # Update specific plugin
-tsuzulint plugin update simorgh3196/tsuzulint-rule-no-doubled-joshi
+tzlint plugin update simorgh3196/tsuzulint-rule-no-doubled-joshi
 
 # Remove plugin
-tsuzulint plugin remove simorgh3196/tsuzulint-rule-no-doubled-joshi
+tzlint plugin remove simorgh3196/tsuzulint-rule-no-doubled-joshi
 ```
 
 ### 1.4 Cache and Storage
 
 ```text
-~/.tsuzulint/
+~/.config/tsuzulint/
 ├── plugins/                      # Global plugins (manually placed)
 │   └── my-local-rule.wasm
 ├── cache/
@@ -169,86 +169,16 @@ tsuzulint plugin remove simorgh3196/tsuzulint-rule-no-doubled-joshi
     ├── source.rs           # ダウンロード・キャッシュ
     ├── manifest.rs         # tsuzulint-rule.json パース
     ├── hash.rs             # SHA256検証
-    ├── trust.rs            # 信頼済みリポジトリ管理
     └── permissions.rs      # パーミッション検証・ホスト関数
 ```
 
 To clear the cache:
 
 ```bash
-tsuzulint plugin cache clean
+tzlint plugin cache clean
 ```
 
-### 1.5 Security Settings
-
-Configure security policy in `.tsuzulint.jsonc`:
-
-```json
-{
-  "security": {
-    "confirm_install": true,
-    "trusted_repositories": [
-      "simorgh3196/tsuzulint-rule-no-doubled-joshi",
-      "simorgh3196/tsuzulint-rule-sentence-length"
-    ]
-  }
-}
-```
-
-| Option | Default | Description |
-| :--- | :--- | :--- |
-| `confirm_install` | `true` | Show confirmation prompt on first install |
-| `trusted_repositories` | `[]` | List of trusted repositories |
-
-#### First-time Installation Confirmation
-
-When `confirm_install: true`, new plugins require confirmation:
-
-```text
-╭──────────────────────────────────────────────────────────────────╮
-│ New plugin installation                                          │
-├──────────────────────────────────────────────────────────────────┤
-│ Plugin: simorgh3196/tsuzulint-rule-no-doubled-joshi                 │
-│ Version: 1.2.3                                                   │
-│ Repository: https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi │
-│ SHA256: a1b2c3d4e5f6...                                          │
-│                                                                  │
-│ ⚠️  This plugin will run in a WASM sandbox, but you should only  │
-│    install plugins from sources you trust.                       │
-│                                                                  │
-│ [T]rust this repository | [I]nstall once | [C]ancel              │
-╰──────────────────────────────────────────────────────────────────╯
-```
-
-For plugins requesting additional permissions:
-
-```text
-╭──────────────────────────────────────────────────────────────────╮
-│ New plugin installation                                          │
-├──────────────────────────────────────────────────────────────────┤
-│ Plugin: simorgh3196/tsuzulint-rule-custom-dict                      │
-│ Version: 1.0.0                                                   │
-│                                                                  │
-│ ⚠️  This plugin requests additional permissions:                 │
-│                                                                  │
-│   📁 Read: ~/.tsuzulint/dictionaries/                               │
-│   📝 Write: ~/.tsuzulint/dictionaries/user-terms.txt                │
-│                                                                  │
-│ [T]rust this repository | [I]nstall once | [C]ancel              │
-╰──────────────────────────────────────────────────────────────────╯
-```
-
-- **Trust**: Add this repository to the trust list (skip confirmation in the future)
-- **Install once**: Install only this time (confirmation required next time)
-- **Cancel**: Cancel installation
-
-For CI/CD, skip with `--yes` flag:
-
-```bash
-tzlint plugin install --yes simorgh3196/tsuzulint-rule-foo
-```
-
-### 1.6 Configuration File Priority and Rule Conflicts
+### 1.5 Configuration File Priority and Rule Conflicts
 
 #### Config File Priority
 
@@ -577,10 +507,8 @@ flowchart TB
         L2D["File access restricted to declared paths only"]
     end
 
-    subgraph L3["Layer 3: Verification and User Confirmation"]
+    subgraph L3["Layer 3: Verification"]
         L3A["SHA256 hash verification: Detect tampering/corruption"]
-        L3B["First install confirmation: Shows requested permissions"]
-        L3C["Trusted repositories: Can skip confirmation"]
     end
 
     L1 --> L2 --> L3
@@ -599,14 +527,6 @@ flowchart TB
 | Infinite loops | ✓ Blocked (configurable timeout) |
 | Path traversal attacks | ✓ Blocked (path normalization enforced) |
 
-### 3.3 What Sandbox Cannot Prevent
-
-| Threat | Description | Mitigation |
-| :--- | :--- | :--- |
-| Data leakage | Embedding input data in diagnostic messages | Use only trusted plugins |
-| Malicious diagnostics | Outputting large amounts of unrelated warnings | Review, use only trusted repositories |
-| Supply chain attacks | Takeover of legitimate repositories | Hash verification, exact version pinning |
-
 ### 3.4 Hash Verification Mechanism
 
 ```mermaid
@@ -623,24 +543,9 @@ flowchart TB
     CHECK -->|YES| OK[Verification successful - Continue installation]
 ```
 
-### 3.5 Managing Trusted Repositories
-
-```bash
-# Add repository to trust list
-tsuzulint plugin trust add simorgh3196/tsuzulint-rule-no-doubled-joshi
-
-# Show trust list
-tsuzulint plugin trust list
-
-# Remove repository from trust list
-tsuzulint plugin trust remove simorgh3196/tsuzulint-rule-no-doubled-joshi
-```
-
-Plugins from trusted repositories are installed without confirmation.
-
 ---
 
-## Part 4: Troubleshooting
+## Part 3: Troubleshooting
 
 ### Installation Errors
 
@@ -681,15 +586,15 @@ Error: Plugin requires TsuzuLint >= 0.3.0, but current version is 0.2.0
 Clear cache and retry:
 
 ```bash
-tsuzulint plugin cache clean
+tzlint plugin cache clean
 tzlint plugin install  # Re-install plugins
 ```
 
 ---
 
-## Part 5: CLI Reference
+## Part 4: CLI Reference
 
-### tzlint plugin install
+### TsuzuLint plugin install
 
 ```text
 tzlint plugin install [OPTIONS] <PLUGIN>
@@ -698,14 +603,13 @@ Arguments:
   <PLUGIN>  Plugin specification (owner/repo, owner/repo@version, manifest URL/path)
 
 Options:
-  -y, --yes        Skip confirmation prompt
   -h, --help       Show help
 ```
 
-### tsuzulint plugin list
+### TsuzuLint plugin list
 
 ```text
-tsuzulint plugin list [OPTIONS]
+tzlint plugin list [OPTIONS]
 
 Options:
   --outdated       Show only updatable plugins
@@ -713,62 +617,50 @@ Options:
   -h, --help       Show help
 ```
 
-### tsuzulint plugin update
+### TsuzuLint plugin update
 
 ```text
-tsuzulint plugin update [OPTIONS] [PLUGIN]
+tzlint plugin update [OPTIONS] [PLUGIN]
 
 Arguments:
   [PLUGIN]  Plugin to update (all if omitted)
 
 Options:
-  -y, --yes        Skip confirmation prompt
   -h, --help       Show help
 ```
 
-### tsuzulint plugin remove
+### TsuzuLint plugin remove
 
 ```text
-tsuzulint plugin remove <PLUGIN>
+tzlint plugin remove <PLUGIN>
 
 Arguments:
   <PLUGIN>  Plugin name to remove
 ```
 
-### tsuzulint plugin verify
+### TsuzuLint plugin verify
 
 ```text
-tsuzulint plugin verify [PLUGIN]
+tzlint plugin verify [PLUGIN]
 
 Arguments:
   [PLUGIN]  Plugin to verify (all if omitted)
 ```
 
-### tsuzulint plugin cache
+### TsuzuLint plugin cache
 
 ```text
-tsuzulint plugin cache <COMMAND>
+tzlint plugin cache <COMMAND>
 
 Commands:
   clean    Clear cache
   list     Show cache contents
 ```
 
-### tsuzulint plugin trust
+### TsuzuLint plugin hash
 
 ```text
-tsuzulint plugin trust <COMMAND>
-
-Commands:
-  add <REPO>     Add repository to trust list (e.g., owner/repo)
-  list           Show trust list
-  remove <REPO>  Remove repository from trust list
-```
-
-### tsuzulint plugin hash
-
-```text
-tsuzulint plugin hash <WASM_FILE>
+tzlint plugin hash <WASM_FILE>
 
 Arguments:
   <WASM_FILE>  WASM file to calculate hash for

@@ -482,7 +482,7 @@ gh release create v1.0.0 \
 Users can install with:
 
 ```bash
-tsuzulint plugin install yourname/tsuzulint-rule-my-rule
+tzlint plugin install yourname/tsuzulint-rule-my-rule
 ```
 
 See [Plugin Distribution Guide](./plugin-distribution.md) for details.
@@ -568,7 +568,7 @@ crate-type = ["cdylib"]
 
 ```bash
 # Enable debug logging
-RUST_LOG=debug tsuzulint lint file.md
+RUST_LOG=debug tzlint lint file.md
 ```
 
 ### Use Testing Tool
@@ -577,7 +577,7 @@ TsuzuLint provides a dedicated test runner:
 
 ```bash
 echo '{"node":{"type":"Str","range":[0,5]},"config":{},"source":"hello","file_path":null}' | \
-  tsuzulint test-rule my-rule.wasm
+  tzlint test-rule my-rule.wasm
 ```
 
 ---
