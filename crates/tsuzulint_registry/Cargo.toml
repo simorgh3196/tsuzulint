@@ -8,12 +8,13 @@ license.workspace = true
 
 [dependencies]
 jsonschema.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 
 # Future dependencies for registry interaction
-# reqwest.workspace = true
 # sha2.workspace = true
 # semver.workspace = true
