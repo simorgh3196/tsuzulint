@@ -117,13 +117,13 @@ impl WasmDownloader {
         }
 
         // Check Content-Length header if available (early rejection)
-        if let Some(content_length) = response.content_length() {
-            if content_length > self.max_size {
-                return Err(DownloadError::TooLarge {
-                    size: content_length,
-                    max: self.max_size,
-                });
-            }
+        if let Some(content_length) = response.content_length()
+            && content_length > self.max_size
+        {
+            return Err(DownloadError::TooLarge {
+                size: content_length,
+                max: self.max_size,
+            });
         }
 
         let response = response.error_for_status()?;
