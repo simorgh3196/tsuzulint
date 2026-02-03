@@ -116,6 +116,9 @@ impl WasmDownloader {
             )));
         }
 
+        // Check HTTP status first to prioritize server errors over size errors
+        let response = response.error_for_status()?;
+
         // Check Content-Length header if available (early rejection)
         if let Some(content_length) = response.content_length()
             && content_length > self.max_size
@@ -125,8 +128,6 @@ impl WasmDownloader {
                 max: self.max_size,
             });
         }
-
-        let response = response.error_for_status()?;
 
         // Stream the body while computing hash and checking size
         let mut stream = response.bytes_stream();
