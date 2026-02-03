@@ -161,6 +161,8 @@ impl WasmDownloader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn test_version_placeholder_replacement() {
@@ -211,15 +213,231 @@ mod tests {
         assert_eq!(downloader.timeout, Duration::from_secs(60));
     }
 
-    #[test]
-    fn test_sha256_computation() {
-        // SHA256 of empty bytes
-        let computed = HashVerifier::compute(b"");
+    #[tokio::test]
+    async fn test_download_success() {
+        let mock_server = MockServer::start().await;
 
-        // Known SHA256 of empty string
-        assert_eq!(
-            computed,
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
+        // Mock a valid WASM file (just some random bytes)
+        let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
+        let expected_hash = HashVerifier::compute(wasm_content);
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(wasm_content.as_slice()))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = ExternalRuleManifest {
+            rule: crate::manifest::RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                // Fill required fields with defaults
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: crate::manifest::IsolationLevel::Global,
+            },
+            artifacts: crate::manifest::Artifacts {
+                wasm: format!("{}/rule.wasm", mock_server.uri()),
+                sha256: "ignored_in_download_method".to_string(),
+            },
+            permissions: None,
+            tsuzulint: None,
+            options: None,
+        };
+
+        let downloader = WasmDownloader::new();
+        let result = downloader
+            .download(&manifest)
+            .await
+            .expect("Download failed");
+
+        assert_eq!(result.bytes, wasm_content);
+        assert_eq!(result.computed_hash, expected_hash);
+    }
+
+    #[tokio::test]
+    async fn test_download_not_found() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = ExternalRuleManifest {
+            rule: crate::manifest::RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: crate::manifest::IsolationLevel::Global,
+            },
+            artifacts: crate::manifest::Artifacts {
+                wasm: format!("{}/rule.wasm", mock_server.uri()),
+                sha256: "ignored".to_string(),
+            },
+            permissions: None,
+            tsuzulint: None,
+            options: None,
+        };
+
+        let downloader = WasmDownloader::new();
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::NotFound(_)) => {}
+            _ => panic!("Expected NotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_server_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = ExternalRuleManifest {
+            rule: crate::manifest::RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: crate::manifest::IsolationLevel::Global,
+            },
+            artifacts: crate::manifest::Artifacts {
+                wasm: format!("{}/rule.wasm", mock_server.uri()),
+                sha256: "ignored".to_string(),
+            },
+            permissions: None,
+            tsuzulint: None,
+            options: None,
+        };
+
+        let downloader = WasmDownloader::new();
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::NetworkError(e)) => {
+                assert!(e.status() == Some(reqwest::StatusCode::INTERNAL_SERVER_ERROR))
+            }
+            _ => panic!("Expected NetworkError with 500 status"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_too_large_content_length() {
+        let mock_server = MockServer::start().await;
+        let max_size = 10;
+
+        Mock::given(method("GET"))
+            .and(path("/large.wasm"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("A".repeat(20)), // wiremock automatically sets Content-Length
+            )
+            .mount(&mock_server)
+            .await;
+
+        let manifest = ExternalRuleManifest {
+            rule: crate::manifest::RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: crate::manifest::IsolationLevel::Global,
+            },
+            artifacts: crate::manifest::Artifacts {
+                wasm: format!("{}/large.wasm", mock_server.uri()),
+                sha256: "ignored".to_string(),
+            },
+            permissions: None,
+            tsuzulint: None,
+            options: None,
+        };
+
+        let downloader = WasmDownloader::with_max_size(max_size);
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::TooLarge { size, max }) => {
+                assert_eq!(size, 20);
+                assert_eq!(max, max_size);
+            }
+            _ => panic!("Expected TooLarge error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_too_large_stream() {
+        let mock_server = MockServer::start().await;
+        let max_size = 5;
+
+        // Use a chunked response or simply a body larger than limit where Content-Length might be ignored or missing
+        // wiremock sets Content-Length by default for strict responses.
+        // We can check if TooLarge catches it even if we just stream it.
+        // But to verify *streaming* specifically, we often rely on implementation detail or large bodies.
+        // Here we just verify that it fails eventually.
+
+        Mock::given(method("GET"))
+            .and(path("/stream.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("A".repeat(10)))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = ExternalRuleManifest {
+            rule: crate::manifest::RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: crate::manifest::IsolationLevel::Global,
+            },
+            artifacts: crate::manifest::Artifacts {
+                wasm: format!("{}/stream.wasm", mock_server.uri()),
+                sha256: "ignored".to_string(),
+            },
+            permissions: None,
+            tsuzulint: None,
+            options: None,
+        };
+
+        let downloader = WasmDownloader::with_max_size(max_size);
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::TooLarge { size: _, max }) => {
+                assert_eq!(max, max_size);
+            }
+            _ => panic!("Expected TooLarge error"),
+        }
     }
 }
