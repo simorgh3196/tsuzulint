@@ -1,8 +1,8 @@
 //! WASM downloader for plugin artifacts.
 
+use crate::hash::HashVerifier;
 use crate::manifest::ExternalRuleManifest;
 use futures_util::StreamExt;
-use sha2::{Digest, Sha256};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -87,7 +87,7 @@ impl WasmDownloader {
     /// This method:
     /// 1. Replaces `{version}` placeholder in the URL with the manifest version
     /// 2. Downloads the WASM binary with streaming (early size limit check)
-    /// 3. Computes the SHA256 hash during download
+    /// 3. Computes the SHA256 hash after download
     ///
     /// Note: Hash verification against `manifest.artifacts.sha256` is the caller's responsibility.
     pub async fn download(
@@ -129,9 +129,8 @@ impl WasmDownloader {
             });
         }
 
-        // Stream the body while computing hash and checking size
+        // Stream the body while checking size
         let mut stream = response.bytes_stream();
-        let mut hasher = Sha256::new();
         let mut bytes = Vec::new();
         let mut total_size: u64 = 0;
 
@@ -147,12 +146,10 @@ impl WasmDownloader {
                 });
             }
 
-            hasher.update(&chunk);
             bytes.extend_from_slice(&chunk);
         }
 
-        let hash = hasher.finalize();
-        let computed_hash = hex::encode(hash);
+        let computed_hash = HashVerifier::compute(&bytes);
 
         Ok(DownloadResult {
             bytes,
@@ -161,16 +158,35 @@ impl WasmDownloader {
     }
 }
 
-/// Convert a byte slice to lowercase hex string.
-mod hex {
-    pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn create_dummy_manifest(wasm_url: String) -> ExternalRuleManifest {
+        ExternalRuleManifest {
+            rule: crate::manifest::RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: crate::manifest::IsolationLevel::Global,
+            },
+            artifacts: crate::manifest::Artifacts {
+                wasm: wasm_url,
+                sha256: "ignored_in_download_method".to_string(),
+            },
+            permissions: None,
+            tsuzulint: None,
+            options: None,
+        }
+    }
 
     #[test]
     fn test_version_placeholder_replacement() {
@@ -221,24 +237,124 @@ mod tests {
         assert_eq!(downloader.timeout, Duration::from_secs(60));
     }
 
-    #[test]
-    fn test_hex_encode() {
-        let bytes = [0x00, 0x01, 0x02, 0xab, 0xcd, 0xef];
-        assert_eq!(hex::encode(bytes), "000102abcdef");
+    #[tokio::test]
+    async fn test_download_success() {
+        let mock_server = MockServer::start().await;
+
+        // Mock a valid WASM file (just some random bytes)
+        let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
+        let expected_hash = HashVerifier::compute(wasm_content);
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(wasm_content.as_slice()))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+
+        let downloader = WasmDownloader::new();
+        let result = downloader
+            .download(&manifest)
+            .await
+            .expect("Download failed");
+
+        assert_eq!(result.bytes, wasm_content);
+        assert_eq!(result.computed_hash, expected_hash);
     }
 
-    #[test]
-    fn test_sha256_computation() {
-        // SHA256 of empty bytes
-        let mut hasher = Sha256::new();
-        hasher.update(b"");
-        let hash = hasher.finalize();
-        let computed = hex::encode(hash);
+    #[tokio::test]
+    async fn test_download_not_found() {
+        let mock_server = MockServer::start().await;
 
-        // Known SHA256 of empty string
-        assert_eq!(
-            computed,
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+
+        let downloader = WasmDownloader::new();
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::NotFound(_)) => {}
+            _ => panic!("Expected NotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_server_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+
+        let downloader = WasmDownloader::new();
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::NetworkError(e)) => {
+                assert!(e.status() == Some(reqwest::StatusCode::INTERNAL_SERVER_ERROR))
+            }
+            _ => panic!("Expected NetworkError with 500 status"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_too_large_content_length() {
+        let mock_server = MockServer::start().await;
+        let max_size = 10;
+
+        Mock::given(method("GET"))
+            .and(path("/large.wasm"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("A".repeat(20)), // wiremock automatically sets Content-Length
+            )
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/large.wasm", mock_server.uri()));
+
+        let downloader = WasmDownloader::with_max_size(max_size);
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::TooLarge { size, max }) => {
+                assert_eq!(size, 20);
+                assert_eq!(max, max_size);
+            }
+            _ => panic!("Expected TooLarge error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_too_large_stream() {
+        let mock_server = MockServer::start().await;
+        let max_size = 5;
+
+        Mock::given(method("GET"))
+            .and(path("/stream.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("A".repeat(10)))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/stream.wasm", mock_server.uri()));
+
+        let downloader = WasmDownloader::with_max_size(max_size);
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::TooLarge { size: _, max }) => {
+                assert_eq!(max, max_size);
+            }
+            _ => panic!("Expected TooLarge error"),
+        }
     }
 }
