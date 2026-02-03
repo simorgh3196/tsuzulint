@@ -1,11 +1,16 @@
 //! WASM downloader for plugin artifacts.
 
 use crate::manifest::ExternalRuleManifest;
+use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
+use std::time::Duration;
 use thiserror::Error;
 
-/// Default maximum file size for WASM downloads (10 MB).
-pub const DEFAULT_MAX_SIZE: u64 = 10 * 1024 * 1024;
+/// Default maximum file size for WASM downloads (50 MB).
+pub const DEFAULT_MAX_SIZE: u64 = 50 * 1024 * 1024;
+
+/// Default request timeout (30 seconds).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Error type for WASM download operations.
 #[derive(Debug, Error)]
@@ -40,6 +45,7 @@ pub struct DownloadResult {
 pub struct WasmDownloader {
     client: reqwest::Client,
     max_size: u64,
+    timeout: Duration,
 }
 
 impl Default for WasmDownloader {
@@ -54,6 +60,7 @@ impl WasmDownloader {
         Self {
             client: reqwest::Client::new(),
             max_size: DEFAULT_MAX_SIZE,
+            timeout: DEFAULT_TIMEOUT,
         }
     }
 
@@ -62,6 +69,16 @@ impl WasmDownloader {
         Self {
             client: reqwest::Client::new(),
             max_size,
+            timeout: DEFAULT_TIMEOUT,
+        }
+    }
+
+    /// Create a new WASM downloader with custom settings.
+    pub fn with_options(max_size: u64, timeout: Duration) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            max_size,
+            timeout,
         }
     }
 
@@ -69,7 +86,7 @@ impl WasmDownloader {
     ///
     /// This method:
     /// 1. Replaces `{version}` placeholder in the URL with the manifest version
-    /// 2. Downloads the WASM binary
+    /// 2. Downloads the WASM binary with streaming (early size limit check)
     /// 3. Computes the SHA256 hash during download
     ///
     /// Note: Hash verification against `manifest.artifacts.sha256` is the caller's responsibility.
@@ -89,9 +106,9 @@ impl WasmDownloader {
             .replace("{version}", &manifest.rule.version)
     }
 
-    /// Download WASM from a resolved URL.
+    /// Download WASM from a resolved URL using streaming.
     async fn download_from_url(&self, url: &str) -> Result<DownloadResult, DownloadError> {
-        let response = self.client.get(url).send().await?;
+        let response = self.client.get(url).timeout(self.timeout).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(DownloadError::NotFound(format!(
@@ -99,29 +116,40 @@ impl WasmDownloader {
             )));
         }
 
-        // Check Content-Length header if available
-        if let Some(content_length) = response.content_length()
-            && content_length > self.max_size
-        {
-            return Err(DownloadError::TooLarge {
-                size: content_length,
-                max: self.max_size,
-            });
+        // Check Content-Length header if available (early rejection)
+        if let Some(content_length) = response.content_length() {
+            if content_length > self.max_size {
+                return Err(DownloadError::TooLarge {
+                    size: content_length,
+                    max: self.max_size,
+                });
+            }
         }
 
-        let bytes = response.error_for_status()?.bytes().await?.to_vec();
+        let response = response.error_for_status()?;
 
-        // Check actual size after download
-        if bytes.len() as u64 > self.max_size {
-            return Err(DownloadError::TooLarge {
-                size: bytes.len() as u64,
-                max: self.max_size,
-            });
-        }
-
-        // Compute SHA256 hash
+        // Stream the body while computing hash and checking size
+        let mut stream = response.bytes_stream();
         let mut hasher = Sha256::new();
-        hasher.update(&bytes);
+        let mut bytes = Vec::new();
+        let mut total_size: u64 = 0;
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            total_size += chunk.len() as u64;
+
+            // Early rejection if size exceeds limit
+            if total_size > self.max_size {
+                return Err(DownloadError::TooLarge {
+                    size: total_size,
+                    max: self.max_size,
+                });
+            }
+
+            hasher.update(&chunk);
+            bytes.extend_from_slice(&chunk);
+        }
+
         let hash = hasher.finalize();
         let computed_hash = hex::encode(hash);
 
@@ -171,6 +199,25 @@ mod tests {
         let url = downloader.resolve_url(&manifest);
 
         assert_eq!(url, "https://example.com/releases/v1.2.3/rule.wasm");
+    }
+
+    #[test]
+    fn test_default_max_size_is_50mb() {
+        let downloader = WasmDownloader::new();
+        assert_eq!(downloader.max_size, 50 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_default_timeout_is_30_seconds() {
+        let downloader = WasmDownloader::new();
+        assert_eq!(downloader.timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_custom_options() {
+        let downloader = WasmDownloader::with_options(100 * 1024 * 1024, Duration::from_secs(60));
+        assert_eq!(downloader.max_size, 100 * 1024 * 1024);
+        assert_eq!(downloader.timeout, Duration::from_secs(60));
     }
 
     #[test]

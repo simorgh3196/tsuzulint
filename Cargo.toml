@@ -67,7 +67,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 
 # HTTP & Plugin Registry
-reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", features = ["rustls-tls", "json", "stream"] }
 semver = "1.0"
 jsonschema = "0.40"
 sha2 = "0.10"
