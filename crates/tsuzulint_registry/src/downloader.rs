@@ -164,6 +164,30 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    fn create_dummy_manifest(wasm_url: String) -> ExternalRuleManifest {
+        ExternalRuleManifest {
+            rule: crate::manifest::RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: crate::manifest::IsolationLevel::Global,
+            },
+            artifacts: crate::manifest::Artifacts {
+                wasm: wasm_url,
+                sha256: "ignored_in_download_method".to_string(),
+            },
+            permissions: None,
+            tsuzulint: None,
+            options: None,
+        }
+    }
+
     #[test]
     fn test_version_placeholder_replacement() {
         let manifest = ExternalRuleManifest {
@@ -227,28 +251,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = ExternalRuleManifest {
-            rule: crate::manifest::RuleMetadata {
-                name: "test-rule".to_string(),
-                version: "1.0.0".to_string(),
-                // Fill required fields with defaults
-                description: None,
-                repository: None,
-                license: None,
-                authors: vec![],
-                keywords: vec![],
-                fixable: false,
-                node_types: vec![],
-                isolation_level: crate::manifest::IsolationLevel::Global,
-            },
-            artifacts: crate::manifest::Artifacts {
-                wasm: format!("{}/rule.wasm", mock_server.uri()),
-                sha256: "ignored_in_download_method".to_string(),
-            },
-            permissions: None,
-            tsuzulint: None,
-            options: None,
-        };
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
         let downloader = WasmDownloader::new();
         let result = downloader
@@ -270,27 +273,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = ExternalRuleManifest {
-            rule: crate::manifest::RuleMetadata {
-                name: "test-rule".to_string(),
-                version: "1.0.0".to_string(),
-                description: None,
-                repository: None,
-                license: None,
-                authors: vec![],
-                keywords: vec![],
-                fixable: false,
-                node_types: vec![],
-                isolation_level: crate::manifest::IsolationLevel::Global,
-            },
-            artifacts: crate::manifest::Artifacts {
-                wasm: format!("{}/rule.wasm", mock_server.uri()),
-                sha256: "ignored".to_string(),
-            },
-            permissions: None,
-            tsuzulint: None,
-            options: None,
-        };
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
         let downloader = WasmDownloader::new();
         let result = downloader.download(&manifest).await;
@@ -311,27 +294,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = ExternalRuleManifest {
-            rule: crate::manifest::RuleMetadata {
-                name: "test-rule".to_string(),
-                version: "1.0.0".to_string(),
-                description: None,
-                repository: None,
-                license: None,
-                authors: vec![],
-                keywords: vec![],
-                fixable: false,
-                node_types: vec![],
-                isolation_level: crate::manifest::IsolationLevel::Global,
-            },
-            artifacts: crate::manifest::Artifacts {
-                wasm: format!("{}/rule.wasm", mock_server.uri()),
-                sha256: "ignored".to_string(),
-            },
-            permissions: None,
-            tsuzulint: None,
-            options: None,
-        };
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
         let downloader = WasmDownloader::new();
         let result = downloader.download(&manifest).await;
@@ -357,27 +320,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = ExternalRuleManifest {
-            rule: crate::manifest::RuleMetadata {
-                name: "test-rule".to_string(),
-                version: "1.0.0".to_string(),
-                description: None,
-                repository: None,
-                license: None,
-                authors: vec![],
-                keywords: vec![],
-                fixable: false,
-                node_types: vec![],
-                isolation_level: crate::manifest::IsolationLevel::Global,
-            },
-            artifacts: crate::manifest::Artifacts {
-                wasm: format!("{}/large.wasm", mock_server.uri()),
-                sha256: "ignored".to_string(),
-            },
-            permissions: None,
-            tsuzulint: None,
-            options: None,
-        };
+        let manifest = create_dummy_manifest(format!("{}/large.wasm", mock_server.uri()));
 
         let downloader = WasmDownloader::with_max_size(max_size);
         let result = downloader.download(&manifest).await;
@@ -396,39 +339,13 @@ mod tests {
         let mock_server = MockServer::start().await;
         let max_size = 5;
 
-        // Use a chunked response or simply a body larger than limit where Content-Length might be ignored or missing
-        // wiremock sets Content-Length by default for strict responses.
-        // We can check if TooLarge catches it even if we just stream it.
-        // But to verify *streaming* specifically, we often rely on implementation detail or large bodies.
-        // Here we just verify that it fails eventually.
-
         Mock::given(method("GET"))
             .and(path("/stream.wasm"))
             .respond_with(ResponseTemplate::new(200).set_body_string("A".repeat(10)))
             .mount(&mock_server)
             .await;
 
-        let manifest = ExternalRuleManifest {
-            rule: crate::manifest::RuleMetadata {
-                name: "test-rule".to_string(),
-                version: "1.0.0".to_string(),
-                description: None,
-                repository: None,
-                license: None,
-                authors: vec![],
-                keywords: vec![],
-                fixable: false,
-                node_types: vec![],
-                isolation_level: crate::manifest::IsolationLevel::Global,
-            },
-            artifacts: crate::manifest::Artifacts {
-                wasm: format!("{}/stream.wasm", mock_server.uri()),
-                sha256: "ignored".to_string(),
-            },
-            permissions: None,
-            tsuzulint: None,
-            options: None,
-        };
+        let manifest = create_dummy_manifest(format!("{}/stream.wasm", mock_server.uri()));
 
         let downloader = WasmDownloader::with_max_size(max_size);
         let result = downloader.download(&manifest).await;
