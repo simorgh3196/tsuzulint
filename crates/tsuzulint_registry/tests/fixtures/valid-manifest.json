@@ -1,0 +1,13 @@
+{
+    "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
+    "rule": {
+        "name": "test-rule",
+        "version": "1.0.0",
+        "description": "Test rule for fetcher tests",
+        "fixable": false
+    },
+    "artifacts": {
+        "wasm": "https://example.com/test-rule.wasm",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+}
