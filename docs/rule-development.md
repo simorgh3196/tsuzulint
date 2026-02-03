@@ -453,8 +453,8 @@ cargo build --target wasm32-wasip1 --release
 # Calculate hash
 HASH=$(shasum -a 256 target/wasm32-wasip1/release/tsuzulint_rule_my_rule.wasm | cut -d' ' -f1)
 
-# Create tzlint-rule.json (required for GitHub distribution)
-cat > tzlint-rule.json << EOF
+# Create tsuzulint-rule.json (required for GitHub distribution)
+cat > tsuzulint-rule.json << EOF
 {
   "\$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
   "rule": {
