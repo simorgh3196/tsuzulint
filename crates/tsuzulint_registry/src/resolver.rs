@@ -206,29 +206,32 @@ impl PluginResolver {
             PluginSource::Path(path) => FetcherSource::Path(path.clone()),
         };
 
-        let manifest = self.fetcher.fetch(&fetcher_source).await?;
-
-        // Determine alias based on source type
-        let alias = match &spec.source {
-            PluginSource::GitHub { .. } => spec
-                .alias
-                .clone()
-                .unwrap_or_else(|| manifest.rule.name.clone()),
+        // Fail fast: strict alias check for Url and Path sources
+        match &spec.source {
             PluginSource::Url(_) => {
-                spec.alias
-                    .clone()
-                    .ok_or_else(|| ResolveError::AliasRequired {
+                if spec.alias.is_none() {
+                    return Err(ResolveError::AliasRequired {
                         src: "url".to_string(),
-                    })?
+                    });
+                }
             }
             PluginSource::Path(_) => {
-                spec.alias
-                    .clone()
-                    .ok_or_else(|| ResolveError::AliasRequired {
+                if spec.alias.is_none() {
+                    return Err(ResolveError::AliasRequired {
                         src: "path".to_string(),
-                    })?
+                    });
+                }
             }
-        };
+            _ => {}
+        }
+
+        let manifest = self.fetcher.fetch(&fetcher_source).await?;
+
+        // Determine alias (GitHub falls back to manifest name, others used validated spec alias)
+        let alias = spec
+            .alias
+            .clone()
+            .unwrap_or_else(|| manifest.rule.name.clone());
 
         match &spec.source {
             PluginSource::GitHub { version, .. } => {
@@ -733,5 +736,36 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("not allowed") || err.to_string().contains("traversal"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_url_fail_fast_missing_alias() {
+        let resolver = PluginResolver::new().unwrap();
+        // Manually construct spec without alias (parse would reject this, but we test resolve safety)
+        let spec = PluginSpec {
+            source: PluginSource::Url("https://example.com/manifest.json".to_string()),
+            alias: None,
+        };
+
+        let result = resolver.resolve(&spec).await;
+        match result {
+            Err(ResolveError::AliasRequired { src }) => assert_eq!(src, "url"),
+            _ => panic!("Should have failed with AliasRequired"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_fail_fast_missing_alias() {
+        let resolver = PluginResolver::new().unwrap();
+        let spec = PluginSpec {
+            source: PluginSource::Path(PathBuf::from("./local")),
+            alias: None,
+        };
+
+        let result = resolver.resolve(&spec).await;
+        match result {
+            Err(ResolveError::AliasRequired { src }) => assert_eq!(src, "path"),
+            _ => panic!("Should have failed with AliasRequired"),
+        }
     }
 }
