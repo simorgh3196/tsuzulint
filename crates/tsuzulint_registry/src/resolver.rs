@@ -36,6 +36,8 @@ pub enum ResolveError {
     CacheError(#[from] CacheError),
     #[error("Hash mismatch: {0}")]
     HashMismatch(#[from] HashError),
+    #[error("Alias required for {src}")]
+    AliasRequired { src: String },
     #[error("Serialization error: {0}")]
     SerializationError(String),
 }
@@ -205,10 +207,28 @@ impl PluginResolver {
         };
 
         let manifest = self.fetcher.fetch(&fetcher_source).await?;
-        let alias = spec
-            .alias
-            .clone()
-            .unwrap_or_else(|| manifest.rule.name.clone());
+
+        // Determine alias based on source type
+        let alias = match &spec.source {
+            PluginSource::GitHub { .. } => spec
+                .alias
+                .clone()
+                .unwrap_or_else(|| manifest.rule.name.clone()),
+            PluginSource::Url(_) => {
+                spec.alias
+                    .clone()
+                    .ok_or_else(|| ResolveError::AliasRequired {
+                        src: "url".to_string(),
+                    })?
+            }
+            PluginSource::Path(_) => {
+                spec.alias
+                    .clone()
+                    .ok_or_else(|| ResolveError::AliasRequired {
+                        src: "path".to_string(),
+                    })?
+            }
+        };
 
         match &spec.source {
             PluginSource::GitHub { version, .. } => {
