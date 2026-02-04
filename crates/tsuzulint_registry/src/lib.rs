@@ -1,5 +1,6 @@
 //! TsuzuLint Plugin Registry and Manifest Management.
 
+pub mod cache;
 pub mod downloader;
 pub mod error;
 pub mod fetcher;
