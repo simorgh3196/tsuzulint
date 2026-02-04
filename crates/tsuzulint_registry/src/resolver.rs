@@ -36,8 +36,6 @@ pub enum ResolveError {
     CacheError(#[from] CacheError),
     #[error("Hash mismatch: {0}")]
     HashMismatch(#[from] HashError),
-    #[error("Alias required for {src}")]
-    AliasRequired { src: String },
     #[error("Serialization error: {0}")]
     SerializationError(String),
 }
