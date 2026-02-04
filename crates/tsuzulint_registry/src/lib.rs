@@ -13,3 +13,4 @@ pub use error::FetchError;
 pub use fetcher::{ManifestFetcher, PluginSource};
 pub use hash::{HashError, HashVerifier};
 pub use manifest::{ExternalRuleManifest, ManifestError};
+pub use resolver::{ParseError, PluginResolver, PluginSpec, ResolveError, ResolvedPlugin};

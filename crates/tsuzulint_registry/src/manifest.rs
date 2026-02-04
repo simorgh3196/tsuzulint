@@ -15,7 +15,7 @@ pub enum ManifestError {
 
 /// The structure of `tsuzulint-rule.json`.
 /// This matches `schemas/v1/rule.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExternalRuleManifest {
     pub rule: RuleMetadata,
     pub artifacts: Artifacts,
@@ -27,7 +27,7 @@ pub struct ExternalRuleManifest {
     pub options: Option<Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuleMetadata {
     pub name: String,
     pub version: String,
@@ -46,7 +46,7 @@ pub struct RuleMetadata {
     pub isolation_level: IsolationLevel,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IsolationLevel {
     #[default]
@@ -58,13 +58,13 @@ fn default_isolation_level() -> IsolationLevel {
     IsolationLevel::Global
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Artifacts {
     pub wasm: String,
     pub sha256: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Permissions {
     #[serde(default)]
     pub filesystem: Vec<FilesystemPermission>,
@@ -72,19 +72,19 @@ pub struct Permissions {
     pub network: Vec<NetworkPermission>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FilesystemPermission {
     pub path: String,
     pub access: String, // "read" or "write"
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NetworkPermission {
     pub host: String,
     pub access: String, // "http" or "https"
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TsuzuLintCompatibility {
     pub min_version: Option<String>,
 }
