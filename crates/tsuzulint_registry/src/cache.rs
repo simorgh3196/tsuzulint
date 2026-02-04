@@ -35,9 +35,23 @@ impl PluginCache {
     }
 
     fn get_path(&self, source: &PluginSource, version: &str) -> Option<PathBuf> {
+        // Validation helper: ensure segment is a single normal component
+        let is_safe = |s: &str| {
+            let path = std::path::Path::new(s);
+            let mut components = path.components();
+            match (components.next(), components.next()) {
+                (Some(std::path::Component::Normal(c)), None) => c == s,
+                _ => false,
+            }
+        };
+
         match source {
             PluginSource::GitHub { owner, repo, .. } => {
-                Some(self.cache_dir.join(owner).join(repo).join(version))
+                if is_safe(owner) && is_safe(repo) && is_safe(version) {
+                    Some(self.cache_dir.join(owner).join(repo).join(version))
+                } else {
+                    None
+                }
             }
             _ => None,
         }
@@ -120,18 +134,17 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_cache_miss() {
+    fn should_return_none_when_cache_is_empty() {
         let temp_dir = tempdir().unwrap();
         let cache = PluginCache::with_dir(temp_dir.path());
         let source = PluginSource::github("owner", "repo");
 
-        // Should return None when cache is empty
         let result = cache.get(&source, "1.0.0");
         assert!(result.is_none());
     }
 
     #[test]
-    fn test_store_and_retrieve() {
+    fn should_store_and_retrieve_plugin() {
         let temp_dir = tempdir().unwrap();
         let cache = PluginCache::with_dir(temp_dir.path());
         let source = PluginSource::github("owner", "repo");
@@ -160,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn test_remove() {
+    fn should_remove_specific_plugin_version() {
         let temp_dir = tempdir().unwrap();
         let cache = PluginCache::with_dir(temp_dir.path());
         let source = PluginSource::github("owner", "repo");
@@ -179,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clear() {
+    fn should_clear_entire_cache() {
         let temp_dir = tempdir().unwrap();
         let cache = PluginCache::with_dir(temp_dir.path());
         let source1 = PluginSource::github("owner1", "repo1");
@@ -198,5 +211,27 @@ mod tests {
         // Root dir should be empty or gone
         assert!(!temp_dir.path().join("owner1").exists());
         assert!(!temp_dir.path().join("owner2").exists());
+    }
+
+    #[test]
+    fn should_prevent_path_traversal() {
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+
+        let source = PluginSource::github("owner", "repo");
+        let malicious_version = "../../../etc/passwd";
+
+        // Try to store with malicious version
+        let result = cache.store(&source, malicious_version, b"evil", "{}");
+
+        // Should either fail with error or be sanitized
+        // For this test, we expect it to be sanitized and NOT write outside the cache dir
+        if let Ok(stored) = result {
+            assert!(stored.wasm_path.starts_with(temp_dir.path()));
+            assert!(!stored.wasm_path.to_string_lossy().contains(".."));
+        } else {
+            // Or explicitly return an error for invalid paths
+            // assert!(matches!(result.unwrap_err(), CacheError::InvalidPath(_)));
+        }
     }
 }
