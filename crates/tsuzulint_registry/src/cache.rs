@@ -57,15 +57,33 @@ impl PluginCache {
             }
         };
 
+        if !is_safe(version) {
+            return None;
+        }
+
         match source {
             PluginSource::GitHub { owner, repo, .. } => {
-                if is_safe(owner) && is_safe(repo) && is_safe(version) {
+                if is_safe(owner) && is_safe(repo) {
                     Some(self.cache_dir.join(owner).join(repo).join(version))
                 } else {
                     None
                 }
             }
-            _ => None,
+            PluginSource::Url(url) => {
+                // For URL, we use a hash of the URL as the directory name
+                // to avoid issues with special characters in URLs.
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(url.as_bytes());
+                let result = hasher.finalize();
+                let hash_hex = hex::encode(result);
+
+                Some(self.cache_dir.join("url").join(hash_hex).join(version))
+            }
+            PluginSource::Path(_) => {
+                // Local paths are not cached
+                None
+            }
         }
     }
 
@@ -96,7 +114,7 @@ impl PluginCache {
         let dir = self.get_path(source, version).ok_or_else(|| {
             CacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
-                "Caching is only supported for GitHub plugins",
+                "Caching is not supported for this plugin source",
             ))
         })?;
 

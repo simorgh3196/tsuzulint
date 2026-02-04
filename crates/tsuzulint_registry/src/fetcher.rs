@@ -57,6 +57,7 @@ impl PluginSource {
 /// Fetcher for plugin manifests from various sources.
 pub struct ManifestFetcher {
     client: reqwest::Client,
+    github_base_url: String,
 }
 
 impl Default for ManifestFetcher {
@@ -70,7 +71,14 @@ impl ManifestFetcher {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
+            github_base_url: "https://github.com".to_string(),
         }
+    }
+
+    /// Set the base URL for GitHub requests (for testing).
+    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
+        self.github_base_url = url.into();
+        self
     }
 
     /// Fetch a manifest from the given source.
@@ -96,13 +104,10 @@ impl ManifestFetcher {
         repo: &str,
         version: Option<&str>,
     ) -> Result<ExternalRuleManifest, FetchError> {
+        let base = &self.github_base_url;
         let url = match version {
-            Some(v) => format!(
-                "https://github.com/{owner}/{repo}/releases/download/v{v}/tsuzulint-rule.json"
-            ),
-            None => format!(
-                "https://github.com/{owner}/{repo}/releases/latest/download/tsuzulint-rule.json"
-            ),
+            Some(v) => format!("{base}/{owner}/{repo}/releases/download/v{v}/tsuzulint-rule.json"),
+            None => format!("{base}/{owner}/{repo}/releases/latest/download/tsuzulint-rule.json"),
         };
 
         self.fetch_from_url(&url).await

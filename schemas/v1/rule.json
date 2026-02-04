@@ -4,7 +4,10 @@
   "title": "TsuzuLint Rule Manifest",
   "description": "Schema for tsuzulint-rule.json - Rule distribution manifest",
   "type": "object",
-  "required": ["rule", "artifacts"],
+  "required": [
+    "rule",
+    "artifacts"
+  ],
   "properties": {
     "$schema": {
       "type": "string",
@@ -13,19 +16,29 @@
     "rule": {
       "type": "object",
       "description": "Rule metadata",
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "properties": {
         "name": {
           "type": "string",
           "description": "Unique rule identifier (e.g., 'no-todo', 'sentence-length')",
           "pattern": "^[a-z][a-z0-9-]*$",
-          "examples": ["no-todo", "sentence-length", "no-doubled-joshi"]
+          "examples": [
+            "no-todo",
+            "sentence-length",
+            "no-doubled-joshi"
+          ]
         },
         "version": {
           "type": "string",
           "description": "Semantic version",
           "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?$",
-          "examples": ["1.0.0", "2.1.0-beta.1"]
+          "examples": [
+            "1.0.0",
+            "2.1.0-beta.1"
+          ]
         },
         "description": {
           "type": "string",
@@ -35,24 +48,44 @@
           "type": "string",
           "format": "uri",
           "description": "GitHub repository URL",
-          "examples": ["https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi"]
+          "examples": [
+            "https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi"
+          ]
         },
         "license": {
           "type": "string",
           "description": "License identifier (SPDX format recommended)",
-          "examples": ["MIT", "Apache-2.0", "GPL-3.0-only"]
+          "examples": [
+            "MIT",
+            "Apache-2.0",
+            "GPL-3.0-only"
+          ]
         },
         "authors": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "List of authors (format: 'Name <email>')",
-          "examples": [["Tomoya Hayakawa <simorgh3196@gmail.com>"]]
+          "examples": [
+            [
+              "Tomoya Hayakawa <simorgh3196@gmail.com>"
+            ]
+          ]
         },
         "keywords": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Search keywords",
-          "examples": [["japanese", "grammar", "joshi"]]
+          "examples": [
+            [
+              "japanese",
+              "grammar",
+              "joshi"
+            ]
+          ]
         },
         "fixable": {
           "type": "boolean",
@@ -64,12 +97,29 @@
           "items": {
             "type": "string",
             "enum": [
-              "Document", "Paragraph", "Header", "BlockQuote",
-              "List", "ListItem", "CodeBlock", "HorizontalRule",
-              "Html", "Table", "TableRow", "TableCell",
-              "Str", "Break", "Emphasis", "Strong", "Delete",
-              "Code", "Link", "Image", "LinkReference",
-              "ImageReference", "FootnoteReference"
+              "Document",
+              "Paragraph",
+              "Header",
+              "BlockQuote",
+              "List",
+              "ListItem",
+              "CodeBlock",
+              "HorizontalRule",
+              "Html",
+              "Table",
+              "TableRow",
+              "TableCell",
+              "Str",
+              "Break",
+              "Emphasis",
+              "Strong",
+              "Delete",
+              "Code",
+              "Link",
+              "Image",
+              "LinkReference",
+              "ImageReference",
+              "FootnoteReference"
             ]
           },
           "default": [],
@@ -77,7 +127,10 @@
         },
         "isolation_level": {
           "type": "string",
-          "enum": ["global", "block"],
+          "enum": [
+            "global",
+            "block"
+          ],
           "default": "global",
           "description": "Rule isolation level: 'global' requires entire document, 'block' can run on individual blocks"
         }
@@ -87,11 +140,14 @@
     "artifacts": {
       "type": "object",
       "description": "Downloadable artifacts and integrity verification",
-      "required": ["wasm", "sha256"],
+      "required": [
+        "wasm",
+        "sha256"
+      ],
       "properties": {
         "wasm": {
           "type": "string",
-          "format": "uri",
+          "format": "uri-reference",
           "description": "WASM file download URL. Use {version} placeholder for version interpolation.",
           "examples": [
             "https://github.com/owner/repo/releases/download/v{version}/rule.wasm"
@@ -113,7 +169,10 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["path", "access"],
+            "required": [
+              "path",
+              "access"
+            ],
             "properties": {
               "path": {
                 "type": "string",
@@ -121,7 +180,10 @@
               },
               "access": {
                 "type": "string",
-                "enum": ["read", "write"],
+                "enum": [
+                  "read",
+                  "write"
+                ],
                 "description": "Access type: 'read' or 'write'"
               }
             },
@@ -133,7 +195,10 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["host", "access"],
+            "required": [
+              "host",
+              "access"
+            ],
             "properties": {
               "host": {
                 "type": "string",
@@ -141,7 +206,10 @@
               },
               "access": {
                 "type": "string",
-                "enum": ["http", "https"],
+                "enum": [
+                  "http",
+                  "https"
+                ],
                 "description": "Protocol to use"
               }
             },
@@ -160,7 +228,10 @@
           "type": "string",
           "pattern": "^\\d+\\.\\d+\\.\\d+$",
           "description": "Minimum required TsuzuLint version",
-          "examples": ["0.2.0", "1.0.0"]
+          "examples": [
+            "0.2.0",
+            "1.0.0"
+          ]
         }
       },
       "additionalProperties": false

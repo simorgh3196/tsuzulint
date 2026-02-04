@@ -6,6 +6,7 @@ pub mod error;
 pub mod fetcher;
 pub mod hash;
 pub mod manifest;
+pub mod resolver;
 
 pub use downloader::{DownloadError, DownloadResult, WasmDownloader};
 pub use error::FetchError;
