@@ -5,9 +5,21 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum CacheError {
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
+    #[error("Permission denied: {0}")]
+    PermissionDenied(std::io::Error),
     #[error("Cache directory resolution failed")]
     DirResolutionFailed,
+}
+
+impl From<std::io::Error> for CacheError {
+    fn from(err: std::io::Error) -> Self {
+        if err.kind() == std::io::ErrorKind::PermissionDenied {
+            CacheError::PermissionDenied(err)
+        } else {
+            CacheError::Io(err)
+        }
+    }
 }
 
 pub struct CachedPlugin {
@@ -232,6 +244,46 @@ mod tests {
         } else {
             // Or explicitly return an error for invalid paths
             // assert!(matches!(result.unwrap_err(), CacheError::InvalidPath(_)));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn should_report_permission_denied() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+        let source = PluginSource::github("owner", "repo");
+
+        // Create the directory with read-only permissions
+        let cache_path = temp_dir.path().join("owner/repo/1.0.0");
+        fs::create_dir_all(&cache_path).unwrap();
+
+        // Remove write permissions from the directory so we can't create files inside it
+        let mut perms = fs::metadata(&cache_path).unwrap().permissions();
+        perms.set_mode(0o500); // Read/Execute only, no Write
+        fs::set_permissions(&cache_path, perms).unwrap();
+
+        let result = cache.store(&source, "1.0.0", b"test", "{}");
+
+        match result {
+            Err(CacheError::PermissionDenied(_)) => {
+                // Success
+            }
+            Err(e) => {
+                // If run as root or on some file systems, permission might not be denied
+                // But if it IS denied, it MUST be PermissionDenied variant, not generic Io
+                if e.to_string().to_lowercase().contains("permission denied") {
+                    panic!(
+                        "Got IO error with 'Permission denied' message but not PermissionDenied variant: {:?}",
+                        e
+                    );
+                }
+            }
+            Ok(_) => {
+                // Maybe running as root?
+            }
         }
     }
 }
