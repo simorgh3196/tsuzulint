@@ -598,6 +598,7 @@ fn run_plugin_install(
         .build()
         .into_diagnostic()?
         .block_on(async { resolver.resolve(&spec).await })
+        .into_diagnostic()?;
     info!("Successfully installed: {}", resolved.manifest.rule.name);
 
     // Update config
@@ -676,6 +677,8 @@ fn update_config_with_plugin(
 
     // Add to options
     let options_map = config_value
+        .as_object_mut()
+        .ok_or_else(|| miette::miette!("Invalid configuration: root must be an object"))?
         .entry("options")
         .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
         .as_object_mut()

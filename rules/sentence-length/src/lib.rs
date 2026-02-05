@@ -41,7 +41,7 @@ struct Config {
     max: usize,
     /// Skip code blocks and inline code.
     #[serde(default = "default_true")]
-    skip_code: bool,
+    _skip_code: bool,
 }
 
 fn default_max() -> usize {
@@ -56,7 +56,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             max: DEFAULT_MAX_LENGTH,
-            skip_code: true,
+            _skip_code: true,
         }
     }
 }
