@@ -1,7 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
-use std::path::PathBuf;
 use tempfile::tempdir;
 use tsuzulint_registry::hash::HashVerifier;
 
@@ -68,7 +67,7 @@ fn test_plugin_install_local_path() {
         .arg(&spec_json)
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "Successfully installed: local-rule",
         ));
 
