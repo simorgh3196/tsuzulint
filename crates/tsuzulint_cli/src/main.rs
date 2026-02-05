@@ -656,6 +656,12 @@ fn update_config_with_plugin(
         offset_adjustment += text.len() as isize;
     };
 
+    let root_obj = ast
+        .value
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| miette::miette!("Invalid config: root must be an object"))?;
+
     // 1. Add to rules array
     // Construct rule definition string
     let rule_def_str = match &spec.source {
@@ -697,46 +703,38 @@ fn update_config_with_plugin(
     };
 
     if needs_add_rule {
-        // Find "rules" in AST
-        // AST navigation is simplified here. We assume root is object.
-        let root = ast.value.as_ref().and_then(|v| v.as_object());
+        // Check if "rules" property exists
+        let rules_prop = root_obj.properties.iter().find(|p| match &p.name {
+            ObjectPropName::String(s) => s.value == "rules",
+            ObjectPropName::Word(w) => w.value == "rules",
+        });
 
-        if let Some(root_obj) = root {
-            // Check if "rules" property exists
-            let rules_prop = root_obj.properties.iter().find(|p| match &p.name {
-                ObjectPropName::String(s) => s.value == "rules",
-                ObjectPropName::Word(w) => w.value == "rules",
-            });
+        if let Some(prop) = rules_prop {
+            if let Some(array) = prop.value.as_array() {
+                // Start of array content (after '[')
+                // We append to the end
+                let end_pos = array.range.end - 1; // Assuming ']' is at end
+                let is_empty = array.elements.is_empty();
 
-            if let Some(prop) = rules_prop {
-                if let Some(array) = prop.value.as_array() {
-                    // Start of array content (after '[')
-                    // We append to the end
-                    let end_pos = array.range.end - 1; // Assuming ']' is at end
-                    let is_empty = array.elements.is_empty();
+                let insert_str = if is_empty {
+                    format!("\n    {}", rule_def_str)
+                } else {
+                    format!(",\n    {}", rule_def_str)
+                };
 
-                    let insert_str = if is_empty {
-                        format!("\n    {}", rule_def_str)
-                    } else {
-                        format!(",\n    {}", rule_def_str)
-                    };
-
-                    insert_at(end_pos, &insert_str);
-                }
-            } else {
-                // "rules" does not exist, insert it at start of object
-                let start_pos = root_obj.range.start + 1; // After '{'
-                let insert_str = format!(
-                    r#"
+                insert_at(end_pos, &insert_str);
+            }
+        } else {
+            // "rules" does not exist, insert it at start of object
+            let start_pos = root_obj.range.start + 1; // After '{'
+            let insert_str = format!(
+                r#"
   "rules": [
     {}
   ],"#,
-                    rule_def_str
-                );
-                insert_at(start_pos, &insert_str);
-            }
-        } else {
-            return Err(miette::miette!("Config file must be a JSON object"));
+                rule_def_str
+            );
+            insert_at(start_pos, &insert_str);
         }
     }
 
@@ -766,63 +764,60 @@ fn update_config_with_plugin(
         .unwrap_or(true);
 
     if needs_add_option {
-        let root = ast.value.as_ref().and_then(|v| v.as_object());
-        if let Some(root_obj) = root {
-            let options_prop = root_obj.properties.iter().find(|p| match &p.name {
-                ObjectPropName::String(s) => s.value == "options",
-                ObjectPropName::Word(w) => w.value == "options",
-            });
+        let options_prop = root_obj.properties.iter().find(|p| match &p.name {
+            ObjectPropName::String(s) => s.value == "options",
+            ObjectPropName::Word(w) => w.value == "options",
+        });
 
-            if let Some(prop) = options_prop {
-                if let Some(obj) = prop.value.as_object() {
-                    let end_pos = obj.range.end - 1;
-                    let is_empty = obj.properties.is_empty();
-                    let insert_str = if is_empty {
-                        format!("\n    {}", options_str)
-                    } else {
-                        format!(",\n    {}", options_str)
-                    };
-                    insert_at(end_pos, &insert_str);
-                }
-            } else {
-                // "options" does not exist
-                // We need to be careful about commas if we added "rules" above?
-                // Actually, if "rules" existed, we are fine. If we added "rules", we added a trailing comma?
-                // My logic above: `"rules": [ ... ],` (added comma).
-                // So we can just append.
-
-                // However, inserting multiple properties into root is tricky with just offsets
-                // if we don't know where we inserted the previous one relative to this one.
-                // "rules" strategy: insert at start (`{` + 1).
-                // "options" strategy: insert at end (`}` - 1).
-                // This avoids collision!
-
-                let end_pos = root_obj.range.end - 1;
-                // Check if object is empty (before our edits)
-                let is_empty = root_obj.properties.is_empty();
-
+        if let Some(prop) = options_prop {
+            if let Some(obj) = prop.value.as_object() {
+                let end_pos = obj.range.end - 1;
+                let is_empty = obj.properties.is_empty();
                 let insert_str = if is_empty {
-                    format!(
-                        r#"
-  "options": {{
-    {}
-  }}
-"#,
-                        options_str
-                    )
+                    format!("\n    {}", options_str)
                 } else {
-                    // Need a comma before
-                    format!(
-                        r#",
-  "options": {{
-    {}
-  }}
-"#,
-                        options_str
-                    )
+                    format!(",\n    {}", options_str)
                 };
                 insert_at(end_pos, &insert_str);
             }
+        } else {
+            // "options" does not exist
+            // We need to be careful about commas if we added "rules" above?
+            // Actually, if "rules" existed, we are fine. If we added "rules", we added a trailing comma?
+            // My logic above: `"rules": [ ... ],` (added comma).
+            // So we can just append.
+
+            // However, inserting multiple properties into root is tricky with just offsets
+            // if we don't know where we inserted the previous one relative to this one.
+            // "rules" strategy: insert at start (`{` + 1).
+            // "options" strategy: insert at end (`}` - 1).
+            // This avoids collision!
+
+            let end_pos = root_obj.range.end - 1;
+            // Check if object is empty (before our edits)
+            let is_empty = root_obj.properties.is_empty();
+
+            let insert_str = if is_empty {
+                format!(
+                    r#"
+  "options": {{
+    {}
+  }}
+"#,
+                    options_str
+                )
+            } else {
+                // Need a comma before
+                format!(
+                    r#",
+  "options": {{
+    {}
+  }}
+"#,
+                    options_str
+                )
+            };
+            insert_at(end_pos, &insert_str);
         }
     }
 
