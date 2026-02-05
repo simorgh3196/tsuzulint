@@ -735,6 +735,8 @@ fn update_config_with_plugin(
                 );
                 insert_at(start_pos, &insert_str);
             }
+        } else {
+            return Err(miette::miette!("Config file must be a JSON object"));
         }
     }
 
