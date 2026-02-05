@@ -79,7 +79,13 @@ impl PluginSpec {
         let parts: Vec<&str> = s.split('@').collect();
         let (name_part, version) = match parts.len() {
             1 => (parts[0], None),
-            2 => (parts[0], Some(parts[1].to_string())),
+            2 => {
+                let v = parts[1].trim();
+                if v.is_empty() {
+                    return Err(ParseError::InvalidFormat);
+                }
+                (parts[0], Some(v.to_string()))
+            }
             _ => return Err(ParseError::InvalidFormat), // Too many @
         };
 
@@ -117,6 +123,18 @@ impl PluginSpec {
 
         let obj: SpecObj = serde_json::from_value(value.clone())
             .map_err(|e| ParseError::InvalidObject(e.to_string()))?;
+
+        // Ensure exactly one source is provided
+        let sources_count = [obj.github.is_some(), obj.url.is_some(), obj.path.is_some()]
+            .into_iter()
+            .filter(|&x| x)
+            .count();
+
+        if sources_count != 1 {
+            return Err(ParseError::InvalidObject(
+                "Exactly one of 'github', 'url', or 'path' must be specified".to_string(),
+            ));
+        }
 
         if let Some(github) = obj.github {
             // Re-use string parsing logic for github field, but override version if needed?
@@ -766,6 +784,46 @@ mod tests {
         match result {
             Err(ResolveError::AliasRequired { src }) => assert_eq!(src, "path"),
             _ => panic!("Should have failed with AliasRequired"),
+        }
+    }
+
+    #[test]
+    fn test_parse_string_error_empty_version() {
+        assert!(matches!(
+            PluginSpec::parse(&json!("owner/repo@")),
+            Err(ParseError::InvalidFormat)
+        ));
+        assert!(matches!(
+            PluginSpec::parse(&json!("owner/repo@   ")),
+            Err(ParseError::InvalidFormat)
+        ));
+    }
+
+    #[test]
+    fn test_parse_object_error_multiple_sources() {
+        let value = json!({
+            "github": "owner/repo",
+            "url": "https://example.com/manifest.json",
+            "as": "alias"
+        });
+        match PluginSpec::parse(&value) {
+            Err(ParseError::InvalidObject(msg)) => {
+                assert!(msg.contains("Exactly one"));
+            }
+            _ => panic!("Should fail with InvalidObject"),
+        }
+    }
+
+    #[test]
+    fn test_parse_object_error_no_source() {
+        let value = json!({
+            "as": "alias"
+        });
+        match PluginSpec::parse(&value) {
+            Err(ParseError::InvalidObject(msg)) => {
+                assert!(msg.contains("Exactly one"));
+            }
+            _ => panic!("Should fail with InvalidObject"),
         }
     }
 }
