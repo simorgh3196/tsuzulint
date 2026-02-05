@@ -12,6 +12,8 @@ use miette::{IntoDiagnostic, Result};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
+use jsonc_parser::ast::ObjectPropName;
+use jsonc_parser::{CollectOptions, ParseOptions};
 use tsuzulint_core::{
     LintResult, Linter, LinterConfig, Severity, apply_fixes_to_file, generate_sarif,
 };
@@ -628,77 +630,190 @@ fn update_config_with_plugin(
 
     let content = std::fs::read_to_string(&path_to_use).into_diagnostic()?;
 
-    // Note: This will strip comments if we use serde_json to parse/dump.
-    // Ideally we should use a jsonc parser/editor, but for now we warn the user in plan.
-    let mut config_value: serde_json::Value = serde_json::from_str(&content).into_diagnostic()?;
+    // Parse to AST to preserve comments
+    let parse_options = ParseOptions::default();
+    let collect_options = CollectOptions::default();
+    let ast = jsonc_parser::parse_to_ast(&content, &collect_options, &parse_options)
+        .map_err(|e| miette::miette!("Failed to parse config: {}", e))?;
+
+    // We need to determine if we should modify "rules" and "options"
+    // Since AST modification is complex, we will perform a text splice approach
+    // based on AST spans.
+
+    // First, convert to Value to check existence (logic)
+    let config_value: serde_json::Value =
+        jsonc_parser::parse_to_serde_value(&content, &parse_options)
+            .map_err(|e| miette::miette!("Failed to parse config value: {}", e))?
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+    let mut new_content = content.clone();
+    let mut offset_adjustment: isize = 0;
+
+    // Helper to insert text at position taking offset into account
+    let mut insert_at = |original_pos: usize, text: &str| {
+        let pos = (original_pos as isize + offset_adjustment) as usize;
+        new_content.insert_str(pos, text);
+        offset_adjustment += text.len() as isize;
+    };
 
     // 1. Add to rules array
-    let rules_array = config_value
-        .get_mut("rules")
-        .and_then(|v| v.as_array_mut())
-        .ok_or_else(|| miette::miette!("Invalid config: 'rules' must be an array"))?;
-
-    // Construct rule definition
-    let rule_def = match &spec.source {
+    // Construct rule definition string
+    let rule_def_str = match &spec.source {
         PluginSource::GitHub { owner, repo, .. } => {
-            // Always pin version to the manifest version for reproducibility
             let version = &manifest.rule.version;
             let source_str = format!("{}/{}@{}", owner, repo, version);
-
             if let Some(a) = &spec.alias {
-                serde_json::json!({
-                    "github": source_str,
-                    "as": a
-                })
+                format!(r#"{{ "github": "{}", "as": "{}" }}"#, source_str, a)
             } else {
-                serde_json::Value::String(source_str)
+                format!(r#""{}""#, source_str)
             }
         }
         PluginSource::Url(url) => {
-            serde_json::json!({
-                "url": url,
-                "as": alias
-            })
+            format!(r#"{{ "url": "{}", "as": "{}" }}"#, url, alias)
         }
         PluginSource::Path(path) => {
-            serde_json::json!({
-                "path": path,
-                "as": alias
-            })
+            format!(r#"{{ "path": "{}", "as": "{}" }}"#, path.display(), alias)
         }
     };
 
-    // Check if already exists (simple string or object with matching alias/name)
-    // For simplicity, we just add it if not present.
-    let rules_vec = rules_array;
-    if !rules_vec.contains(&rule_def) {
-        rules_vec.push(rule_def);
+    // Check if rule already exists (using serde logic)
+    let rule_def_json: serde_json::Value = serde_json::from_str(&rule_def_str).into_diagnostic()?;
+    let needs_add_rule = if let Some(rules) = config_value.get("rules").and_then(|v| v.as_array()) {
+        !rules.contains(&rule_def_json)
+    } else {
+        true
+    };
+
+    if needs_add_rule {
+        // Find "rules" in AST
+        // AST navigation is simplified here. We assume root is object.
+        let root = ast.value.as_ref().and_then(|v| v.as_object());
+
+        if let Some(root_obj) = root {
+            // Check if "rules" property exists
+            let rules_prop = root_obj.properties.iter().find(|p| match &p.name {
+                ObjectPropName::String(s) => s.value == "rules",
+                ObjectPropName::Word(w) => w.value == "rules",
+            });
+
+            if let Some(prop) = rules_prop {
+                if let Some(array) = prop.value.as_array() {
+                    // Start of array content (after '[')
+                    // We append to the end
+                    let end_pos = array.range.end - 1; // Assuming ']' is at end
+                    let is_empty = array.elements.is_empty();
+
+                    let insert_str = if is_empty {
+                        format!("\n    {}", rule_def_str)
+                    } else {
+                        format!(",\n    {}", rule_def_str)
+                    };
+
+                    insert_at(end_pos, &insert_str);
+                }
+            } else {
+                // "rules" does not exist, insert it at start of object
+                let start_pos = root_obj.range.start + 1; // After '{'
+                let insert_str = format!(
+                    r#"
+  "rules": [
+    {}
+  ],"#,
+                    rule_def_str
+                );
+                insert_at(start_pos, &insert_str);
+            }
+        }
     }
 
-    // Add to options
-    let options_map = config_value
-        .as_object_mut()
-        .ok_or_else(|| miette::miette!("Invalid configuration: root must be an object"))?
-        .entry("options")
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| miette::miette!("Invalid config: 'options' must be an object"))?;
+    // 2. Add to options
+    // Find "options" in AST (need to re-parse or adjust logic if we were modifying structure deeply)
+    // IMPORTANT: Since we modified `new_content` but `ast` refers to `content`,
+    // we must rely on `offset_adjustment` or re-parse.
+    // Since `offset_adjustment` accumulates, we can continue using `ast` locations + offset.
 
-    // Use manifest options or default to true
+    // Determine options text
     let default_options = if let Some(opts) = &manifest.options {
         opts.clone()
     } else {
         serde_json::Value::Bool(true)
     };
+    let options_str = format!(
+        r#""{}": {}"#,
+        alias,
+        serde_json::to_string(&default_options).unwrap()
+    );
 
-    options_map.insert(alias.to_string(), default_options);
+    // Check logic
+    let needs_add_option = config_value
+        .get("options")
+        .and_then(|v| v.as_object())
+        .map(|o| !o.contains_key(alias))
+        .unwrap_or(true);
 
-    // Write back
-    let new_content = serde_json::to_string_pretty(&config_value).into_diagnostic()?;
+    if needs_add_option {
+        let root = ast.value.as_ref().and_then(|v| v.as_object());
+        if let Some(root_obj) = root {
+            let options_prop = root_obj.properties.iter().find(|p| match &p.name {
+                ObjectPropName::String(s) => s.value == "options",
+                ObjectPropName::Word(w) => w.value == "options",
+            });
+
+            if let Some(prop) = options_prop {
+                if let Some(obj) = prop.value.as_object() {
+                    let end_pos = obj.range.end - 1;
+                    let is_empty = obj.properties.is_empty();
+                    let insert_str = if is_empty {
+                        format!("\n    {}", options_str)
+                    } else {
+                        format!(",\n    {}", options_str)
+                    };
+                    insert_at(end_pos, &insert_str);
+                }
+            } else {
+                // "options" does not exist
+                // We need to be careful about commas if we added "rules" above?
+                // Actually, if "rules" existed, we are fine. If we added "rules", we added a trailing comma?
+                // My logic above: `"rules": [ ... ],` (added comma).
+                // So we can just append.
+
+                // However, inserting multiple properties into root is tricky with just offsets
+                // if we don't know where we inserted the previous one relative to this one.
+                // "rules" strategy: insert at start (`{` + 1).
+                // "options" strategy: insert at end (`}` - 1).
+                // This avoids collision!
+
+                let end_pos = root_obj.range.end - 1;
+                // Check if object is empty (before our edits)
+                let is_empty = root_obj.properties.is_empty();
+
+                let insert_str = if is_empty {
+                    format!(
+                        r#"
+  "options": {{
+    {}
+  }}
+"#,
+                        options_str
+                    )
+                } else {
+                    // Need a comma before
+                    format!(
+                        r#",
+  "options": {{
+    {}
+  }}
+"#,
+                        options_str
+                    )
+                };
+                insert_at(end_pos, &insert_str);
+            }
+        }
+    }
+
     std::fs::write(&path_to_use, new_content).into_diagnostic()?;
-
     info!("Updated {}", path_to_use.display());
-
     Ok(())
 }
 

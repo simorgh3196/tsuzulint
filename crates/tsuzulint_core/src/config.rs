@@ -155,8 +155,11 @@ impl LinterConfig {
     /// Parses configuration from JSON string with schema validation.
     pub fn from_json(json: &str) -> Result<Self, LinterError> {
         // Parse into Value first for validation
-        let value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| LinterError::config(format!("Invalid JSON: {}", e)))?;
+        // Use jsonc-parser to support comments
+        let value =
+            jsonc_parser::parse_to_serde_value(json, &jsonc_parser::ParseOptions::default())
+                .map_err(|e| LinterError::config(format!("Invalid JSONC: {}", e)))?
+                .unwrap_or(serde_json::Value::Null);
 
         // Initialize and check schema
         let schema = CONFIG_SCHEMA.get_or_init(|| {
@@ -218,6 +221,21 @@ mod tests {
         let json = r#"{
             "options": {
                 "no-todo": true,
+                "max-lines": { "max": 100 }
+            }
+        }"#;
+
+        let config = LinterConfig::from_json(json).unwrap();
+        assert_eq!(config.options.len(), 2);
+    }
+
+    #[test]
+    fn test_config_from_jsonc() {
+        let json = r#"{
+            // This is a comment
+            "options": {
+                "no-todo": true, // Trailing comment
+                /* Block comment */
                 "max-lines": { "max": 100 }
             }
         }"#;
