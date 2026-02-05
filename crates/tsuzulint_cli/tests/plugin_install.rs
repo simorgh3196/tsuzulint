@@ -49,11 +49,9 @@ fn test_plugin_install_local_path() {
     // 5. Construct JSON spec for local path
     // We need absolute path for the test execution to always find it
     let manifest_path_abs = manifest_path.to_string_lossy();
-    // Escape backslashes for JSON on Windows if needed, but we are on Mac
-    let spec_json = format!(
-        r#"{{"path": "{}", "as": "my-local-rule"}}"#,
-        manifest_path_abs
-    );
+    // Escape backslashes for JSON on Windows and other special characters
+    let path_json = serde_json::to_string(&manifest_path_abs).unwrap();
+    let spec_json = format!(r#"{{"path": {}, "as": "my-local-rule"}}"#, path_json);
 
     // 6. Run install command
     // We run in 'root' so .tsuzulint.json is found/created there?

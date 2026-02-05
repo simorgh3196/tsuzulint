@@ -663,16 +663,28 @@ fn update_config_with_plugin(
             let version = &manifest.rule.version;
             let source_str = format!("{}/{}@{}", owner, repo, version);
             if let Some(a) = &spec.alias {
-                format!(r#"{{ "github": "{}", "as": "{}" }}"#, source_str, a)
+                format!(
+                    r#"{{ "github": "{}", "as": {} }}"#,
+                    source_str,
+                    serde_json::to_string(a).unwrap()
+                )
             } else {
                 format!(r#""{}""#, source_str)
             }
         }
         PluginSource::Url(url) => {
-            format!(r#"{{ "url": "{}", "as": "{}" }}"#, url, alias)
+            format!(
+                r#"{{ "url": {}, "as": {} }}"#,
+                serde_json::to_string(url).unwrap(),
+                serde_json::to_string(alias).unwrap()
+            )
         }
         PluginSource::Path(path) => {
-            format!(r#"{{ "path": "{}", "as": "{}" }}"#, path.display(), alias)
+            format!(
+                r#"{{ "path": {}, "as": {} }}"#,
+                serde_json::to_string(path).unwrap(),
+                serde_json::to_string(alias).unwrap()
+            )
         }
     };
 
@@ -739,8 +751,8 @@ fn update_config_with_plugin(
         serde_json::Value::Bool(true)
     };
     let options_str = format!(
-        r#""{}": {}"#,
-        alias,
+        r#"{}: {}"#,
+        serde_json::to_string(alias).unwrap(),
         serde_json::to_string(&default_options).unwrap()
     );
 
