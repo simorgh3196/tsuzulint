@@ -15,6 +15,7 @@ use tracing_subscriber::EnvFilter;
 use tsuzulint_core::{
     LintResult, Linter, LinterConfig, Severity, apply_fixes_to_file, generate_sarif,
 };
+use tsuzulint_registry::resolver::{PluginResolver, PluginSource, PluginSpec};
 
 /// TsuzuLint - High-performance natural language linter
 #[derive(Parser)]
@@ -107,6 +108,19 @@ enum PluginCommands {
         #[command(subcommand)]
         command: CacheCommands,
     },
+    /// Install a plugin
+    Install {
+        /// Plugin spec ("owner/repo" or "owner/repo@version")
+        spec: Option<String>,
+
+        /// Plugin source URL
+        #[arg(long)]
+        url: Option<String>,
+
+        /// Alias for the plugin
+        #[arg(long, value_name = "ALIAS")]
+        r#as: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -180,6 +194,10 @@ fn run(cli: Cli) -> Result<bool> {
                     Ok(false)
                 }
             },
+            PluginCommands::Install { spec, url, r#as } => {
+                run_plugin_install(spec, url, r#as)?;
+                Ok(false)
+            }
         },
     }
 }
@@ -531,6 +549,153 @@ fn run_plugin_cache_clean() -> Result<()> {
     cache.clear().into_diagnostic()?;
 
     info!("Plugin cache cleaned");
+    Ok(())
+}
+
+fn run_plugin_install(
+    spec_str: Option<String>,
+    url: Option<String>,
+    alias: Option<String>,
+) -> Result<()> {
+    let spec = if let Some(url) = url {
+        if let Some(spec_str) = spec_str {
+            return Err(miette::miette!(
+                "Cannot specify both a plugin spec '{}' and --url '{}'",
+                spec_str,
+                url
+            ));
+        }
+
+        if alias.is_none() {
+            return Err(miette::miette!("--as <ALIAS> is required when using --url"));
+        }
+
+        PluginSpec {
+            source: PluginSource::Url(url),
+            alias,
+        }
+    } else if let Some(s) = spec_str {
+        // Construct JSON to use PluginSpec::parse logic which handles string parsing
+        // We try to parse as JSON first to allow object format (e.g. {"path": "...", "as": "..."})
+        let json_value = serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s));
+        let mut spec = PluginSpec::parse(&json_value).into_diagnostic()?;
+
+        // Override alias if provided
+        if let Some(a) = alias {
+            spec.alias = Some(a);
+        }
+        spec
+    } else {
+        return Err(miette::miette!("Must provide a plugin spec or --url"));
+    };
+
+    info!("Resolving plugin...");
+    let resolver = PluginResolver::new().into_diagnostic()?;
+
+    // Run the resolve (download) process
+    let resolved = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .into_diagnostic()?
+        .block_on(async { resolver.resolve(&spec).await })
+    info!("Successfully installed: {}", resolved.manifest.rule.name);
+
+    // Update config
+    update_config_with_plugin(&spec, &resolved.alias, &resolved.manifest)?;
+
+    Ok(())
+}
+
+fn update_config_with_plugin(
+    spec: &PluginSpec,
+    alias: &str,
+    manifest: &tsuzulint_registry::manifest::ExternalRuleManifest,
+) -> Result<()> {
+    let config_path = PathBuf::from(".tsuzulint.jsonc");
+    let path_to_use = if config_path.exists() {
+        config_path
+    } else {
+        let json_path = PathBuf::from(".tsuzulint.json");
+        if json_path.exists() {
+            json_path
+        } else {
+            // Create default .tsuzulint.jsonc
+            run_init(false)?;
+            config_path
+        }
+    };
+
+    let content = std::fs::read_to_string(&path_to_use).into_diagnostic()?;
+
+    // Note: This will strip comments if we use serde_json to parse/dump.
+    // Ideally we should use a jsonc parser/editor, but for now we warn the user in plan.
+    let mut config_value: serde_json::Value = serde_json::from_str(&content).into_diagnostic()?;
+
+    // 1. Add to rules array
+    let rules_array = config_value
+        .get_mut("rules")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| miette::miette!("Invalid config: 'rules' must be an array"))?;
+
+    // Construct rule definition
+    let rule_def = match &spec.source {
+        PluginSource::GitHub { owner, repo, .. } => {
+            // Always pin version to the manifest version for reproducibility
+            let version = &manifest.rule.version;
+            let source_str = format!("{}/{}@{}", owner, repo, version);
+
+            if let Some(a) = &spec.alias {
+                serde_json::json!({
+                    "github": source_str,
+                    "as": a
+                })
+            } else {
+                serde_json::Value::String(source_str)
+            }
+        }
+        PluginSource::Url(url) => {
+            serde_json::json!({
+                "url": url,
+                "as": alias
+            })
+        }
+        PluginSource::Path(path) => {
+            serde_json::json!({
+                "path": path,
+                "as": alias
+            })
+        }
+    };
+
+    // Check if already exists (simple string or object with matching alias/name)
+    // For simplicity, we just add it if not present.
+    let rules_vec = rules_array;
+    if !rules_vec.contains(&rule_def) {
+        rules_vec.push(rule_def);
+    }
+
+    // Add to options
+    let options_map = config_value
+        .entry("options")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| miette::miette!("Invalid config: 'options' must be an object"))?;
+
+    // Use manifest options or default to true
+    let default_options = if let Some(opts) = &manifest.options {
+        opts.clone()
+    } else {
+        serde_json::Value::Bool(true)
+    };
+
+    options_map.insert(alias.to_string(), default_options);
+
+    // Write back
+    let new_content = serde_json::to_string_pretty(&config_value).into_diagnostic()?;
+    std::fs::write(&path_to_use, new_content).into_diagnostic()?;
+
+    info!("Updated {}", path_to_use.display());
+
     Ok(())
 }
 

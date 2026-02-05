@@ -42,6 +42,9 @@ cargo install --path crates/tsuzulint_cli
 # Initialize configuration
 tzlint init
 
+# Install a plugin
+tzlint plugin install simorgh3196/tsuzulint-rule-no-doubled-joshi
+
 # Lint files
 tzlint lint "**/*.md"
 
