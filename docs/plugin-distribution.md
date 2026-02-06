@@ -1,7 +1,7 @@
 # External Plugin Distribution Guide
 
-> [!WARNING]
-> **Not Yet Implemented**: This plugin distribution system is planned but not yet implemented.
+> [!IMPORTANT]
+> **Beta Feature**: This plugin distribution system is currently in **Beta**.
 > The specification described in this document is subject to change.
 
 A guide for installing and managing plugins published on GitHub, as well as a distribution guide for plugin authors.
@@ -263,6 +263,7 @@ When multiple rules have the same short name, you **must** use explicit aliases 
 ```
 
 **Resolution priority:**
+
 1. If `as` is specified, use that alias
 2. If no conflict exists, use the short name
 3. If conflict exists and no `as`, **raise an error**
@@ -307,11 +308,13 @@ To distribute a plugin, place `tsuzulint-rule.json` in your repository. Using JS
 ```
 
 **DX Benefits:**
+
 - `$schema` enables auto-completion, validation, and hover documentation in VSCode and other IDEs
 - Type checking and required field validation on save
 - No need to memorize field names or valid values
 
 **Schema Versioning:**
+
 - URL format: `schemas/v{major}/rule.json` (e.g., `schemas/v1/rule.json`)
 - Major version increments for backward-incompatible changes (adding required fields, removing fields, etc.)
 - Backward-compatible changes (adding optional fields, etc.) are updated within the same version

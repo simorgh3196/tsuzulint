@@ -12,9 +12,12 @@ use miette::{IntoDiagnostic, Result};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
+use jsonc_parser::ast::ObjectPropName;
+use jsonc_parser::{CollectOptions, ParseOptions};
 use tsuzulint_core::{
     LintResult, Linter, LinterConfig, Severity, apply_fixes_to_file, generate_sarif,
 };
+use tsuzulint_registry::resolver::{PluginResolver, PluginSource, PluginSpec};
 
 /// TsuzuLint - High-performance natural language linter
 #[derive(Parser)]
@@ -107,6 +110,19 @@ enum PluginCommands {
         #[command(subcommand)]
         command: CacheCommands,
     },
+    /// Install a plugin
+    Install {
+        /// Plugin spec ("owner/repo" or "owner/repo@version")
+        spec: Option<String>,
+
+        /// Plugin source URL
+        #[arg(long)]
+        url: Option<String>,
+
+        /// Alias for the plugin
+        #[arg(long, value_name = "ALIAS")]
+        r#as: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -180,6 +196,10 @@ fn run(cli: Cli) -> Result<bool> {
                     Ok(false)
                 }
             },
+            PluginCommands::Install { spec, url, r#as } => {
+                run_plugin_install(spec, url, r#as, cli.config)?;
+                Ok(false)
+            }
         },
     }
 }
@@ -531,6 +551,289 @@ fn run_plugin_cache_clean() -> Result<()> {
     cache.clear().into_diagnostic()?;
 
     info!("Plugin cache cleaned");
+    Ok(())
+}
+
+fn run_plugin_install(
+    spec_str: Option<String>,
+    url: Option<String>,
+    alias: Option<String>,
+    config_path: Option<PathBuf>,
+) -> Result<()> {
+    let spec = if let Some(url) = url {
+        if let Some(spec_str) = spec_str {
+            return Err(miette::miette!(
+                "Cannot specify both a plugin spec '{}' and --url '{}'",
+                spec_str,
+                url
+            ));
+        }
+
+        if alias.is_none() {
+            return Err(miette::miette!("--as <ALIAS> is required when using --url"));
+        }
+
+        PluginSpec {
+            source: PluginSource::Url(url),
+            alias,
+        }
+    } else if let Some(s) = spec_str {
+        // Construct JSON to use PluginSpec::parse logic which handles string parsing
+        // We try to parse as JSON first to allow object format (e.g. {"path": "...", "as": "..."})
+        let json_value = serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s));
+        let mut spec = PluginSpec::parse(&json_value).into_diagnostic()?;
+
+        // Override alias if provided
+        if let Some(a) = alias {
+            spec.alias = Some(a);
+        }
+        spec
+    } else {
+        return Err(miette::miette!("Must provide a plugin spec or --url"));
+    };
+
+    info!("Resolving plugin...");
+    let resolver = PluginResolver::new().into_diagnostic()?;
+
+    // Run the resolve (download) process
+    let resolved = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .into_diagnostic()?
+        .block_on(async { resolver.resolve(&spec).await })
+        .into_diagnostic()?;
+    info!("Successfully installed: {}", resolved.manifest.rule.name);
+
+    // Update config
+    update_config_with_plugin(&spec, &resolved.alias, &resolved.manifest, config_path)?;
+
+    Ok(())
+}
+
+fn update_config_with_plugin(
+    spec: &PluginSpec,
+    alias: &str,
+    manifest: &tsuzulint_registry::manifest::ExternalRuleManifest,
+    config_path: Option<PathBuf>,
+) -> Result<()> {
+    let path_to_use = if let Some(path) = config_path {
+        path
+    } else {
+        let config_path = PathBuf::from(".tsuzulint.jsonc");
+        if config_path.exists() {
+            config_path
+        } else {
+            let json_path = PathBuf::from(".tsuzulint.json");
+            if json_path.exists() {
+                json_path
+            } else {
+                // Create default .tsuzulint.jsonc
+                run_init(false)?;
+                config_path
+            }
+        }
+    };
+
+    let content = std::fs::read_to_string(&path_to_use).into_diagnostic()?;
+
+    // Parse to AST to preserve comments
+    let parse_options = ParseOptions::default();
+    let collect_options = CollectOptions::default();
+    let ast = jsonc_parser::parse_to_ast(&content, &collect_options, &parse_options)
+        .map_err(|e| miette::miette!("Failed to parse config: {}", e))?;
+
+    // We need to determine if we should modify "rules" and "options"
+    // Since AST modification is complex, we will perform a text splice approach
+    // based on AST spans.
+
+    // First, convert to Value to check existence (logic)
+    // Use jsonc-compatible parsing
+    let config_value: serde_json::Value =
+        jsonc_parser::parse_to_serde_value(&content, &parse_options)
+            .map_err(|e| miette::miette!("Failed to parse config config: {}", e))?
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+    let mut new_content = content.clone();
+    let mut offset_adjustment: isize = 0;
+
+    // Helper to insert text at position taking offset into account
+    let mut insert_at = |original_pos: usize, text: &str| {
+        let pos = (original_pos as isize + offset_adjustment) as usize;
+        new_content.insert_str(pos, text);
+        offset_adjustment += text.len() as isize;
+    };
+
+    let root_obj = ast
+        .value
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| miette::miette!("Invalid config: root must be an object"))?;
+
+    // 1. Add to rules array
+    // Construct rule definition string
+    let rule_def_str = match &spec.source {
+        PluginSource::GitHub { owner, repo, .. } => {
+            let version = &manifest.rule.version;
+            let source_str = format!("{}/{}@{}", owner, repo, version);
+            if let Some(a) = &spec.alias {
+                let alias_json = serde_json::to_string(a).into_diagnostic()?;
+                format!(r#"{{ "github": "{}", "as": {} }}"#, source_str, alias_json)
+            } else {
+                format!(r#""{}""#, source_str)
+            }
+        }
+        PluginSource::Url(url) => {
+            let url_json = serde_json::to_string(url).into_diagnostic()?;
+            let alias_json = serde_json::to_string(alias).into_diagnostic()?;
+            format!(r#"{{ "url": {}, "as": {} }}"#, url_json, alias_json)
+        }
+        PluginSource::Path(path) => {
+            let path_json = serde_json::to_string(path).into_diagnostic()?;
+            let alias_json = serde_json::to_string(alias).into_diagnostic()?;
+            format!(r#"{{ "path": {}, "as": {} }}"#, path_json, alias_json)
+        }
+    };
+
+    // Check if rule already exists (using serde logic)
+    let rule_def_json: serde_json::Value = serde_json::from_str(&rule_def_str).into_diagnostic()?;
+    let needs_add_rule = if let Some(rules) = config_value.get("rules").and_then(|v| v.as_array()) {
+        !rules.contains(&rule_def_json)
+    } else {
+        true
+    };
+
+    if needs_add_rule {
+        // Check if "rules" property exists
+        let rules_prop = root_obj.properties.iter().find(|p| match &p.name {
+            ObjectPropName::String(s) => s.value == "rules",
+            ObjectPropName::Word(w) => w.value == "rules",
+        });
+
+        if let Some(prop) = rules_prop {
+            if let Some(array) = prop.value.as_array() {
+                // Start of array content (after '[')
+                // We append to the end
+                let end_pos = array.range.end - 1; // Assuming ']' is at end
+                let is_empty = array.elements.is_empty();
+
+                let insert_str = if is_empty {
+                    format!("\n    {}", rule_def_str)
+                } else {
+                    format!(",\n    {}", rule_def_str)
+                };
+
+                insert_at(end_pos, &insert_str);
+            } else {
+                return Err(miette::miette!("Invalid config: 'rules' must be an array"));
+            }
+        } else {
+            // "rules" does not exist, insert it at start of object
+            let start_pos = root_obj.range.start + 1; // After '{'
+            let insert_str = format!(
+                r#"
+  "rules": [
+    {}
+  ],"#,
+                rule_def_str
+            );
+            insert_at(start_pos, &insert_str);
+        }
+    }
+
+    // 2. Add to options
+    // Find "options" in AST (need to re-parse or adjust logic if we were modifying structure deeply)
+    // IMPORTANT: Since we modified `new_content` but `ast` refers to `content`,
+    // we must rely on `offset_adjustment` or re-parse.
+    // Since `offset_adjustment` accumulates, we can continue using `ast` locations + offset.
+
+    // Determine options text
+    let default_options = if let Some(opts) = &manifest.options {
+        opts.clone()
+    } else {
+        serde_json::Value::Bool(true)
+    };
+
+    let alias_json = serde_json::to_string(alias).into_diagnostic()?;
+    let options_json = serde_json::to_string(&default_options).into_diagnostic()?;
+    let options_str = format!(r#"{}: {}"#, alias_json, options_json);
+
+    // Check logic
+    let needs_add_option = config_value
+        .get("options")
+        .and_then(|v| v.as_object())
+        .map(|o| !o.contains_key(alias))
+        .unwrap_or(true);
+
+    if needs_add_option {
+        let options_prop = root_obj.properties.iter().find(|p| match &p.name {
+            ObjectPropName::String(s) => s.value == "options",
+            ObjectPropName::Word(w) => w.value == "options",
+        });
+
+        if let Some(prop) = options_prop {
+            if let Some(obj) = prop.value.as_object() {
+                let end_pos = obj.range.end - 1;
+                let is_empty = obj.properties.is_empty();
+                let insert_str = if is_empty {
+                    format!("\n    {}", options_str)
+                } else {
+                    format!(",\n    {}", options_str)
+                };
+                insert_at(end_pos, &insert_str);
+            } else {
+                return Err(miette::miette!(
+                    "Invalid config: 'options' must be an object"
+                ));
+            }
+        } else {
+            // "options" does not exist
+            // We need to be careful about commas if we added "rules" above?
+            // Actually, if "rules" existed, we are fine. If we added "rules", we added a trailing comma?
+            // My logic above: `"rules": [ ... ],` (added comma).
+            // So we can just append.
+
+            // However, inserting multiple properties into root is tricky with just offsets
+            // if we don't know where we inserted the previous one relative to this one.
+            // "rules" strategy: insert at start (`{` + 1).
+            // "options" strategy: insert at end (`}` - 1).
+            // This avoids collision!
+
+            let end_pos = root_obj.range.end - 1;
+
+            // If we added rules, we inserted at `root_obj.range.start + 1`.
+            // We are now inserting at `root_obj.range.end - 1`.
+            // These are distinct locations (unless object was empty `{}`).
+
+            // If `root_obj` has properties, we need comma.
+            // If `needs_add_rule` was true AND we added rules, we definitely have properties now.
+            // So if `!root_obj.properties.is_empty() || needs_add_rule`, we need a comma.
+
+            let need_comma = !root_obj.properties.is_empty() || needs_add_rule;
+
+            let insert_str = if need_comma {
+                format!(
+                    r#",
+  "options": {{
+    {}
+  }}"#,
+                    options_str
+                )
+            } else {
+                format!(
+                    r#"
+  "options": {{
+    {}
+  }}"#,
+                    options_str
+                )
+            };
+
+            insert_at(end_pos, &insert_str);
+        }
+    }
+
+    std::fs::write(&path_to_use, new_content).into_diagnostic()?;
+    info!("Updated {}", path_to_use.display());
     Ok(())
 }
 

@@ -1,0 +1,368 @@
+author:	coderabbitai
+association:	none
+edited:	true
+status:	none
+--
+<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
+<!-- walkthrough_start -->
+
+<details>
+<summary>📝 Walkthrough</summary>
+
+## Walkthrough
+
+CLI にプラグインインストール機能を追加。`PluginCommands::Install` とハンドラを実装し、PluginResolver を用いた解決／ダウンロード、ローカル設定（`.tsuzulint.jsonc`/`.tsuzulint.json`）の更新、E2E テストと関連ドキュメント・依存の追加を含む。
+
+## Changes
+
+|Cohort / File(s)|Summary|
+|---|---|
+|**CLI プラグインインストール** <br> `crates/tsuzulint_cli/src/main.rs`|`PluginCommands::Install { spec, url, r#as }` 追加。`run_plugin_install` 実装（入力検証、PluginSpec 生成、PluginResolver 呼び出し、`update_config_with_plugin` による設定ファイル更新、ログ出力、ランタイム呼び出し）。|
+|**統合テスト** <br> `crates/tsuzulint_cli/tests/plugin_install.rs`|ローカルパス参照でのプラグインインストールを検証する E2E テストを追加（WASM アーティファクト作成、マニフェスト、CLI 実行、設定検証）。|
+|**設定パーサ / コア** <br> `crates/tsuzulint_core/src/config.rs`, `crates/tsuzulint_core/Cargo.toml`|`LinterConfig::from_json` を JSONC パース（`jsonc-parser`）に切替、JSONC 対応テスト追加。依存に `jsonc-parser` を追加。|
+|**ドキュメント** <br> `README.md`, `docs/plugin-distribution.md`|README にプラグインインストール手順を追加。plugin-distribution.md を Beta 表示等で文言更新。|
+|**ワークスペース依存調整** <br> `Cargo.toml`, `crates/tsuzulint_registry/Cargo.toml`, `crates/tsuzulint_cli/Cargo.toml`|`jsonc-parser` 追加、`reqwest` の features/default-features/workspace 宣言を明示化・調整。テスト用に `serde_json` を dev-deps に追加。|
+|**ルール内部修正** <br> `rules/sentence-length/src/lib.rs`|内部設定フィールド名を `skip_code` → `_skip_code` に変更（内部表記変更）。|
+
+## Sequence Diagram(s)
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant CLI as CLI (main.rs)
+    participant Resolver as PluginResolver
+    participant Cache as PluginCache
+    participant Config as ConfigManager
+    participant FS as FileSystem
+
+    User->>CLI: tzlint plugin install [spec | --url] [--as]
+    CLI->>CLI: validate spec/url/alias
+    alt spec provided
+        CLI->>Resolver: resolve from PluginSpec
+    else url provided
+        CLI->>Resolver: resolve from URL (with alias)
+    end
+    Resolver->>Cache: check cache / download artifact
+    Cache-->>Resolver: artifact path
+    Resolver-->>CLI: resolved plugin manifest & path
+    CLI->>Config: update_config_with_plugin(plugin, alias)
+    Config->>FS: read or init .tsuzulint.jsonc/.tsuzulint.json
+    FS-->>Config: config contents
+    Config->>Config: insert rule entry and options (JSONC-aware)
+    Config->>FS: write updated config
+    FS-->>Config: write complete
+    Config-->>CLI: config updated
+    CLI-->>User: installation success
+```
+
+## Estimated code review effort
+
+🎯 4 (Complex) | ⏱️ ~45 minutes
+
+## Possibly related issues
+
+- simorgh3196/tsuzulint#57: CLI のプラグインインストール機能実装を要求しているため、本 PR と直接対応。
+
+## Possibly related PRs
+
+- simorgh3196/tsuzulint#63: PluginResolver / PluginSpec 解決・キャッシュ周りの実装と密接に関連。  
+- simorgh3196/tsuzulint#58: CLI と設定周り（名称変更や構成）に重なりがありコードレベルで関連。
+
+## Poem
+
+> 🐰 ぽょんと来てプラグイン招くよ  
+> ふわりと解決してアーティファクト抱くよ  
+> 設定にそっとルールを書き込むよ  
+> Resolver と Cache が手を取り合うよ  
+> にんじんで祝おう、ぴょん！
+
+</details>
+
+<!-- walkthrough_end -->
+
+
+<!-- pre_merge_checks_walkthrough_start -->
+
+<details>
+<summary>🚥 Pre-merge checks | ✅ 2 | ❌ 1</summary>
+
+<details>
+<summary>❌ Failed checks (1 warning)</summary>
+
+|     Check name     | Status     | Explanation                                                                           | Resolution                                                                         |
+| :----------------: | :--------- | :------------------------------------------------------------------------------------ | :--------------------------------------------------------------------------------- |
+| Docstring Coverage | ⚠️ Warning | Docstring coverage is 41.67% which is insufficient. The required threshold is 80.00%. | Write docstrings for the functions missing them to satisfy the coverage threshold. |
+
+</details>
+<details>
+<summary>✅ Passed checks (2 passed)</summary>
+
+|     Check name    | Status   | Explanation                                                                              |
+| :---------------: | :------- | :--------------------------------------------------------------------------------------- |
+| Description Check | ✅ Passed | Check skipped - CodeRabbit’s high-level summary is enabled.                              |
+|    Title check    | ✅ Passed | プルリクエストのタイトルは、変更セットの主要な内容を明確かつ正確に要約しています。CLI にプラグインインストールコマンドを実装したという最も重要な変更を簡潔に表現しています。 |
+
+</details>
+
+<sub>✏️ Tip: You can configure your own custom pre-merge checks in the settings.</sub>
+
+</details>
+
+<!-- pre_merge_checks_walkthrough_end -->
+
+<!-- finishing_touch_checkbox_start -->
+
+<details>
+<summary>✨ Finishing touches</summary>
+
+- [ ] <!-- {"checkboxId": "7962f53c-55bc-4827-bfbf-6a18da830691"} --> 📝 Generate docstrings
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+
+- [ ] <!-- {"checkboxId": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "radioGroupId": "utg-output-choice-group-unknown_comment_id"} -->   Create PR with unit tests
+- [ ] <!-- {"checkboxId": "07f1e7d6-8a8e-4e23-9900-8731c2c87f58", "radioGroupId": "utg-output-choice-group-unknown_comment_id"} -->   Post copyable unit tests in a comment
+- [ ] <!-- {"checkboxId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "radioGroupId": "utg-output-choice-group-unknown_comment_id"} -->   Commit unit tests in branch `feat/cli-plugin-install`
+
+</details>
+
+</details>
+
+<!-- finishing_touch_checkbox_end -->
+
+<!-- tips_start -->
+
+---
+
+
+
+<sub>Comment `@coderabbitai help` to get the list of available commands and usage tips.</sub>
+
+<!-- tips_end -->
+
+<!-- internal state start -->
+
+
+<!-- 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= -->
+
+<!-- internal state end -->
+--
+author:	coderabbitai
+association:	none
+edited:	false
+status:	commented
+--
+**Actionable comments posted: 4**
+
+> [!CAUTION]
+> Some comments are outside the diff and can’t be posted inline due to platform limitations.
+> 
+> 
+> 
+> <details>
+> <summary>⚠️ Outside diff range comments (1)</summary><blockquote>
+> 
+> <details>
+> <summary>README.md (1)</summary><blockquote>
+> 
+> `39-47`: _⚠️ Potential issue_ | _🟡 Minor_
+> 
+> **`make fmt-md` の実行が必須です**
+> 
+> README.md を修正しているため、コーディングガイドラインに従い `make fmt-md` を実行してください。Makefile に定義された markdownlint-cli2 によるフォーマット検査が README.md に適用されます。実行後、フォーマットが整ったことを確認してください。
+> 
+> </blockquote></details>
+> 
+> </blockquote></details>
+
+<details>
+<summary>🤖 Fix all issues with AI agents</summary>
+
+```
+In `@crates/tsuzulint_cli/src/main.rs`:
+- Around line 628-633: The code reads the config into content and calls
+serde_json::from_str to populate config_value, but serde_json doesn't accept
+JSONC (comments), causing parse errors for .tsuzulint.jsonc; fix by parsing
+JSONC before calling serde_json: either integrate a JSONC parser crate (e.g.,
+jsonc-parser or json_comments) and replace serde_json::from_str(&content) with
+that parser's API, or add a small preprocessing helper (e.g.,
+strip_json_comments(content) or parse_jsonc_content) that removes comments and
+then pass the cleaned string to serde_json::from_str; update both the code path
+that sets config_value in main.rs (content -> config_value) and the equivalent
+loader in tsuzulint_core (the config parsing function) to use the same
+JSONC-aware helper.
+- Around line 592-601: The block_on call is missing proper error propagation and
+a trailing semicolon and `resolved` is a Result, so chain `.into_diagnostic()?`
+on the result of `.block_on(...)` and ensure the expression is terminated; e.g.,
+after building the runtime call `.block_on(async { resolver.resolve(&spec).await
+}) .into_diagnostic()?` so that `resolved` becomes a `ResolvedPlugin` you can
+access (referencing PluginResolver::new, resolver.resolve,
+tokio::runtime::Builder::new_multi_thread, block_on, and into_diagnostic).
+- Around line 677-683: config_value is a serde_json::Value so you cannot call
+entry on it directly; call config_value.as_object_mut() to get a &mut Map first,
+then call map.entry("options") and insert
+serde_json::Value::Object(serde_json::Map::new()) if missing, and finally
+convert the resulting Value to an object mut reference (i.e. ensure the
+inserted/existing value is an Object) — update the code around
+options_map/config_value to obtain the object map via as_object_mut(), use entry
+on that Map, and then handle the returned Value accordingly instead of calling
+entry on Value.
+
+In `@crates/tsuzulint_cli/tests/plugin_install.rs`:
+- Around line 1-4: Remove the unused import PathBuf from the imports at the top
+of the test file: delete PathBuf from the use statement so only used symbols
+like Command, predicates::prelude::*, and std::fs remain; ensure the remaining
+imports compile and run cargo test to verify no unused-import warnings.
+```
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+--
+author:	coderabbitai
+association:	none
+edited:	false
+status:	commented
+--
+**Actionable comments posted: 3**
+
+> [!CAUTION]
+> Some comments are outside the diff and can’t be posted inline due to platform limitations.
+> 
+> 
+> 
+> <details>
+> <summary>⚠️ Outside diff range comments (1)</summary><blockquote>
+> 
+> <details>
+> <summary>rules/sentence-length/src/lib.rs (1)</summary><blockquote>
+> 
+> `40-45`: _⚠️ Potential issue_ | _🟠 Major_
+> 
+> **ドキュメント化された設定キーと実装の不一致によるブレークチェンジ**
+> 
+> ドキュメントは設定キー `skip_code` を明示していますが、フィールド名が `_skip_code` のため、serde のデフォルト動作によって JSON キーは `_skip_code` になります。これにより、ドキュメントに従った既存の設定ファイルは無視されます。
+> 
+> 互換性を維持するため、以下のように serde の `rename` と `alias` を使用してください：
+> 
+> ```rust
+> #[serde(default = "default_true", rename = "skip_code", alias = "_skip_code")]
+> _skip_code: bool,
+> ```
+> 
+> このように設定することで、新しい実装では `skip_code` キーを受け入れ、古い `_skip_code` キーも後方互換性のためサポートします。
+> 
+> </blockquote></details>
+> 
+> </blockquote></details>
+
+<details>
+<summary>🤖 Fix all issues with AI agents</summary>
+
+```
+In `@crates/tsuzulint_cli/Cargo.toml`:
+- Line 21: Cargo.toml の jsonc-parser 依存に serde feature を有効にする必要があります: 現在の行
+`jsonc-parser = { workspace = true }` を、CLI でも tsuzulint_core と同様に serde
+を有効にするように変更して（features = ["serde"] を追加しつつ workspace = true を維持）、CLI 内で使っている
+parse_to_serde_value 呼び出しが正しくコンパイルされるようにしてください。
+
+In `@crates/tsuzulint_cli/src/main.rs`:
+- Around line 689-727: The code silently does nothing when the AST root isn’t an
+object (root = ast.value.as_ref().and_then(|v| v.as_object())), so add an
+explicit error path: detect when root is None or not an object and return or
+propagate a descriptive error (or log and exit) instead of continuing; update
+the caller or surrounding function to handle this Result so users get a clear
+failure message; reference the existing symbols root, root_obj, ast.value,
+insert_at, and rule_def_str when adding the check and error return so the change
+integrates with the current insertion logic.
+- Around line 659-676: The code builds JSON fragments into rule_def_str by
+interpolating alias, URL and path raw—this breaks JSON if those contain quotes
+or backslashes; fix it by serializing the dynamic pieces with
+serde_json::to_string() (e.g. call to_string on alias, url, path.display()
+values) and then assemble the final string using those escaped values in the
+PluginSource::Url and PluginSource::Path arms and the PluginSource::GitHub arm
+where alias is used; update all uses of alias interpolation (including the
+manifest.rule.version + spec.alias branch) to use the serialized/escaped strings
+so the resulting JSON stays valid.
+```
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+--
+author:	coderabbitai
+association:	none
+edited:	false
+status:	commented
+--
+**Actionable comments posted: 2**
+
+<details>
+<summary>🤖 Fix all issues with AI agents</summary>
+
+```
+In `@crates/tsuzulint_cli/src/main.rs`:
+- Around line 199-201: PluginCommands::Install ブランチではグローバルの --config が無視されて CWD
+の .tsuzulint.jsonc/.json が上書きされる可能性があるので、run_plugin_install の呼び出しに CLI
+で渡された設定ファイルパスを渡して優先的に使うように修正してください：run_plugin_install のシグネチャに
+config_path（Option<PathBuf> など）を追加し、内部で update_config_with_plugin を呼ぶ際にその
+config_path を渡して CWD の自動選択を避け、PluginCommands::Install
+を含む全ての呼び出し箇所（該当するもう一箇所にも同様に）を新シグネチャに合わせて更新してください。
+- Around line 705-727: When needs_add_rule (or needs_add_option) is true and a
+"rules" (or "options") property exists, detect if prop.value is not the expected
+array (or object) and explicitly return or raise an error instead of silently
+skipping insertion; update the branch that inspects rules_prop (and the
+analogous options_prop) to call prop.value.as_array()/as_object() and if it
+returns None produce a clear error message (e.g., Err(...) or process exit)
+indicating the property has an invalid type, rather than proceeding to the
+insert_at(...) logic or falling through.
+```
+
+</details>
+
+<details>
+<summary>🧹 Nitpick comments (1)</summary><blockquote>
+
+<details>
+<summary>crates/tsuzulint_cli/src/main.rs (1)</summary><blockquote>
+
+`671-676`: **`serde_json::to_string(...).unwrap()` のパニックを避けてエラー伝播に。**  
+直列化失敗で CLI がクラッシュするため、`into_diagnostic()?` で返すほうが安全です（他の `unwrap()` も同様に）。  
+
+
+<details>
+<summary>修正案（例）</summary>
+
+```diff
+-        PluginSource::Url(url) => {
+-            format!(
+-                r#"{{ "url": {}, "as": {} }}"#,
+-                serde_json::to_string(url).unwrap(),
+-                serde_json::to_string(alias).unwrap()
+-            )
+-        }
++        PluginSource::Url(url) => {
++            let url_json = serde_json::to_string(url).into_diagnostic()?;
++            let alias_json = serde_json::to_string(alias).into_diagnostic()?;
++            format!(r#"{{ "url": {}, "as": {} }}"#, url_json, alias_json)
++        }
+@@
+-    let options_str = format!(
+-        r#"{}: {}"#,
+-        serde_json::to_string(alias).unwrap(),
+-        serde_json::to_string(&default_options).unwrap()
+-    );
++    let alias_json = serde_json::to_string(alias).into_diagnostic()?;
++    let options_json = serde_json::to_string(&default_options).into_diagnostic()?;
++    let options_str = format!(r#"{}: {}"#, alias_json, options_json);
+```
+</details>
+
+
+Also applies to: 681-693, 753-757
+
+</blockquote></details>
+
+</blockquote></details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+--

@@ -19,6 +19,7 @@ tsuzulint_plugin = { workspace = true, default-features = false }
 tsuzulint_cache = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+jsonc-parser = { workspace = true, features = ["serde"] }
 blake3 = { workspace = true }
 rayon = { workspace = true }
 thiserror = { workspace = true }
