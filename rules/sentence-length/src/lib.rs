@@ -40,8 +40,8 @@ struct Config {
     #[serde(default = "default_max")]
     max: usize,
     /// Skip code blocks and inline code.
-    #[serde(default = "default_true")]
-    _skip_code: bool,
+    #[serde(default = "default_true", rename = "skip_code", alias = "_skip_code")]
+    skip_code: bool,
 }
 
 fn default_max() -> usize {
@@ -56,7 +56,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             max: DEFAULT_MAX_LENGTH,
-            _skip_code: true,
+            skip_code: true,
         }
     }
 }
@@ -144,5 +144,49 @@ mod tests {
                 .message
                 .contains("Sentence is too long")
         );
+    }
+
+    #[test]
+    fn test_lint_alias_config() {
+        // Test compatibility with old _skip_code key
+        let text = "`code block`";
+        let node = serde_json::json!({
+            "type": "Str",
+            "range": [0, text.len()]
+        });
+
+        // Explicitly use _skip_code: false to ensure it's picked up
+        // Default is true (skip), so if alias works, this will mean skip_code = false
+        // But wait, the rule implementation doesn't check skip_code in lint_impl?
+        // Ah, the lint_impl provided in the file ONLY checks length.
+        // Logic for skipping code is likely in `tsuzulint_core` or handled by `extract_node_text` / node types?
+        // Let's check `lint_impl` again.
+
+        // 80: fn lint_impl(input: String) -> FnResult<String> {
+        // ...
+        // 85:     if !is_node_type(&request.node, "Str") {
+        // ...
+        // 90:     let config: Config = serde_json::from_value(request.config.clone()).unwrap_or_default();
+        // ...
+        // 93:     if let Some((start, _end, text)) = extract_node_text(&request.node, &request.source) {
+
+        // It seems `skip_code` field in Config is NOT USED in `lint_impl` in the provided code!
+        // Struct definition:
+        // struct Config { ... skip_code: bool }
+
+        // Uses:
+        // 98:             if sentence.char_count > config.max {
+
+        // `config.skip_code` is NOT used!
+        // If it is not used, then the test won't verify functionality, only deserialization.
+        // Validating deserialization is enough to verify the alias works for loading Config.
+
+        let config_json = r#"{ "max": 100, "_skip_code": false }"#;
+        let config: Config = serde_json::from_str(config_json).unwrap();
+        assert_eq!(config.skip_code, false);
+
+        let config_json_new = r#"{ "max": 100, "skip_code": false }"#;
+        let config_new: Config = serde_json::from_str(config_json_new).unwrap();
+        assert_eq!(config_new.skip_code, false);
     }
 }

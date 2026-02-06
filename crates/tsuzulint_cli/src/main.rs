@@ -197,7 +197,7 @@ fn run(cli: Cli) -> Result<bool> {
                 }
             },
             PluginCommands::Install { spec, url, r#as } => {
-                run_plugin_install(spec, url, r#as)?;
+                run_plugin_install(spec, url, r#as, cli.config)?;
                 Ok(false)
             }
         },
@@ -558,6 +558,7 @@ fn run_plugin_install(
     spec_str: Option<String>,
     url: Option<String>,
     alias: Option<String>,
+    config_path: Option<PathBuf>,
 ) -> Result<()> {
     let spec = if let Some(url) = url {
         if let Some(spec_str) = spec_str {
@@ -604,7 +605,7 @@ fn run_plugin_install(
     info!("Successfully installed: {}", resolved.manifest.rule.name);
 
     // Update config
-    update_config_with_plugin(&spec, &resolved.alias, &resolved.manifest)?;
+    update_config_with_plugin(&spec, &resolved.alias, &resolved.manifest, config_path)?;
 
     Ok(())
 }
@@ -613,18 +614,23 @@ fn update_config_with_plugin(
     spec: &PluginSpec,
     alias: &str,
     manifest: &tsuzulint_registry::manifest::ExternalRuleManifest,
+    config_path: Option<PathBuf>,
 ) -> Result<()> {
-    let config_path = PathBuf::from(".tsuzulint.jsonc");
-    let path_to_use = if config_path.exists() {
-        config_path
+    let path_to_use = if let Some(path) = config_path {
+        path
     } else {
-        let json_path = PathBuf::from(".tsuzulint.json");
-        if json_path.exists() {
-            json_path
-        } else {
-            // Create default .tsuzulint.jsonc
-            run_init(false)?;
+        let config_path = PathBuf::from(".tsuzulint.jsonc");
+        if config_path.exists() {
             config_path
+        } else {
+            let json_path = PathBuf::from(".tsuzulint.json");
+            if json_path.exists() {
+                json_path
+            } else {
+                // Create default .tsuzulint.jsonc
+                run_init(false)?;
+                config_path
+            }
         }
     };
 
@@ -641,9 +647,10 @@ fn update_config_with_plugin(
     // based on AST spans.
 
     // First, convert to Value to check existence (logic)
+    // Use jsonc-compatible parsing
     let config_value: serde_json::Value =
         jsonc_parser::parse_to_serde_value(&content, &parse_options)
-            .map_err(|e| miette::miette!("Failed to parse config value: {}", e))?
+            .map_err(|e| miette::miette!("Failed to parse config config: {}", e))?
             .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
     let mut new_content = content.clone();
@@ -669,28 +676,21 @@ fn update_config_with_plugin(
             let version = &manifest.rule.version;
             let source_str = format!("{}/{}@{}", owner, repo, version);
             if let Some(a) = &spec.alias {
-                format!(
-                    r#"{{ "github": "{}", "as": {} }}"#,
-                    source_str,
-                    serde_json::to_string(a).unwrap()
-                )
+                let alias_json = serde_json::to_string(a).into_diagnostic()?;
+                format!(r#"{{ "github": "{}", "as": {} }}"#, source_str, alias_json)
             } else {
                 format!(r#""{}""#, source_str)
             }
         }
         PluginSource::Url(url) => {
-            format!(
-                r#"{{ "url": {}, "as": {} }}"#,
-                serde_json::to_string(url).unwrap(),
-                serde_json::to_string(alias).unwrap()
-            )
+            let url_json = serde_json::to_string(url).into_diagnostic()?;
+            let alias_json = serde_json::to_string(alias).into_diagnostic()?;
+            format!(r#"{{ "url": {}, "as": {} }}"#, url_json, alias_json)
         }
         PluginSource::Path(path) => {
-            format!(
-                r#"{{ "path": {}, "as": {} }}"#,
-                serde_json::to_string(path).unwrap(),
-                serde_json::to_string(alias).unwrap()
-            )
+            let path_json = serde_json::to_string(path).into_diagnostic()?;
+            let alias_json = serde_json::to_string(alias).into_diagnostic()?;
+            format!(r#"{{ "path": {}, "as": {} }}"#, path_json, alias_json)
         }
     };
 
@@ -723,6 +723,8 @@ fn update_config_with_plugin(
                 };
 
                 insert_at(end_pos, &insert_str);
+            } else {
+                return Err(miette::miette!("Invalid config: 'rules' must be an array"));
             }
         } else {
             // "rules" does not exist, insert it at start of object
@@ -750,11 +752,10 @@ fn update_config_with_plugin(
     } else {
         serde_json::Value::Bool(true)
     };
-    let options_str = format!(
-        r#"{}: {}"#,
-        serde_json::to_string(alias).unwrap(),
-        serde_json::to_string(&default_options).unwrap()
-    );
+
+    let alias_json = serde_json::to_string(alias).into_diagnostic()?;
+    let options_json = serde_json::to_string(&default_options).into_diagnostic()?;
+    let options_str = format!(r#"{}: {}"#, alias_json, options_json);
 
     // Check logic
     let needs_add_option = config_value
@@ -779,6 +780,10 @@ fn update_config_with_plugin(
                     format!(",\n    {}", options_str)
                 };
                 insert_at(end_pos, &insert_str);
+            } else {
+                return Err(miette::miette!(
+                    "Invalid config: 'options' must be an object"
+                ));
             }
         } else {
             // "options" does not exist
@@ -798,25 +803,70 @@ fn update_config_with_plugin(
             let is_empty = root_obj.properties.is_empty();
 
             let insert_str = if is_empty {
-                format!(
-                    r#"
+                format!("\n  {}", options_str)
+            } else {
+                // If not empty, we need a comma
+                format!(",\n  {}", options_str)
+            };
+
+            // Wait, if we added rules at start, is_empty check on original AST is stale if it WAS empty.
+            // But if it was empty, we added rules at start.
+            // So now it's not empty. We need a comma.
+
+            // If the original AST said it was empty, but we added rules, then `new_content` now has rules.
+            // Optimistic approach: if we added rules, we assume we need a comma.
+            // But `needs_add_rule` implies we might have added it.
+
+            // Refined logic:
+            // If we added rules, we inserted at `root_obj.range.start + 1`.
+            // We are now inserting at `root_obj.range.end - 1`.
+            // These are distinct locations (unless object was empty `{}`).
+
+            // If object was empty `{}`, start=0, end=2 (approx).
+            // rules: insert at 1. `{\n "rules": ... \n}`
+            // options: insert at 1 (end-1).
+            // This would collide or interleave weirdly because offset applies to `end`.
+
+            // If we insert rules at start, valid JSON so far.
+            // If we insert options at end, we need to know if there's a preceding property in *new* content.
+
+            // A safer bet is to wrap "options" in a block similar to rules if it doesn't exist.
+
+            let insert_str = format!(
+                r#",
   "options": {{
     {}
-  }}
-"#,
-                    options_str
-                )
-            } else {
-                // Need a comma before
+  }}"#,
+                options_str
+            );
+
+            // BUT, if it was empty originally, we don't want the leading comma if we didn't add rules?
+            // Or if existing properties exist.
+
+            // If `root_obj` has properties, we need comma.
+            // If `needs_add_rule` was true AND we added rules, we definitely have properties now.
+            // So if `!root_obj.properties.is_empty() || needs_add_rule`, we need a comma.
+
+            let need_comma = !root_obj.properties.is_empty() || needs_add_rule;
+
+            let insert_str = if need_comma {
                 format!(
                     r#",
   "options": {{
     {}
-  }}
-"#,
+  }}"#,
+                    options_str
+                )
+            } else {
+                format!(
+                    r#"
+  "options": {{
+    {}
+  }}"#,
                     options_str
                 )
             };
+
             insert_at(end_pos, &insert_str);
         }
     }
