@@ -183,10 +183,16 @@ mod tests {
 
         let config_json = r#"{ "max": 100, "_skip_code": false }"#;
         let config: Config = serde_json::from_str(config_json).unwrap();
-        assert_eq!(config.skip_code, false);
+        assert!(
+            !config.skip_code,
+            "legacy _skip_code key should be deserialized"
+        );
 
         let config_json_new = r#"{ "max": 100, "skip_code": false }"#;
         let config_new: Config = serde_json::from_str(config_json_new).unwrap();
-        assert_eq!(config_new.skip_code, false);
+        assert!(
+            !config_new.skip_code,
+            "skip_code key should be deserialized"
+        );
     }
 }

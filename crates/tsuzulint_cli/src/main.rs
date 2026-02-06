@@ -799,49 +799,10 @@ fn update_config_with_plugin(
             // This avoids collision!
 
             let end_pos = root_obj.range.end - 1;
-            // Check if object is empty (before our edits)
-            let is_empty = root_obj.properties.is_empty();
 
-            let insert_str = if is_empty {
-                format!("\n  {}", options_str)
-            } else {
-                // If not empty, we need a comma
-                format!(",\n  {}", options_str)
-            };
-
-            // Wait, if we added rules at start, is_empty check on original AST is stale if it WAS empty.
-            // But if it was empty, we added rules at start.
-            // So now it's not empty. We need a comma.
-
-            // If the original AST said it was empty, but we added rules, then `new_content` now has rules.
-            // Optimistic approach: if we added rules, we assume we need a comma.
-            // But `needs_add_rule` implies we might have added it.
-
-            // Refined logic:
             // If we added rules, we inserted at `root_obj.range.start + 1`.
             // We are now inserting at `root_obj.range.end - 1`.
             // These are distinct locations (unless object was empty `{}`).
-
-            // If object was empty `{}`, start=0, end=2 (approx).
-            // rules: insert at 1. `{\n "rules": ... \n}`
-            // options: insert at 1 (end-1).
-            // This would collide or interleave weirdly because offset applies to `end`.
-
-            // If we insert rules at start, valid JSON so far.
-            // If we insert options at end, we need to know if there's a preceding property in *new* content.
-
-            // A safer bet is to wrap "options" in a block similar to rules if it doesn't exist.
-
-            let insert_str = format!(
-                r#",
-  "options": {{
-    {}
-  }}"#,
-                options_str
-            );
-
-            // BUT, if it was empty originally, we don't want the leading comma if we didn't add rules?
-            // Or if existing properties exist.
 
             // If `root_obj` has properties, we need comma.
             // If `needs_add_rule` was true AND we added rules, we definitely have properties now.
