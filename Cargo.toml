@@ -74,7 +74,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "stream",
 ] }
 semver = "1.0"
-jsonschema = "0.40"
+jsonschema = "0.41"
 sha2 = "0.10"
 
 
@@ -91,7 +91,7 @@ js-sys = "0.3"
 # Testing
 pretty_assertions = "1.4"
 rstest = "0.26"
-insta = { version = "1.42", features = ["json", "redactions"] }
+insta = { version = "1.46", features = ["json", "redactions"] }
 tempfile = "3.14"
 assert_fs = "1.1"
 assert_cmd = "2.0"
