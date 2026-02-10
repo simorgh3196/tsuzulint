@@ -15,7 +15,8 @@ use tracing_subscriber::EnvFilter;
 use jsonc_parser::ast::ObjectPropName;
 use jsonc_parser::{CollectOptions, ParseOptions};
 use tsuzulint_core::{
-    LintResult, Linter, LinterConfig, Severity, apply_fixes_to_file, generate_sarif,
+    LintResult, Linter, LinterConfig, RuleDefinition, RuleDefinitionDetail, Severity,
+    apply_fixes_to_file, generate_sarif,
 };
 use tsuzulint_registry::resolver::{PluginResolver, PluginSource, PluginSpec};
 
@@ -230,6 +231,100 @@ fn run_lint(
         // Try to find config file
         find_config()?
     };
+
+    // Pre-resolve remote rules (GitHub, URL) using registry
+    let resolver = PluginResolver::new().into_diagnostic()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .into_diagnostic()?;
+
+    let mut new_rules = Vec::new();
+    let mut modified = false;
+
+    for rule in &config.rules {
+        let (spec, original_alias) = match rule {
+            RuleDefinition::Simple(s) => {
+                let val = serde_json::Value::String(s.clone());
+                if let Ok(spec) = PluginSpec::parse(&val) {
+                    if matches!(spec.source, PluginSource::GitHub { .. }) {
+                        (Some(spec), None)
+                    } else {
+                        // Assuming simple strings that aren't GitHub are local paths or unknown
+                        (None, None)
+                    }
+                } else {
+                    (None, None)
+                }
+            }
+            RuleDefinition::Detail(d) => {
+                if let Some(gh) = &d.github {
+                    // Reconstruct likely input for PluginSpec parse to leverage its logic
+                    let mut map = serde_json::Map::new();
+                    map.insert("github".to_string(), serde_json::Value::String(gh.clone()));
+                    if let Some(a) = &d.r#as {
+                        map.insert("as".to_string(), serde_json::Value::String(a.clone()));
+                    }
+                    let val = serde_json::Value::Object(map);
+                    if let Ok(spec) = PluginSpec::parse(&val) {
+                        (Some(spec), d.r#as.clone())
+                    } else {
+                        (None, None)
+                    }
+                } else if let Some(url) = &d.url {
+                    let mut map = serde_json::Map::new();
+                    map.insert("url".to_string(), serde_json::Value::String(url.clone()));
+                    if let Some(a) = &d.r#as {
+                        map.insert("as".to_string(), serde_json::Value::String(a.clone()));
+                    }
+                    let val = serde_json::Value::Object(map);
+                    if let Ok(spec) = PluginSpec::parse(&val) {
+                        (Some(spec), d.r#as.clone())
+                    } else {
+                        (None, None)
+                    }
+                } else {
+                    (None, None)
+                }
+            }
+        };
+
+        if let Some(spec) = spec {
+            info!("Resolving rule: {:?}...", spec);
+            let resolved = runtime
+                .block_on(async { resolver.resolve(&spec).await })
+                .into_diagnostic()?;
+
+            // Replace with local path to cached manifest
+            // For cached plugins (remote), the manifest is always "tsuzulint-rule.json" in the same dir as wasm_path
+            let manifest_path = resolved
+                .wasm_path
+                .parent()
+                .ok_or_else(|| {
+                    miette::miette!(
+                        "WASM path '{}' has no parent directory",
+                        resolved.wasm_path.display()
+                    )
+                })?
+                .join("tsuzulint-rule.json");
+
+            let path_str = manifest_path.to_string_lossy().to_string();
+            let new_rule = RuleDefinition::Detail(RuleDefinitionDetail {
+                github: None,
+                url: None,
+                path: Some(path_str),
+                r#as: original_alias.or(Some(resolved.alias)),
+            });
+            new_rules.push(new_rule);
+            modified = true;
+        } else {
+            new_rules.push(rule.clone());
+        }
+    }
+
+    if modified {
+        config.rules = new_rules;
+    }
 
     // Override timings from CLI
     if timings {

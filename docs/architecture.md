@@ -19,6 +19,12 @@ graph TB
         Parallel["Parallel Scheduler"]
     end
 
+    subgraph Registry["tsuzulint_registry"]
+        Resolver["Plugin Resolver"]
+        Downloader["Wasm Downloader"]
+        P_Cache["Plugin Cache"]
+    end
+
     subgraph Parser["tsuzulint_parser"]
         Markdown["Markdown (markdown-rs)"]
         PlainText["Plain Text"]
@@ -36,13 +42,22 @@ graph TB
         Rule3["Rule 3 (WASM)"]
     end
 
-    UI --> Core
+    subgraph Manifest["tsuzulint_manifest"]
+        Validator["JSON Schema Validator"]
+        M_Struct["Manifest Structures"]
+    end
+
+    UI --> Registry
+    Registry --> Core
+    Registry -.->|Validates| Manifest
+    Core --> Manifest
     Core --> Parser
     Parser --> AST
     Core --> Plugin
     Plugin --> Rule1
     Plugin --> Rule2
     Plugin --> Rule3
+    Registry -.->|Downloads| Plugin
 ```
 
 ## Crates
@@ -118,6 +133,37 @@ graph TB
 - Uses rayon for parallel file processing
 - Glob patterns for file discovery
 - Integrates parsers, plugins, and cache
+- **Network Agnostic**: Relies on `tsuzulint_registry` for remote resource resolution.
+
+### tsuzulint_registry
+
+**Purpose**: Remote plugin resolution and security.
+
+**Key Components**:
+- `PluginResolver`: Orchestrates GitHub/URL/Local resolution
+- `PluginCache`: Manages downloaded artifacts and manifest localization
+- `WasmDownloader`: Secure streaming download with size limits
+- `HashVerifier`: SHA256 integrity verification
+
+**Design Decisions**:
+- Centralizes all network and remote handling
+- Rewrites remote manifests to use local paths when caching
+- Ensures `tsuzulint_core` stays strictly local-only
+- Implements defense-in-depth security layer (hash/permissions)
+
+### tsuzulint_manifest
+
+**Purpose**: Shared rule manifest definitions and validation.
+
+**Key Components**:
+- `ExternalRuleManifest`: Rust representation of `tsuzulint-rule.json`
+- `validate_manifest`: JSON Schema based validator (v1/rule.json)
+- `IsolationLevel`: Rule execution scope (Global/Block)
+
+**Design Decisions**:
+- Single source of truth for manifest structure
+- Embeds JSON Schema directly for self-contained validation
+- Shared by `tsuzulint_registry` (for resolution) and `tsuzulint_core` (for loading)
 
 ### tsuzulint_cli
 

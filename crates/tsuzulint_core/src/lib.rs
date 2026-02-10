@@ -30,7 +30,7 @@ mod linter;
 pub mod resolver;
 mod result;
 
-pub use config::LinterConfig;
+pub use config::{LinterConfig, RuleDefinition, RuleDefinitionDetail};
 pub use error::LinterError;
 pub use fixer::{FixerResult, apply_fixes_to_content, apply_fixes_to_file};
 pub use formatters::generate_sarif;

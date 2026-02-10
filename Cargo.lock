@@ -3967,6 +3967,7 @@ dependencies = [
  "tsuzulint_core",
  "tsuzulint_lsp",
  "tsuzulint_registry",
+ "wiremock",
 ]
 
 [[package]]

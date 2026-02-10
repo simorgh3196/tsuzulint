@@ -124,7 +124,28 @@ impl PluginCache {
         let manifest_path = dir.join("tsuzulint-rule.json");
 
         std::fs::write(&wasm_path, wasm_bytes)?;
-        std::fs::write(&manifest_path, manifest_content)?;
+
+        // If artifacts.wasm is a URL, we rewrite it to "rule.wasm" for the cached manifest
+        // This ensures tsuzulint_core doesn't need to know about URLs or fallback logic
+        let mut manifest_to_write = manifest_content.to_string();
+        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(manifest_content) {
+            let is_remote_url = json["artifacts"]["wasm"]
+                .as_str()
+                .map(|s| s.starts_with("http://") || s.starts_with("https://"))
+                .unwrap_or(false);
+
+            if is_remote_url {
+                if let Some(wasm) = json.get_mut("artifacts").and_then(|a| a.get_mut("wasm")) {
+                    // Rewrite to local file name consistent with cache layout
+                    *wasm = serde_json::Value::String("rule.wasm".to_string());
+                    if let Ok(rewritten) = serde_json::to_string_pretty(&json) {
+                        manifest_to_write = rewritten;
+                    }
+                }
+            }
+        }
+
+        std::fs::write(&manifest_path, manifest_to_write)?;
 
         Ok(CachedPlugin {
             wasm_path,
@@ -287,21 +308,50 @@ mod tests {
 
         match result {
             Err(CacheError::PermissionDenied(_)) => {
-                // Success
+                // Success: PermissionDenied is the expected error
             }
-            Err(e) => {
+            Err(e) if e.to_string().to_lowercase().contains("permission denied") => {
                 // If run as root or on some file systems, permission might not be denied
                 // But if it IS denied, it MUST be PermissionDenied variant, not generic Io
-                if e.to_string().to_lowercase().contains("permission denied") {
-                    panic!(
-                        "Got IO error with 'Permission denied' message but not PermissionDenied variant: {:?}",
-                        e
-                    );
-                }
+                panic!(
+                    "Got IO error with 'Permission denied' message but not PermissionDenied variant: {:?}",
+                    e
+                );
             }
             Ok(_) => {
                 // Maybe running as root?
             }
+            Err(e) => {
+                // Any other error is unexpected for this test scenario
+                panic!("Unexpected error: {:?}", e);
+            }
         }
+    }
+
+    #[test]
+    fn should_rewrite_url_artifact_to_local_path() {
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+        let source = PluginSource::Url("https://example.com/manifest.json".to_string());
+
+        // Manifest with URL artifact
+        let manifest_content = r#"{
+            "rule": { "name": "url-rule", "version": "1.0.0" },
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "hash"
+            }
+        }"#;
+
+        let stored = cache
+            .store(&source, "1.0.0", b"wasm", manifest_content)
+            .unwrap();
+
+        // Verify manifest content on disk
+        let saved_content = fs::read_to_string(&stored.manifest_path).unwrap();
+        let saved_json: serde_json::Value = serde_json::from_str(&saved_content).unwrap();
+
+        let wasm_path = saved_json["artifacts"]["wasm"].as_str().unwrap();
+        assert_eq!(wasm_path, "rule.wasm");
     }
 }

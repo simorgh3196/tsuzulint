@@ -41,8 +41,12 @@ flowchart LR
 
     A3 --> GH
     GH -->|Fetch| C
-    C --> U3
+    C -->|Localized Manifest| U3
 ```
+
+- **Registry Manifest Rewriting**: When caching a remote plugin, `tsuzulint_registry` detects if `artifacts.wasm` is a URL. If so, it rewrites it to `"rule.wasm"` (the local filename) in the cached manifest.
+- **Core Pureness**: `tsuzulint_core` remains network-agnostic. It strictly resolves WASM paths relative to the manifest file. The localization handled by the registry ensures core can always find the rule locally.
+
 
 ---
 
@@ -164,12 +168,16 @@ tzlint plugin remove simorgh3196/tsuzulint-rule-no-doubled-joshi
 │   └── plugins/                  # Download cache
 │       └── simorgh3196/
 │           └── tsuzulint-crates/
-└── tsuzulint_registry/        # NEW: プラグイン解決・取得・セキュリティ
+└── tsuzulint_registry/        # プラグイン解決・取得・セキュリティ
     ├── resolver.rs         # GitHub/URL/Local の解析
-    ├── source.rs           # ダウンロード・キャッシュ
+    ├── source.rs           # ダウンロード定義
+    ├── cache.rs            # キャッシュ・マニフェスト書き換え (Localization)
     ├── manifest.rs         # tsuzulint-rule.json パース
     ├── hash.rs             # SHA256検証
     └── permissions.rs      # パーミッション検証・ホスト関数
+└── tsuzulint_manifest/        # マニフェスト定義・バリデーション (JSON Schema)
+    ├── lib.rs              # ExternalRuleManifest 構造体と validate_manifest
+    └── schemas/v1/rule.json # 埋め込み済みの JSON Schema
 ```
 
 To clear the cache:

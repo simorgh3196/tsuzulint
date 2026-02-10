@@ -26,8 +26,9 @@ pub fn load_rule_manifest(
         ))
     })?;
 
-    // Resolve WASM path relative to the manifest file
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+
+    // Resolve WASM path relative to the manifest file
     let wasm_relative = Path::new(&manifest.artifacts.wasm);
     let wasm_path = manifest_dir.join(wasm_relative);
 
