@@ -161,8 +161,14 @@ impl PluginSpec {
 
         if let Some(path_str) = obj.path {
             let mut alias = obj.alias;
+            // Validate manifest structure if alias is missing, to infer name
+            // Note: We use tsuzulint_manifest::validate_manifest for correctness,
+            // but reading file in parse() is side-effect heavy. Ideally this should
+            // be deferred to resolve(). However, to satisfy the requirement that
+            // PluginSpec has a valid alias (or inferable one), we do it here.
+            // A better architecture might be to allow alias=None in PluginSpec and
+            // resolve it later, but PluginSpec definition implies resolved intent.
             if alias.is_none() {
-                // Read manifest to get name as per requirement
                 let path = PathBuf::from(&path_str);
                 let content = std::fs::read_to_string(&path).map_err(|e| {
                     ParseError::InvalidObject(format!(
@@ -170,15 +176,16 @@ impl PluginSpec {
                         path_str, e
                     ))
                 })?;
-                let manifest: ExternalRuleManifest =
-                    serde_json::from_str(&content).map_err(|e| {
-                        ParseError::InvalidObject(format!(
-                            "Failed to parse manifest at {}: {}",
-                            path_str, e
-                        ))
-                    })?;
+
+                let manifest = tsuzulint_manifest::validate_manifest(&content).map_err(|e| {
+                    ParseError::InvalidObject(format!(
+                        "Failed to validate manifest at {}: {}",
+                        path_str, e
+                    ))
+                })?;
                 alias = Some(manifest.rule.name);
             }
+
             return Ok(Self {
                 source: PluginSource::Path(PathBuf::from(path_str)),
                 alias,
@@ -507,7 +514,7 @@ mod tests {
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let manifest = json!({
             "rule": { "name": "test-rule-name", "version": "1.0.0" },
-            "artifacts": { "wasm": "rule.wasm", "sha256": "..." }
+            "artifacts": { "wasm": "rule.wasm", "sha256": "0000000000000000000000000000000000000000000000000000000000000000" }
         });
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 

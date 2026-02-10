@@ -125,17 +125,27 @@ impl PluginCache {
 
         std::fs::write(&wasm_path, wasm_bytes)?;
 
-        // If artifacts.wasm is a URL, we rewrite it to "rule.wasm" for the cached manifest
-        // This ensures tsuzulint_core doesn't need to know about URLs or fallback logic
+        // Rewrite artifacts.wasm to "rule.wasm" for the cached manifest
+        // This ensures the cached manifest always references the local file name,
+        // regardless of the original source (URL, relative path, etc.)
         let mut manifest_to_write = manifest_content.to_string();
-        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(manifest_content) {
-            let wasm_artifact = json.get_mut("artifacts").and_then(|a| a.get_mut("wasm"));
-            if let Some(wasm) = wasm_artifact {
-                // Rewrite to local file name consistent with cache layout
-                *wasm = serde_json::Value::String("rule.wasm".to_string());
-                if let Ok(rewritten) = serde_json::to_string_pretty(&json) {
-                    manifest_to_write = rewritten;
+        match serde_json::from_str::<serde_json::Value>(manifest_content) {
+            Ok(mut json) => {
+                let wasm_artifact = json.get_mut("artifacts").and_then(|a| a.get_mut("wasm"));
+                if let Some(wasm) = wasm_artifact {
+                    *wasm = serde_json::Value::String("rule.wasm".to_string());
+                    match serde_json::to_string_pretty(&json) {
+                        Ok(rewritten) => {
+                            manifest_to_write = rewritten;
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to serialize rewritten manifest: {}", e);
+                        }
+                    }
                 }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to parse manifest for rewriting: {}", e);
             }
         }
 

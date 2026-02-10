@@ -32,7 +32,8 @@ pub fn load_rule_manifest(
     let wasm_relative = Path::new(&manifest.artifacts.wasm);
 
     // Security: Reject absolute paths
-    if wasm_relative.is_absolute() {
+    // On Windows, is_absolute() requires a drive letter, but has_root() catches rooted paths like "/foo"
+    if wasm_relative.is_absolute() || wasm_relative.has_root() {
         return Err(LinterError::Config(format!(
             "Absolute WASM path '{}' is not allowed in manifest '{}'",
             manifest.artifacts.wasm,

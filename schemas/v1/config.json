@@ -40,7 +40,7 @@
               "as": {
                 "type": "string",
                 "description": "Alias for this rule (used in options)",
-                "pattern": "^[a-z][a-z0-9-]*$"
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
               }
             },
             "additionalProperties": false
@@ -56,12 +56,15 @@
               "url": {
                 "type": "string",
                 "format": "uri",
-                "description": "URL to tsuzulint-rule.json manifest"
+                "description": "URL to tsuzulint-rule.json manifest",
+                "examples": [
+                  "https://example.com/rules/my-rule/tsuzulint-rule.json"
+                ]
               },
               "as": {
                 "type": "string",
                 "description": "Alias for this rule (required for URL sources)",
-                "pattern": "^[a-z][a-z0-9-]*$"
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
               }
             },
             "additionalProperties": false
@@ -75,12 +78,15 @@
             "properties": {
               "path": {
                 "type": "string",
-                "description": "Local path to tsuzulint-rule.json manifest file"
+                "description": "Local path to tsuzulint-rule.json manifest file",
+                "examples": [
+                  "./rules/my-rule/tsuzulint-rule.json"
+                ]
               },
               "as": {
                 "type": "string",
                 "description": "Optional alias to override rule name from manifest",
-                "pattern": "^[a-z][a-z0-9-]*$"
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
               }
             },
             "additionalProperties": false

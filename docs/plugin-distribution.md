@@ -127,7 +127,7 @@ tzlint plugin install simorgh3196/tsuzulint-rule-sentence-length
 
 > **Note**: Version range specification (e.g., `^1.0`, `~1.0`) is not supported. Use exact versions for reproducibility.
 >
-> **Note**: For URL sources, the `as` field is required because the owner cannot be determined. For Path sources, `as` is optional; if omitted, the rule name is extracted from the manifest.
+> **Note**: For URL sources, the `as` field is required. For Path sources, `as` is optional (if omitted, the rule name is extracted from the manifest).
 
 ### 1.3 Plugin Management Commands
 

@@ -259,10 +259,12 @@ fn run_lint(
             RuleDefinition::Simple(s) => {
                 let val = serde_json::Value::String(s.clone());
                 if let Ok(spec) = PluginSpec::parse(&val) {
+                    // Current implementation of PluginSpec::parse_string only supports GitHub format.
+                    // URLs and Paths in simple string format are not yet supported because they require 'as' alias,
+                    // or we need to infer alias from the filename/url which is not implemented in parse_string.
                     if matches!(spec.source, PluginSource::GitHub { .. }) {
                         (Some(spec), None)
                     } else {
-                        // Assuming simple strings that aren't GitHub are local paths or unknown
                         (None, None)
                     }
                 } else {
