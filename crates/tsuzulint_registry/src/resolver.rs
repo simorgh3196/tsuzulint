@@ -351,10 +351,10 @@ impl PluginResolver {
                 let wasm_relative = Path::new(wasm_relative_str);
 
                 // 1. Reject absolute paths and '..' components
-                if wasm_relative.is_absolute() {
+                if wasm_relative.is_absolute() || wasm_relative.has_root() {
                     return Err(ResolveError::DownloadError(DownloadError::NotFound(
                         format!(
-                            "Absolute path not allowed in manifest: {}",
+                            "Absolute or rooted path not allowed in manifest: {}",
                             wasm_relative_str
                         ),
                     )));

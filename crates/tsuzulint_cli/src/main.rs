@@ -273,9 +273,9 @@ fn run_lint(
             }
             RuleDefinition::Detail(d) => {
                 if let Some(gh) = &d.github {
-                    build_spec_from_detail("github", gh, &d.r#as)
+                    build_spec_from_detail("github", gh, d.r#as.as_deref())
                 } else if let Some(url) = &d.url {
-                    build_spec_from_detail("url", url, &d.r#as)
+                    build_spec_from_detail("url", url, d.r#as.as_deref())
                 } else {
                     (None, None)
                 }
@@ -300,7 +300,16 @@ fn run_lint(
             };
 
             // Replace with local path to cached manifest
-            let path_str = resolved.manifest_path.to_string_lossy().to_string();
+            let path_str = resolved
+                .manifest_path
+                .to_str()
+                .ok_or_else(|| {
+                    miette::miette!(
+                        "Resolved manifest path is not valid UTF-8: {:?}",
+                        resolved.manifest_path
+                    )
+                })?
+                .to_string();
             let new_rule = RuleDefinition::Detail(RuleDefinitionDetail {
                 github: None,
                 url: None,
@@ -1021,7 +1030,7 @@ fn output_fix_summary(summary: &FixSummary, dry_run: bool) {
 pub(crate) fn build_spec_from_detail(
     key: &str,
     value: &str,
-    alias: &Option<String>,
+    alias: Option<&str>,
 ) -> (Option<PluginSpec>, Option<String>) {
     let mut map = serde_json::Map::new();
     map.insert(
@@ -1029,11 +1038,11 @@ pub(crate) fn build_spec_from_detail(
         serde_json::Value::String(value.to_string()),
     );
     if let Some(a) = alias {
-        map.insert("as".to_string(), serde_json::Value::String(a.clone()));
+        map.insert("as".to_string(), serde_json::Value::String(a.to_string()));
     }
     let val = serde_json::Value::Object(map);
     if let Ok(spec) = PluginSpec::parse(&val) {
-        (Some(spec), alias.clone())
+        (Some(spec), alias.map(String::from))
     } else {
         (None, None)
     }
@@ -1045,13 +1054,27 @@ mod tests {
 
     #[test]
     fn test_build_spec_from_detail() {
-        let (spec, alias) =
-            build_spec_from_detail("github", "owner/repo", &Some("alias".to_string()));
+        let (spec, alias) = build_spec_from_detail("github", "owner/repo", Some("alias"));
         assert!(spec.is_some());
         assert_eq!(alias, Some("alias".to_string()));
 
-        let (spec, alias) = build_spec_from_detail("invalid", "value", &None);
+        let (spec, alias) = build_spec_from_detail("invalid", "value", None);
         assert!(spec.is_none());
+        assert!(alias.is_none());
+    }
+
+    #[test]
+    fn test_build_spec_from_detail_url() {
+        let (spec, alias) =
+            build_spec_from_detail("url", "https://example.com/rule.wasm", Some("my-rule"));
+        assert!(spec.is_some());
+        assert_eq!(alias, Some("my-rule".to_string()));
+    }
+
+    #[test]
+    fn test_build_spec_from_detail_github_no_alias() {
+        let (spec, alias) = build_spec_from_detail("github", "owner/repo", None);
+        assert!(spec.is_some());
         assert!(alias.is_none());
     }
 }
