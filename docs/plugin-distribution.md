@@ -124,11 +124,11 @@ tzlint plugin install simorgh3196/tsuzulint-rule-sentence-length
 | GitHub + version | `"owner/repo@1.0.0"` | Fetch specific version (pinned) |
 | GitHub + alias | `{ "github": "owner/repo", "as": "alias" }` | With explicit alias |
 | URL | `{ "url": "https://...", "as": "alias" }` | Manifest URL (`as` required) |
-| Path | `{ "path": "./local/...", "as": "alias" }` | Local manifest (`as` required) |
+| Path | `{ "path": "./local/..." }` | Local manifest (`as` optional) |
 
 > **Note**: Version range specification (e.g., `^1.0`, `~1.0`) is not supported. Use exact versions for reproducibility.
 >
-> **Note**: For URL and Path formats, the `as` field is required because the owner cannot be determined from the source.
+> **Note**: For URL sources, the `as` field is required because the owner cannot be determined. For Path sources, `as` is optional; if omitted, the rule name is extracted from the manifest.
 
 ### 1.3 Plugin Management Commands
 
@@ -168,16 +168,16 @@ tzlint plugin remove simorgh3196/tsuzulint-rule-no-doubled-joshi
 │   └── plugins/                  # Download cache
 │       └── simorgh3196/
 │           └── tsuzulint-crates/
-└── tsuzulint_registry/        # プラグイン解決・取得・セキュリティ
-    ├── resolver.rs         # GitHub/URL/Local の解析
-    ├── source.rs           # ダウンロード定義
-    ├── cache.rs            # キャッシュ・マニフェスト書き換え (Localization)
-    ├── manifest.rs         # tsuzulint-rule.json パース
-    ├── hash.rs             # SHA256検証
-    └── permissions.rs      # パーミッション検証・ホスト関数
-└── tsuzulint_manifest/        # マニフェスト定義・バリデーション (JSON Schema)
-    ├── lib.rs              # ExternalRuleManifest 構造体と validate_manifest
-    └── schemas/v1/rule.json # 埋め込み済みの JSON Schema
+├── tsuzulint_registry/        # Plugin resolution, fetching, and security
+│   ├── resolver.rs         # Resolution of GitHub/URL/Local sources
+│   ├── source.rs           # Download definitions
+│   ├── cache.rs            # Cache management and manifest localization
+│   ├── manifest.rs         # Manifest parsing logic
+│   ├── hash.rs             # SHA256 integrity verification
+│   └── permissions.rs      # Permission validation
+└── tsuzulint_manifest/        # Shared manifest definitions and validation
+    ├── lib.rs              # ExternalRuleManifest struct and validate_manifest
+    └── schemas/v1/rule.json # Embedded JSON Schema
 ```
 
 To clear the cache:
@@ -238,18 +238,18 @@ For GitHub sources, TsuzuLint automatically constructs the identifier from the r
 {
   "rules": [
     { "github": "alice/tsuzulint-rule-sentence-length", "as": "alice-sl" },
-    { "path": "./local-rules/my-rule", "as": "my-local" },
+    { "path": "./local-rules/my-rule" },
     { "url": "https://example.com/tsuzulint-rule.json", "as": "external" }
   ],
   "options": {
     "alice-sl": { "max": 100 },
-    "my-local": { "enabled": true },
+    "my-rule": { "enabled": true },
     "external": { "strict": false }
   }
 }
 ```
 
-> **Note**: For `path` and `url` sources, the `as` field is **required** because the owner cannot be determined.
+> **Note**: For `url` sources, the `as` field is **required**. For `path` sources, `as` is optional (if omitted, the rule name is extracted from the manifest).
 
 #### Same-Name Rule Resolution
 

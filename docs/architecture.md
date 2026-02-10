@@ -157,7 +157,7 @@ graph TB
 
 **Key Components**:
 - `ExternalRuleManifest`: Rust representation of `tsuzulint-rule.json`
-- `validate_manifest`: JSON Schema based validator (v1/rule.json)
+- `validate_manifest`: JSON Schema-based validator (v1/rule.json)
 - `IsolationLevel`: Rule execution scope (Global/Block)
 
 **Design Decisions**:
