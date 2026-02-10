@@ -9,6 +9,7 @@ members = [
     "crates/tsuzulint_cli",
     "crates/tsuzulint_lsp",
     "crates/tsuzulint_registry",
+    "crates/tsuzulint_manifest",
     "crates/tsuzulint_wasm",
 ]
 
@@ -29,6 +30,7 @@ tsuzulint_parser = { path = "crates/tsuzulint_parser" }
 tsuzulint_plugin = { path = "crates/tsuzulint_plugin", default-features = false }
 tsuzulint_cache = { path = "crates/tsuzulint_cache" }
 tsuzulint_core = { path = "crates/tsuzulint_core", default-features = false }
+tsuzulint_manifest = { path = "crates/tsuzulint_manifest" }
 
 # WASM Runtime - Extism uses wasmtime internally (native)
 extism = "1.7"
@@ -96,3 +98,4 @@ tempfile = "3.14"
 assert_fs = "1.1"
 assert_cmd = "2.0"
 predicates = "3.1"
+wiremock = "0.6"

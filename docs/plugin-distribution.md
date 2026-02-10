@@ -41,8 +41,11 @@ flowchart LR
 
     A3 --> GH
     GH -->|Fetch| C
-    C --> U3
+    C -->|Localized Manifest| U3
 ```
+
+- **Registry Manifest Rewriting**: When caching a remote plugin, `tsuzulint_registry` detects if `artifacts.wasm` is a URL. If so, it rewrites it to `"rule.wasm"` (the local filename) in the cached manifest.
+- **Core Pureness**: `tsuzulint_core` remains network-agnostic. It strictly resolves WASM paths relative to the manifest file. The localization handled by the registry ensures core can always find the rule locally.
 
 ---
 
@@ -120,11 +123,11 @@ tzlint plugin install simorgh3196/tsuzulint-rule-sentence-length
 | GitHub + version | `"owner/repo@1.0.0"` | Fetch specific version (pinned) |
 | GitHub + alias | `{ "github": "owner/repo", "as": "alias" }` | With explicit alias |
 | URL | `{ "url": "https://...", "as": "alias" }` | Manifest URL (`as` required) |
-| Path | `{ "path": "./local/...", "as": "alias" }` | Local manifest (`as` required) |
+| Path | `{ "path": "./local/..." }` | Local manifest (`as` optional) |
 
 > **Note**: Version range specification (e.g., `^1.0`, `~1.0`) is not supported. Use exact versions for reproducibility.
 >
-> **Note**: For URL and Path formats, the `as` field is required because the owner cannot be determined from the source.
+> **Note**: For URL sources, the `as` field is required because the owner cannot be determined. For Path sources, `as` is optional; if omitted, the rule name is extracted from the manifest.
 
 ### 1.3 Plugin Management Commands
 
@@ -160,16 +163,10 @@ tzlint plugin remove simorgh3196/tsuzulint-rule-no-doubled-joshi
 ~/.config/tsuzulint/
 ├── plugins/                      # Global plugins (manually placed)
 │   └── my-local-rule.wasm
-├── cache/
-│   └── plugins/                  # Download cache
-│       └── simorgh3196/
-│           └── tsuzulint-crates/
-└── tsuzulint_registry/        # NEW: プラグイン解決・取得・セキュリティ
-    ├── resolver.rs         # GitHub/URL/Local の解析
-    ├── source.rs           # ダウンロード・キャッシュ
-    ├── manifest.rs         # tsuzulint-rule.json パース
-    ├── hash.rs             # SHA256検証
-    └── permissions.rs      # パーミッション検証・ホスト関数
+└── cache/
+    └── plugins/                  # Download cache
+        └── simorgh3196/
+            └── tsuzulint-crates/
 ```
 
 To clear the cache:
@@ -230,7 +227,7 @@ For GitHub sources, TsuzuLint automatically constructs the identifier from the r
 {
   "rules": [
     { "github": "alice/tsuzulint-rule-sentence-length", "as": "alice-sl" },
-    { "path": "./local-rules/my-rule", "as": "my-local" },
+    { "path": "./local-rules/my-rule/tsuzulint-rule.json", "as": "my-local" },
     { "url": "https://example.com/tsuzulint-rule.json", "as": "external" }
   ],
   "options": {
@@ -241,7 +238,7 @@ For GitHub sources, TsuzuLint automatically constructs the identifier from the r
 }
 ```
 
-> **Note**: For `path` and `url` sources, the `as` field is **required** because the owner cannot be determined.
+> **Note**: For `url` sources, the `as` field is **required**. For `path` sources, `as` is optional (if omitted, the rule name is extracted from the manifest).
 
 #### Same-Name Rule Resolution
 

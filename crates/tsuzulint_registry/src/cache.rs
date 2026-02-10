@@ -124,7 +124,22 @@ impl PluginCache {
         let manifest_path = dir.join("tsuzulint-rule.json");
 
         std::fs::write(&wasm_path, wasm_bytes)?;
-        std::fs::write(&manifest_path, manifest_content)?;
+
+        // If artifacts.wasm is a URL, we rewrite it to "rule.wasm" for the cached manifest
+        // This ensures tsuzulint_core doesn't need to know about URLs or fallback logic
+        let mut manifest_to_write = manifest_content.to_string();
+        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(manifest_content) {
+            let wasm_artifact = json.get_mut("artifacts").and_then(|a| a.get_mut("wasm"));
+            if let Some(wasm) = wasm_artifact {
+                // Rewrite to local file name consistent with cache layout
+                *wasm = serde_json::Value::String("rule.wasm".to_string());
+                if let Ok(rewritten) = serde_json::to_string_pretty(&json) {
+                    manifest_to_write = rewritten;
+                }
+            }
+        }
+
+        std::fs::write(&manifest_path, manifest_to_write)?;
 
         Ok(CachedPlugin {
             wasm_path,
@@ -287,21 +302,115 @@ mod tests {
 
         match result {
             Err(CacheError::PermissionDenied(_)) => {
-                // Success
+                // Success: PermissionDenied is the expected error
             }
-            Err(e) => {
+            Err(e) if e.to_string().to_lowercase().contains("permission denied") => {
                 // If run as root or on some file systems, permission might not be denied
                 // But if it IS denied, it MUST be PermissionDenied variant, not generic Io
-                if e.to_string().to_lowercase().contains("permission denied") {
-                    panic!(
-                        "Got IO error with 'Permission denied' message but not PermissionDenied variant: {:?}",
-                        e
-                    );
-                }
+                panic!(
+                    "Got IO error with 'Permission denied' message but not PermissionDenied variant: {:?}",
+                    e
+                );
             }
             Ok(_) => {
                 // Maybe running as root?
             }
+            Err(e) => {
+                // Any other error is unexpected for this test scenario
+                panic!("Unexpected error: {:?}", e);
+            }
         }
+    }
+
+    #[test]
+    fn should_rewrite_url_artifact_to_local_path() {
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+        let source = PluginSource::Url("https://example.com/manifest.json".to_string());
+
+        // Manifest with URL artifact
+        let manifest_content = r#"{
+            "rule": { "name": "url-rule", "version": "1.0.0" },
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "hash"
+            }
+        }"#;
+
+        let stored = cache
+            .store(&source, "1.0.0", b"wasm", manifest_content)
+            .unwrap();
+
+        // Verify manifest content on disk
+        let saved_content = fs::read_to_string(&stored.manifest_path).unwrap();
+        let saved_json: serde_json::Value = serde_json::from_str(&saved_content).unwrap();
+
+        let wasm_path = saved_json["artifacts"]["wasm"].as_str().unwrap();
+        assert_eq!(wasm_path, "rule.wasm");
+    }
+
+    #[test]
+    fn should_ensure_different_urls_have_different_cache_keys() {
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+        let source1 = PluginSource::Url("https://example.com/rule1.wasm".to_string());
+        let source2 = PluginSource::Url("https://example.com/rule2.wasm".to_string());
+
+        let _ = cache.store(&source1, "1.0.0", b"content1", "{}").unwrap();
+        let _ = cache.store(&source2, "1.0.0", b"content2", "{}").unwrap();
+
+        let cached1 = cache.get(&source1, "1.0.0").unwrap();
+        let cached2 = cache.get(&source2, "1.0.0").unwrap();
+
+        assert_ne!(cached1.wasm_path, cached2.wasm_path);
+    }
+
+    #[test]
+    fn should_rewrite_non_url_wasm_artifact_to_filename() {
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+        let source = PluginSource::github("owner", "repo");
+
+        // Manifest with relative path (not URL)
+        let manifest_content = r#"{
+            "rule": { "name": "local-artifact", "version": "1.0.0" },
+            "artifacts": {
+                "wasm": "local/rule.wasm",
+                "sha256": "hash"
+            }
+        }"#;
+
+        let stored = cache
+            .store(&source, "1.0.0", b"wasm", manifest_content)
+            .unwrap();
+
+        // Should be rewritten to "rule.wasm" regardless because we store it that way
+        let saved_content = fs::read_to_string(&stored.manifest_path).unwrap();
+        let saved_json: serde_json::Value = serde_json::from_str(&saved_content).unwrap();
+
+        let wasm_path = saved_json["artifacts"]["wasm"].as_str().unwrap();
+        assert_eq!(wasm_path, "rule.wasm");
+    }
+
+    #[test]
+    fn should_remove_nonexistent_plugin_gracefully() {
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+        let source = PluginSource::github("owner", "repo");
+
+        // Removing a non-existent plugin should succeed
+        let result = cache.remove(&source, "1.0.0");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn should_clear_when_cache_dir_doesnt_exist() {
+        let temp_dir = tempdir().unwrap();
+        let nonexistent = temp_dir.path().join("nonexistent");
+        let cache = PluginCache::with_dir(nonexistent);
+
+        // Clearing a non-existent cache should succeed
+        let result = cache.clear();
+        assert!(result.is_ok());
     }
 }
