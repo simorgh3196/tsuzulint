@@ -90,6 +90,7 @@ pub struct TsuzuLintCompatibility {
 }
 
 // Embed the schema
+// Path is relative to this file: ../../../schemas/v1/rule.json
 const RULE_SCHEMA_JSON: &str = include_str!("../../../schemas/v1/rule.json");
 
 static SCHEMA: OnceLock<Validator> = OnceLock::new();

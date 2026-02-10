@@ -39,3 +39,4 @@ pub use result::LintResult;
 
 // Re-export commonly used types
 pub use tsuzulint_plugin::{Diagnostic, Fix, Severity};
+pub mod rule_manifest;

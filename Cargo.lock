@@ -4018,6 +4018,7 @@ dependencies = [
  "tracing",
  "tsuzulint_ast",
  "tsuzulint_cache",
+ "tsuzulint_manifest",
  "tsuzulint_parser",
  "tsuzulint_plugin",
  "walkdir",
@@ -4035,6 +4036,16 @@ dependencies = [
  "tsuzulint_ast",
  "tsuzulint_core",
  "tsuzulint_parser",
+]
+
+[[package]]
+name = "tsuzulint_manifest"
+version = "0.1.0"
+dependencies = [
+ "jsonschema",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4073,7 +4084,6 @@ dependencies = [
  "dirs",
  "futures-util",
  "hex",
- "jsonschema",
  "proptest",
  "reqwest 0.12.28",
  "serde",
@@ -4083,6 +4093,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tsuzulint_manifest",
  "wiremock",
 ]
 

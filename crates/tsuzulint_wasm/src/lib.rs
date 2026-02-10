@@ -116,11 +116,7 @@ impl TextLinter {
     /// Returns the names of all loaded rules.
     #[wasm_bindgen(js_name = loadedRules)]
     pub fn loaded_rules(&self) -> Vec<String> {
-        self.host
-            .loaded_rules()
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        self.host.loaded_rules().map(|s| s.to_string()).collect()
     }
 
     /// Unloads a rule.

@@ -7,7 +7,7 @@ license.workspace = true
 
 
 [dependencies]
-jsonschema.workspace = true
+tsuzulint_manifest.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "json", "stream"] }
 serde.workspace = true
 serde_json.workspace = true

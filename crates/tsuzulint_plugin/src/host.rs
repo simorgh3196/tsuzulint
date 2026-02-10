@@ -77,6 +77,8 @@ pub struct PluginHost {
     manifests: HashMap<String, RuleManifest>,
     /// Rule configurations by name.
     configs: HashMap<String, serde_json::Value>,
+    /// Aliases mapping (alias -> real_name).
+    aliases: HashMap<String, String>,
 }
 
 impl PluginHost {
@@ -86,6 +88,7 @@ impl PluginHost {
             executor: Executor::new(),
             manifests: HashMap::new(),
             configs: HashMap::new(),
+            aliases: HashMap::new(),
         }
     }
 
@@ -129,6 +132,65 @@ impl PluginHost {
         Ok(result.manifest)
     }
 
+    /// Renames a loaded rule, optionally updating its manifest.
+    ///
+    /// # Arguments
+    ///
+    /// * `old_name` - Current name of the rule
+    /// * `new_name` - New name for the rule
+    /// * `manifest` - Optional new manifest to associate (overrides existing)
+    pub fn rename_rule(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+        manifest: Option<RuleManifest>,
+    ) -> Result<(), PluginError> {
+        // Resolve old_name to real_name if it's already an alias
+        let real_name = self
+            .aliases
+            .get(old_name)
+            .cloned()
+            .unwrap_or_else(|| old_name.to_string());
+
+        if !self.manifests.contains_key(old_name) && old_name == real_name {
+            // Check if real_name is loaded?
+            // Logic: rule is loaded if it is in manifests (under whatever name)
+            // If old_name is not in manifests, it's not loaded as such.
+            return Err(PluginError::not_found(old_name));
+        }
+
+        // Update alias map
+        self.aliases.insert(new_name.to_string(), real_name);
+
+        // Move manifest
+        if let Some(old_manifest) = self.manifests.remove(old_name) {
+            let new_manifest = manifest.unwrap_or(old_manifest);
+            self.manifests.insert(new_name.to_string(), new_manifest);
+        } else {
+            // If old_name was just an alias to real_name, but not in manifests?
+            // Should not happen if we maintain consistency.
+            // If we rely on manifests keys as source of truth for "loaded rules exposed to user"
+            // Then we must ensure entry exists.
+            if let Some(mani) = manifest {
+                self.manifests.insert(new_name.to_string(), mani);
+            } else {
+                return Err(PluginError::not_found(old_name));
+            }
+        }
+
+        // Move config
+        if let Some(config) = self.configs.remove(old_name) {
+            self.configs.insert(new_name.to_string(), config);
+        }
+
+        // Remove old alias if it existed
+        if self.aliases.contains_key(old_name) {
+            self.aliases.remove(old_name);
+        }
+
+        Ok(())
+    }
+
     /// Configures a loaded rule.
     ///
     /// # Arguments
@@ -154,8 +216,8 @@ impl PluginHost {
     }
 
     /// Returns the names of all loaded rules.
-    pub fn loaded_rules(&self) -> Vec<&str> {
-        self.executor.loaded_rules()
+    pub fn loaded_rules(&self) -> impl Iterator<Item = &String> {
+        self.manifests.keys()
     }
 
     /// Runs a rule on a node.
@@ -190,8 +252,10 @@ impl PluginHost {
             file_path,
         };
 
+        let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
         let request_json = serde_json::to_string(&request)?;
-        let response_json = self.executor.call_lint(name, &request_json)?;
+        let response_json = self.executor.call_lint(real_name, &request_json)?;
 
         let response: LintResponse = serde_json::from_str(&response_json)
             .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
@@ -216,12 +280,9 @@ impl PluginHost {
         source: &str,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        let rule_names: Vec<String> = self
-            .executor
-            .loaded_rules()
-            .into_iter()
-            .map(|s: &str| s.to_string())
-            .collect();
+        // Run against all rules visible in manifests (including aliases)
+        // Collect names first to avoid borrow check issues
+        let rule_names: Vec<String> = self.manifests.keys().cloned().collect();
         let mut all_diagnostics = Vec::new();
 
         for name in &rule_names {
@@ -240,15 +301,36 @@ impl PluginHost {
 
     /// Unloads a rule.
     pub fn unload_rule(&mut self, name: &str) -> bool {
+        let real_name = self
+            .aliases
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string());
+
         self.manifests.remove(name);
         self.configs.remove(name);
-        self.executor.unload(name)
+        self.aliases.remove(name);
+
+        // Only unload from executor if no other alias points to it?
+        // Checking reverse dependency is expensive.
+        // For simplicity, we assume one-to-one mapping for now or let executor handle it.
+        // But RuleExecutor::unload expects real_name.
+
+        // WARNING: If multiple aliases point to same real_name, unloading one might break others if we unload real_name.
+        // For now, let's assume we rename rules (move), not copy (alias).
+        // rename_rule uses remove(old_name), so it's a move.
+        // So we can safely unload real_name IF name == real_name OR this was the last alias.
+
+        // But since we are only doing Rename, there should be only one entry in `manifests` pointing to `real_name`.
+        // So unloading is safe.
+        self.executor.unload(&real_name)
     }
 
     /// Unloads all rules.
     pub fn unload_all(&mut self) {
         self.manifests.clear();
         self.configs.clear();
+        self.aliases.clear();
         self.executor.unload_all();
     }
 }
@@ -266,7 +348,7 @@ mod tests {
     #[test]
     fn test_plugin_host_new() {
         let host = PluginHost::new();
-        assert!(host.loaded_rules().is_empty());
+        assert!(host.loaded_rules().next().is_none());
     }
 
     #[test]
