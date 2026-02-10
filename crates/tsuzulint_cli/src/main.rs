@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use miette::{IntoDiagnostic, Result};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use jsonc_parser::ast::ObjectPropName;
@@ -64,6 +64,10 @@ enum Commands {
         /// Measure performance
         #[arg(long)]
         timings: bool,
+
+        /// Fail if a rule resolution fails (default is to skip with a warning)
+        #[arg(long)]
+        fail_on_resolve_error: bool,
     },
 
     /// Initialize configuration
@@ -123,6 +127,10 @@ enum PluginCommands {
         /// Alias for the plugin
         #[arg(long, value_name = "ALIAS")]
         r#as: Option<String>,
+
+        /// Fail if plugin resolution fails
+        #[arg(long)]
+        fail_on_resolve_error: bool,
     },
 }
 
@@ -164,43 +172,46 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<bool> {
-    match cli.command {
+    match &cli.command {
         Commands::Lint {
-            ref patterns,
-            ref format,
+            patterns,
+            format,
             fix,
             dry_run,
             timings,
-        } => run_lint(&cli, patterns, format, fix, dry_run, timings),
-        Commands::Init { force } => {
-            run_init(force)?;
-            Ok(false)
-        }
+            fail_on_resolve_error,
+        } => run_lint(
+            &cli,
+            patterns,
+            format,
+            *fix,
+            *dry_run,
+            *timings,
+            *fail_on_resolve_error,
+        ),
+        Commands::Init { force } => run_init(*force).map(|_| false),
         Commands::Rules { command } => match command {
-            RulesCommands::Create { name } => {
-                run_create_rule(&name)?;
-                Ok(false)
-            }
-            RulesCommands::Add { path } => {
-                run_add_rule(&path)?;
-                Ok(false)
-            }
+            RulesCommands::Create { name } => run_create_rule(name).map(|_| false),
+            RulesCommands::Add { path } => run_add_rule(path).map(|_| false),
         },
-        Commands::Lsp => {
-            run_lsp()?;
-            Ok(false)
-        }
+        Commands::Lsp => run_lsp().map(|_| false),
         Commands::Plugin { command } => match command {
             PluginCommands::Cache { command } => match command {
-                CacheCommands::Clean => {
-                    run_plugin_cache_clean()?;
-                    Ok(false)
-                }
+                CacheCommands::Clean => run_plugin_cache_clean().map(|_| false),
             },
-            PluginCommands::Install { spec, url, r#as } => {
-                run_plugin_install(spec, url, r#as, cli.config)?;
-                Ok(false)
-            }
+            PluginCommands::Install {
+                spec,
+                url,
+                r#as,
+                fail_on_resolve_error,
+            } => run_plugin_install(
+                spec.clone(),
+                url.clone(),
+                r#as.clone(),
+                cli.config.clone(),
+                *fail_on_resolve_error,
+            )
+            .map(|_| false),
         },
     }
 }
@@ -223,6 +234,7 @@ fn run_lint(
     fix: bool,
     dry_run: bool,
     timings: bool,
+    fail_on_resolve_error: bool,
 ) -> Result<bool> {
     // Load configuration
     let mut config = if let Some(ref path) = cli.config {
@@ -259,30 +271,9 @@ fn run_lint(
             }
             RuleDefinition::Detail(d) => {
                 if let Some(gh) = &d.github {
-                    // Reconstruct likely input for PluginSpec parse to leverage its logic
-                    let mut map = serde_json::Map::new();
-                    map.insert("github".to_string(), serde_json::Value::String(gh.clone()));
-                    if let Some(a) = &d.r#as {
-                        map.insert("as".to_string(), serde_json::Value::String(a.clone()));
-                    }
-                    let val = serde_json::Value::Object(map);
-                    if let Ok(spec) = PluginSpec::parse(&val) {
-                        (Some(spec), d.r#as.clone())
-                    } else {
-                        (None, None)
-                    }
+                    build_spec_from_detail("github", gh, &d.r#as)
                 } else if let Some(url) = &d.url {
-                    let mut map = serde_json::Map::new();
-                    map.insert("url".to_string(), serde_json::Value::String(url.clone()));
-                    if let Some(a) = &d.r#as {
-                        map.insert("as".to_string(), serde_json::Value::String(a.clone()));
-                    }
-                    let val = serde_json::Value::Object(map);
-                    if let Ok(spec) = PluginSpec::parse(&val) {
-                        (Some(spec), d.r#as.clone())
-                    } else {
-                        (None, None)
-                    }
+                    build_spec_from_detail("url", url, &d.r#as)
                 } else {
                     (None, None)
                 }
@@ -291,24 +282,23 @@ fn run_lint(
 
         if let Some(spec) = spec {
             info!("Resolving rule: {:?}...", spec);
-            let resolved = runtime
-                .block_on(async { resolver.resolve(&spec).await })
-                .into_diagnostic()?;
+            let resolve_result = runtime.block_on(async { resolver.resolve(&spec).await });
+
+            let resolved = match resolve_result {
+                Ok(r) => r,
+                Err(e) => {
+                    if fail_on_resolve_error {
+                        return Err(e).into_diagnostic();
+                    } else {
+                        warn!("Failed to resolve rule {:?}: {}. Skipping...", spec, e);
+                        new_rules.push(rule.clone());
+                        continue;
+                    }
+                }
+            };
 
             // Replace with local path to cached manifest
-            // For cached plugins (remote), the manifest is always "tsuzulint-rule.json" in the same dir as wasm_path
-            let manifest_path = resolved
-                .wasm_path
-                .parent()
-                .ok_or_else(|| {
-                    miette::miette!(
-                        "WASM path '{}' has no parent directory",
-                        resolved.wasm_path.display()
-                    )
-                })?
-                .join("tsuzulint-rule.json");
-
-            let path_str = manifest_path.to_string_lossy().to_string();
+            let path_str = resolved.manifest_path.to_string_lossy().to_string();
             let new_rule = RuleDefinition::Detail(RuleDefinitionDetail {
                 github: None,
                 url: None,
@@ -360,8 +350,7 @@ fn run_lint(
 
         if dry_run {
             // In dry-run mode, still output diagnostics
-            let has_errors = output_results(&results, format, timings_enabled)?;
-            return Ok(has_errors || !failures.is_empty());
+            return output_results(&results, format, timings_enabled);
         }
 
         // After fixing, return based on whether there were unfixable errors
@@ -654,6 +643,7 @@ fn run_plugin_install(
     url: Option<String>,
     alias: Option<String>,
     config_path: Option<PathBuf>,
+    fail_on_resolve_error: bool,
 ) -> Result<()> {
     let spec = if let Some(url) = url {
         if let Some(spec_str) = spec_str {
@@ -691,18 +681,30 @@ fn run_plugin_install(
     let resolver = PluginResolver::new().into_diagnostic()?;
 
     // Run the resolve (download) process
-    let resolved = tokio::runtime::Builder::new_multi_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .into_diagnostic()?
-        .block_on(async { resolver.resolve(&spec).await })
         .into_diagnostic()?;
+
+    let resolve_result = runtime.block_on(async { resolver.resolve(&spec).await });
+
+    let resolved = match resolve_result {
+        Ok(r) => r,
+        Err(e) => {
+            if fail_on_resolve_error {
+                return Err(e).into_diagnostic();
+            } else {
+                warn!(
+                    "Failed to resolve plugin {:?}: {}. Aborting install.",
+                    spec, e
+                );
+                return Ok(());
+            }
+        }
+    };
+
     info!("Successfully installed: {}", resolved.manifest.rule.name);
-
-    // Update config
-    update_config_with_plugin(&spec, &resolved.alias, &resolved.manifest, config_path)?;
-
-    Ok(())
+    update_config_with_plugin(&spec, &resolved.alias, &resolved.manifest, config_path)
 }
 
 fn update_config_with_plugin(
@@ -1010,5 +1012,44 @@ fn output_fix_summary(summary: &FixSummary, dry_run: bool) {
         for (path, count) in &summary.fixes_by_file {
             println!("  {}: {} fixes", path.display(), count);
         }
+    }
+}
+
+/// Helper to build PluginSpec from RuleDefinition detail
+pub(crate) fn build_spec_from_detail(
+    key: &str,
+    value: &str,
+    alias: &Option<String>,
+) -> (Option<PluginSpec>, Option<String>) {
+    let mut map = serde_json::Map::new();
+    map.insert(
+        key.to_string(),
+        serde_json::Value::String(value.to_string()),
+    );
+    if let Some(a) = alias {
+        map.insert("as".to_string(), serde_json::Value::String(a.clone()));
+    }
+    let val = serde_json::Value::Object(map);
+    if let Ok(spec) = PluginSpec::parse(&val) {
+        (Some(spec), alias.clone())
+    } else {
+        (None, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_spec_from_detail() {
+        let (spec, alias) =
+            build_spec_from_detail("github", "owner/repo", &Some("alias".to_string()));
+        assert!(spec.is_some());
+        assert_eq!(alias, Some("alias".to_string()));
+
+        let (spec, alias) = build_spec_from_detail("invalid", "value", &None);
+        assert!(spec.is_none());
+        assert!(alias.is_none());
     }
 }

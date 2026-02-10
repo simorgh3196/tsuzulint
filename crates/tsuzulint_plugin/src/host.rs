@@ -159,9 +159,6 @@ impl PluginHost {
             return Err(PluginError::not_found(old_name));
         }
 
-        // Update alias map
-        self.aliases.insert(new_name.to_string(), real_name);
-
         // Move manifest
         if let Some(old_manifest) = self.manifests.remove(old_name) {
             let new_manifest = manifest.unwrap_or(old_manifest);
@@ -177,6 +174,9 @@ impl PluginHost {
                 return Err(PluginError::not_found(old_name));
             }
         }
+
+        // Update alias map only after successful manifest handling
+        self.aliases.insert(new_name.to_string(), real_name);
 
         // Move config
         if let Some(config) = self.configs.remove(old_name) {
@@ -311,18 +311,7 @@ impl PluginHost {
         self.configs.remove(name);
         self.aliases.remove(name);
 
-        // Only unload from executor if no other alias points to it?
-        // Checking reverse dependency is expensive.
-        // For simplicity, we assume one-to-one mapping for now or let executor handle it.
-        // But RuleExecutor::unload expects real_name.
-
-        // WARNING: If multiple aliases point to same real_name, unloading one might break others if we unload real_name.
-        // For now, let's assume we rename rules (move), not copy (alias).
-        // rename_rule uses remove(old_name), so it's a move.
-        // So we can safely unload real_name IF name == real_name OR this was the last alias.
-
-        // But since we are only doing Rename, there should be only one entry in `manifests` pointing to `real_name`.
-        // So unloading is safe.
+        // Since rename_rule uses move semantics, unloading is safe.
         self.executor.unload(&real_name)
     }
 

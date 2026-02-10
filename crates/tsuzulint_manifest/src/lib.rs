@@ -75,13 +75,27 @@ pub struct Permissions {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FilesystemPermission {
     pub path: String,
-    pub access: String, // "read" or "write"
+    pub access: FilesystemAccess,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilesystemAccess {
+    Read,
+    Write,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NetworkPermission {
     pub host: String,
-    pub access: String, // "http" or "https"
+    pub access: NetworkAccess,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkAccess {
+    Http,
+    Https,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

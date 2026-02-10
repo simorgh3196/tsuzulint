@@ -29,4 +29,4 @@ assert_fs = { workspace = true }
 predicates = { workspace = true }
 tempfile = { workspace = true }
 serde_json = { workspace = true }
-wiremock = "0.6.5"
+wiremock = { workspace = true }

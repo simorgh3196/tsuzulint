@@ -23,6 +23,6 @@ dirs = "6.0.0"
 # semver.workspace = true
 
 [dev-dependencies]
-wiremock = "0.6"
+wiremock.workspace = true
 proptest = "1.10"
 tempfile.workspace = true

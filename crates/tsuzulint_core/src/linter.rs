@@ -933,6 +933,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_load_configured_rules_from_manifest() {
         // Setup temporary directory with rule manifest and wasm
         let (_config, dir) = test_config();

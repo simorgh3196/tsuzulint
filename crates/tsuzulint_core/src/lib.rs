@@ -29,6 +29,7 @@ pub mod formatters;
 mod linter;
 pub mod resolver;
 mod result;
+pub mod rule_manifest;
 
 pub use config::{LinterConfig, RuleDefinition, RuleDefinitionDetail};
 pub use error::LinterError;
@@ -39,4 +40,3 @@ pub use result::LintResult;
 
 // Re-export commonly used types
 pub use tsuzulint_plugin::{Diagnostic, Fix, Severity};
-pub mod rule_manifest;

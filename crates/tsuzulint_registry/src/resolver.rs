@@ -159,15 +159,29 @@ impl PluginSpec {
             });
         }
 
-        if let Some(path) = obj.path {
-            if obj.alias.is_none() {
-                return Err(ParseError::MissingAlias {
-                    src: "path".to_string(),
-                });
+        if let Some(path_str) = obj.path {
+            let mut alias = obj.alias;
+            if alias.is_none() {
+                // Read manifest to get name as per requirement
+                let path = PathBuf::from(&path_str);
+                let content = std::fs::read_to_string(&path).map_err(|e| {
+                    ParseError::InvalidObject(format!(
+                        "FAILED to read manifest at {}: {}",
+                        path_str, e
+                    ))
+                })?;
+                let manifest: ExternalRuleManifest =
+                    serde_json::from_str(&content).map_err(|e| {
+                        ParseError::InvalidObject(format!(
+                            "FAILED to parse manifest at {}: {}",
+                            path_str, e
+                        ))
+                    })?;
+                alias = Some(manifest.rule.name);
             }
             return Ok(Self {
-                source: PluginSource::Path(PathBuf::from(path)),
-                alias: obj.alias,
+                source: PluginSource::Path(PathBuf::from(path_str)),
+                alias,
             });
         }
 
@@ -179,6 +193,7 @@ impl PluginSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedPlugin {
     pub wasm_path: PathBuf,
+    pub manifest_path: PathBuf,
     pub manifest: ExternalRuleManifest,
     pub alias: String,
 }
@@ -224,23 +239,11 @@ impl PluginResolver {
             PluginSource::Path(path) => FetcherSource::Path(path.clone()),
         };
 
-        // Fail fast: strict alias check for Url and Path sources
-        match &spec.source {
-            PluginSource::Url(_) => {
-                if spec.alias.is_none() {
-                    return Err(ResolveError::AliasRequired {
-                        src: "url".to_string(),
-                    });
-                }
-            }
-            PluginSource::Path(_) => {
-                if spec.alias.is_none() {
-                    return Err(ResolveError::AliasRequired {
-                        src: "path".to_string(),
-                    });
-                }
-            }
-            _ => {}
+        // Fail fast: strict alias check for Url sources
+        if matches!(spec.source, PluginSource::Url(_)) && spec.alias.is_none() {
+            return Err(ResolveError::AliasRequired {
+                src: "url".to_string(),
+            });
         }
 
         let manifest = self.fetcher.fetch(&fetcher_source).await?;
@@ -259,6 +262,7 @@ impl PluginResolver {
                 if let Some(cached) = self.cache.get(&fetcher_source, version_str) {
                     return Ok(ResolvedPlugin {
                         wasm_path: cached.wasm_path,
+                        manifest_path: cached.manifest_path,
                         manifest,
                         alias,
                     });
@@ -288,6 +292,7 @@ impl PluginResolver {
 
                 Ok(ResolvedPlugin {
                     wasm_path: cached.wasm_path,
+                    manifest_path: cached.manifest_path,
                     manifest,
                     alias,
                 })
@@ -300,6 +305,7 @@ impl PluginResolver {
                 if let Some(cached) = self.cache.get(&fetcher_source, version_str) {
                     return Ok(ResolvedPlugin {
                         wasm_path: cached.wasm_path,
+                        manifest_path: cached.manifest_path,
                         manifest,
                         alias,
                     });
@@ -327,6 +333,7 @@ impl PluginResolver {
 
                 Ok(ResolvedPlugin {
                     wasm_path: cached.wasm_path,
+                    manifest_path: cached.manifest_path,
                     manifest,
                     alias,
                 })
@@ -398,6 +405,7 @@ impl PluginResolver {
 
                 Ok(ResolvedPlugin {
                     wasm_path,
+                    manifest_path: base_path.clone(),
                     manifest,
                     alias,
                 })
@@ -494,10 +502,20 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_error_missing_alias_path() {
-        let value = json!({ "path": "./local" });
-        let result = PluginSpec::parse(&value);
-        assert!(matches!(result, Err(ParseError::MissingAlias { .. })));
+    fn test_parse_object_path_optional_alias() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let manifest = json!({
+            "rule": { "name": "test-rule-name", "version": "1.0.0" },
+            "artifacts": { "wasm": "rule.wasm", "sha256": "..." }
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let value = json!({
+            "path": manifest_path.to_str().unwrap()
+        });
+        let spec = PluginSpec::parse(&value).expect("Parsing should succeed now");
+        assert_eq!(spec.alias, Some("test-rule-name".to_string()));
     }
 
     #[test]
@@ -773,18 +791,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_path_fail_fast_missing_alias() {
+    async fn test_resolve_path_optional_alias() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+        let wasm_content = b"wasm content";
+        std::fs::write(&wasm_path, wasm_content).unwrap();
+
+        let manifest = json!({
+            "rule": { "name": "auto-alias", "version": "1.0.0" },
+            "artifacts": {
+                "wasm": "rule.wasm",
+                "sha256": HashVerifier::compute(wasm_content)
+            }
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
         let resolver = PluginResolver::new().unwrap();
+        // Manually construct spec without alias
         let spec = PluginSpec {
-            source: PluginSource::Path(PathBuf::from("./local")),
+            source: PluginSource::Path(manifest_path),
             alias: None,
         };
 
-        let result = resolver.resolve(&spec).await;
-        match result {
-            Err(ResolveError::AliasRequired { src }) => assert_eq!(src, "path"),
-            _ => panic!("Should have failed with AliasRequired"),
-        }
+        let resolved = resolver
+            .resolve(&spec)
+            .await
+            .expect("Resolve should succeed");
+        assert_eq!(resolved.alias, "auto-alias");
     }
 
     #[test]
