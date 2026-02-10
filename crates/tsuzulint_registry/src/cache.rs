@@ -134,13 +134,12 @@ impl PluginCache {
                 .map(|s| s.starts_with("http://") || s.starts_with("https://"))
                 .unwrap_or(false);
 
-            if is_remote_url {
-                if let Some(wasm) = json.get_mut("artifacts").and_then(|a| a.get_mut("wasm")) {
-                    // Rewrite to local file name consistent with cache layout
-                    *wasm = serde_json::Value::String("rule.wasm".to_string());
-                    if let Ok(rewritten) = serde_json::to_string_pretty(&json) {
-                        manifest_to_write = rewritten;
-                    }
+            let wasm_artifact = json.get_mut("artifacts").and_then(|a| a.get_mut("wasm"));
+            if let (true, Some(wasm)) = (is_remote_url, wasm_artifact) {
+                // Rewrite to local file name consistent with cache layout
+                *wasm = serde_json::Value::String("rule.wasm".to_string());
+                if let Ok(rewritten) = serde_json::to_string_pretty(&json) {
+                    manifest_to_write = rewritten;
                 }
             }
         }
