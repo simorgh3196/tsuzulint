@@ -81,7 +81,11 @@ mod tests {
             &["abc", "DEF"]
         }
 
-        fn parse<'a>(&self, _arena: &'a AstArena, _source: &str) -> Result<TxtNode<'a>, crate::ParseError> {
+        fn parse<'a>(
+            &self,
+            _arena: &'a AstArena,
+            _source: &str,
+        ) -> Result<TxtNode<'a>, crate::ParseError> {
             Ok(TxtNode::new_leaf(NodeType::Document, Span::new(0, 0)))
         }
     }
