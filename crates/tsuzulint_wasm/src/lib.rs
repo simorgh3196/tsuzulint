@@ -163,7 +163,8 @@ impl TextLinter {
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Pre-serialize source
-        let source_json = serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
+        let source_json =
+            serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
         let source_raw = serde_json::value::RawValue::from_string(source_json)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
@@ -206,7 +207,8 @@ impl TextLinter {
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Pre-serialize source
-        let source_json = serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
+        let source_json =
+            serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
         let source_raw = serde_json::value::RawValue::from_string(source_json)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
@@ -383,7 +385,7 @@ mod tests {
 
         let doc = TxtNode::new_parent(NodeType::Document, Span::new(0, 10), &[]);
 
-        let json = serde_json::to_value(&doc).unwrap();
+        let json = serde_json::to_value(doc).unwrap();
 
         assert_eq!(json["type"], "Document");
         assert_eq!(json["range"][0], 0);
@@ -415,7 +417,7 @@ mod tests {
         let children = arena.alloc_slice_copy(&[*child1, *child2]);
         let parent = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 11), children);
 
-        let json = serde_json::to_value(&parent).unwrap();
+        let json = serde_json::to_value(parent).unwrap();
 
         assert!(json["children"].is_array());
         let children_arr = json["children"].as_array().unwrap();
@@ -434,7 +436,7 @@ mod tests {
         node.data.lang = Some(arena.alloc_str("rust"));
         node.data.ordered = Some(true);
 
-        let json = serde_json::to_value(&node).unwrap();
+        let json = serde_json::to_value(node).unwrap();
 
         assert_eq!(json["depth"], 2);
         assert_eq!(json["url"], "https://example.com");

@@ -450,8 +450,9 @@ impl Linter {
         {
             // Pre-serialize source content (escape string once)
             // This avoids re-escaping the source string for every rule execution
-            let source_json = serde_json::to_string(&content)
-                .map_err(|e| LinterError::Internal(format!("Failed to serialize content: {}", e)))?;
+            let source_json = serde_json::to_string(&content).map_err(|e| {
+                LinterError::Internal(format!("Failed to serialize content: {}", e))
+            })?;
             let source_raw = serde_json::value::RawValue::from_string(source_json)
                 .map_err(|e| LinterError::Internal(format!("Failed to create RawValue: {}", e)))?;
 
@@ -461,10 +462,12 @@ impl Linter {
             let global_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Global);
             if !global_rule_names.is_empty() {
                 // Serialize AST once for global rules
-                let ast_json = serde_json::to_string(&ast)
-                    .map_err(|e| LinterError::Internal(format!("Failed to serialize AST: {}", e)))?;
-                let ast_raw = serde_json::value::RawValue::from_string(ast_json)
-                    .map_err(|e| LinterError::Internal(format!("Failed to create RawValue: {}", e)))?;
+                let ast_json = serde_json::to_string(&ast).map_err(|e| {
+                    LinterError::Internal(format!("Failed to serialize AST: {}", e))
+                })?;
+                let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
+                    LinterError::Internal(format!("Failed to create RawValue: {}", e))
+                })?;
 
                 for rule in global_rule_names {
                     let start = Instant::now();
@@ -489,16 +492,24 @@ impl Linter {
                         if !matched_mask[block_index] {
                             // This block changed. Run block rules on it.
                             if let Ok(node_json) = serde_json::to_string(node) {
-                                if let Ok(node_raw) = serde_json::value::RawValue::from_string(node_json) {
+                                if let Ok(node_raw) =
+                                    serde_json::value::RawValue::from_string(node_json)
+                                {
                                     for rule in &block_rule_names {
                                         let start = Instant::now();
-                                        match host.run_rule(rule, &node_raw, &source_raw, path.to_str()) {
+                                        match host.run_rule(
+                                            rule,
+                                            &node_raw,
+                                            &source_raw,
+                                            path.to_str(),
+                                        ) {
                                             Ok(diags) => block_diagnostics.extend(diags),
                                             Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                         }
                                         if self.config.timings {
-                                            *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
-                                                start.elapsed();
+                                            *timings
+                                                .entry(rule.clone())
+                                                .or_insert(Duration::new(0, 0)) += start.elapsed();
                                         }
                                     }
                                 } else {
@@ -695,14 +706,16 @@ impl Linter {
         // Serialize to string + RawValue to avoid serialization overhead in rules
         let ast_json = serde_json::to_string(&ast)
             .map_err(|e| LinterError::Internal(format!("Failed to serialize AST: {}", e)))?;
-        let ast_raw = serde_json::value::RawValue::from_string(ast_json)
-            .map_err(|e| LinterError::Internal(format!("Failed to create RawValue for AST: {}", e)))?;
+        let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
+            LinterError::Internal(format!("Failed to create RawValue for AST: {}", e))
+        })?;
 
         // Pre-serialize source
         let source_json = serde_json::to_string(&content)
             .map_err(|e| LinterError::Internal(format!("Failed to serialize content: {}", e)))?;
-        let source_raw = serde_json::value::RawValue::from_string(source_json)
-            .map_err(|e| LinterError::Internal(format!("Failed to create RawValue for content: {}", e)))?;
+        let source_raw = serde_json::value::RawValue::from_string(source_json).map_err(|e| {
+            LinterError::Internal(format!("Failed to create RawValue for content: {}", e))
+        })?;
 
         // Run rules
         let diagnostics = {

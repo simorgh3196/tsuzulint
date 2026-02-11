@@ -2,7 +2,7 @@
 //!
 //! The core AST node type used throughout TsuzuLint.
 
-use serde::{ser::SerializeStruct, Serialize};
+use serde::{Serialize, ser::SerializeStruct};
 
 use crate::{NodeType, Span};
 
@@ -447,9 +447,8 @@ mod tests {
 
     #[test]
     fn test_serialization_basic() {
-        let arena = AstArena::new();
         let node = TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello");
-        let json = serde_json::to_value(&node).unwrap();
+        let json = serde_json::to_value(node).unwrap();
 
         assert_eq!(json["type"], "Str");
         assert_eq!(json["range"][0], 0);
@@ -466,7 +465,7 @@ mod tests {
         let children = arena.alloc_slice_copy(&[*child]);
         let node = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 5), children);
 
-        let json = serde_json::to_value(&node).unwrap();
+        let json = serde_json::to_value(node).unwrap();
 
         assert_eq!(json["type"], "Paragraph");
         assert_eq!(json["range"][0], 0);
@@ -478,12 +477,11 @@ mod tests {
 
     #[test]
     fn test_serialization_flattened_data() {
-        let arena = AstArena::new();
         let mut node = TxtNode::new_parent(NodeType::Header, Span::new(0, 10), &[]);
         node.data = NodeData::header(2);
         node.data.url = Some("https://example.com");
 
-        let json = serde_json::to_value(&node).unwrap();
+        let json = serde_json::to_value(node).unwrap();
 
         assert_eq!(json["type"], "Header");
         assert_eq!(json["depth"], 2);
@@ -494,7 +492,7 @@ mod tests {
     fn test_serialization_empty_parent() {
         // Parent node with no children should still have "children": []
         let node = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 0), &[]);
-        let json = serde_json::to_value(&node).unwrap();
+        let json = serde_json::to_value(node).unwrap();
 
         assert_eq!(json["type"], "Paragraph");
         assert!(json["children"].is_array());
