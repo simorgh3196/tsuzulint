@@ -22,10 +22,6 @@ impl PluginResolver {
             _ => return None,
         }
 
-        if name.contains(std::path::is_separator) {
-            return None;
-        }
-
         let filename = format!("{}.wasm", name);
 
         // 1. Check local project directory
@@ -84,5 +80,20 @@ mod tests {
         assert_eq!(PluginResolver::resolve("dir/plugin", None), None);
         assert_eq!(PluginResolver::resolve(".", None), None);
         assert_eq!(PluginResolver::resolve("..", None), None);
+    }
+}
+
+#[cfg(test)]
+mod additional_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_resolve_trailing_separator() {
+        let dir = tempdir().unwrap();
+        let project_root = dir.path();
+
+        // Should return None, even if it passes validation
+        assert_eq!(PluginResolver::resolve("foo/", Some(project_root)), None);
     }
 }
