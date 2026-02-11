@@ -32,6 +32,8 @@ pub type LintFilesResult = Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>)
 pub struct Linter {
     /// Linter configuration.
     config: LinterConfig,
+    /// Pre-computed hash of the configuration.
+    config_hash: String,
     /// Plugin host for WASM rules.
     plugin_host: Mutex<PluginHost>,
     /// Cache manager.
@@ -69,8 +71,12 @@ impl Linter {
         // Load configured plugins and rules
         Self::load_configured_rules(&config, &mut host);
 
+        // Pre-compute config hash
+        let config_hash = config.hash();
+
         Ok(Self {
             config,
+            config_hash,
             plugin_host: Mutex::new(host),
             cache: Mutex::new(cache),
             dynamic_rules: Mutex::new(Vec::new()),
@@ -363,7 +369,7 @@ impl Linter {
             .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
 
         let content_hash = CacheManager::hash_content(&content);
-        let config_hash = self.config.hash();
+        let config_hash = self.config_hash.clone();
         let rule_versions = Self::get_rule_versions_from_host(host);
 
         // 1. Check full cache first
@@ -863,5 +869,15 @@ mod tests {
         Linter::load_configured_rules(&config, &mut host);
         // With no plugins configured, no rules should be loaded
         assert!(host.loaded_rules().is_empty());
+    }
+
+    #[test]
+    fn test_linter_config_hash_caching() {
+        let (config, _temp) = test_config();
+        let expected_hash = config.hash();
+        let linter = Linter::new(config).unwrap();
+
+        // Verify that the hash stored in Linter matches the one computed from config
+        assert_eq!(linter.config_hash, expected_hash);
     }
 }
