@@ -7,10 +7,16 @@
 use std::collections::HashMap;
 
 use tracing::{debug, info};
-use wasmi::{Caller, Config, Engine, Extern, Linker, Memory, Module, Store, TypedFunc};
+use wasmi::{
+    Caller, Config, Engine, Extern, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder,
+    TypedFunc,
+};
 
 use crate::executor::{LoadResult, RuleExecutor};
 use crate::{PluginError, RuleManifest};
+
+/// Default memory limit for WASM instances (128 MB).
+const DEFAULT_MEMORY_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
 /// Host state for wasmi store.
 struct HostState {
@@ -20,6 +26,8 @@ struct HostState {
     output_buffer: Vec<u8>,
     /// Memory instance (set after instantiation).
     memory: Option<Memory>,
+    /// Resource limits for the store.
+    limits: StoreLimits,
 }
 
 impl HostState {
@@ -28,6 +36,9 @@ impl HostState {
             input_buffer: Vec::new(),
             output_buffer: Vec::new(),
             memory: None,
+            limits: StoreLimitsBuilder::new()
+                .memory_size(DEFAULT_MEMORY_LIMIT_BYTES)
+                .build(),
         }
     }
 }
@@ -133,6 +144,9 @@ impl RuleExecutor for WasmiExecutor {
 
         // Create store with host state
         let mut store = Store::new(&self.engine, HostState::new());
+
+        // Configure resource limits
+        store.limiter(|state| &mut state.limits);
 
         // Create linker and add host functions
         let mut linker = <Linker<HostState>>::new(&self.engine);
@@ -461,5 +475,29 @@ mod tests {
 
         let result = executor.call_lint("test-rule", &input_json);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_executor_memory_limit() {
+        let mut executor = WasmiExecutor::new();
+
+        // A rule that tries to allocate 200MB (3200 pages)
+        // 3200 * 64KB = 204,800KB = 200MB
+        let wasm = wat_to_wasm(
+            r#"
+            (module
+                (memory (export "memory") 3200)
+                (func (export "get_manifest") (result i32 i32) (i32.const 0) (i32.const 0))
+                (func (export "lint") (param i32 i32) (result i32 i32) (i32.const 0) (i32.const 0))
+                (func (export "alloc") (param i32) (result i32) (i32.const 0))
+            )
+            "#,
+        );
+
+        // Loading should fail because the initial memory exceeds the limit
+        let result = executor.load(&wasm);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Resource limit exceeded") || err_msg.contains("Memory"));
     }
 }
