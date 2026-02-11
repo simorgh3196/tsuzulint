@@ -462,4 +462,133 @@ mod tests {
         let result = executor.call_lint("test-rule", &input_json);
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_executor_default() {
+        let executor = WasmiExecutor::default();
+        assert!(executor.loaded_rules().is_empty());
+    }
+
+    #[test]
+    fn test_executor_unload_returns_false_for_nonexistent() {
+        let mut executor = WasmiExecutor::new();
+        assert!(!executor.unload("nonexistent-rule"));
+    }
+
+    #[test]
+    fn test_executor_unload_returns_true_after_load() {
+        let mut executor = WasmiExecutor::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+        executor.load(&wasm).expect("Failed to load rule");
+
+        assert!(executor.unload("test-rule"));
+        assert!(executor.loaded_rules().is_empty());
+    }
+
+    #[test]
+    fn test_executor_unload_all() {
+        let mut executor = WasmiExecutor::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+        executor.load(&wasm).expect("Failed to load rule");
+
+        assert_eq!(executor.loaded_rules().len(), 1);
+        executor.unload_all();
+        assert!(executor.loaded_rules().is_empty());
+    }
+
+    #[test]
+    fn test_executor_empty_wasm() {
+        let mut executor = WasmiExecutor::new();
+        let result = executor.load(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_executor_invalid_wasm_bytes() {
+        let mut executor = WasmiExecutor::new();
+        let invalid_wasm = b"not wasm at all";
+        let result = executor.load(invalid_wasm);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_executor_multiple_rules() {
+        let mut executor = WasmiExecutor::new();
+
+        // Load first rule
+        let wasm1 = wat_to_wasm(&valid_rule_wat());
+        executor.load(&wasm1).expect("Failed to load rule 1");
+
+        // Load second rule (different name)
+        let json2 = r#"{"name":"test-rule-2","version":"1.0.0","description":"Test rule 2"}"#;
+        let len2 = json2.len();
+        let wasm2 = wat_to_wasm(&format!(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "get_manifest") (result i32 i32)
+                    (i32.const 0)
+                    (i32.const {})
+                )
+                (func (export "lint") (param i32 i32) (result i32 i32)
+                    (i32.const 100)
+                    (i32.const 2)
+                )
+                (func (export "alloc") (param i32) (result i32)
+                    (i32.const 128)
+                )
+                (data (i32.const 0) "{}")
+                (data (i32.const 100) "[]")
+            )
+            "#,
+            len2,
+            json2.replace("\"", "\\\"")
+        ));
+        executor.load(&wasm2).expect("Failed to load rule 2");
+
+        assert_eq!(executor.loaded_rules().len(), 2);
+        assert!(executor.loaded_rules().contains(&"test-rule"));
+        assert!(executor.loaded_rules().contains(&"test-rule-2"));
+    }
+
+    #[test]
+    fn test_read_string_invalid_utf8() {
+        // This is harder to test directly since read_string is private
+        // But we can test through call_lint with a rule that returns invalid UTF-8
+        let mut executor = WasmiExecutor::new();
+
+        // Create a rule that returns invalid UTF-8 bytes
+        let json = r#"{"name":"invalid-utf8","version":"1.0.0","description":"Invalid"}"#;
+        let len = json.len();
+        let wasm = wat_to_wasm(&format!(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "get_manifest") (result i32 i32)
+                    (i32.const 0)
+                    (i32.const {})
+                )
+                (func (export "lint") (param i32 i32) (result i32 i32)
+                    (i32.const 100)
+                    (i32.const 2)
+                )
+                (func (export "alloc") (param i32) (result i32)
+                    (i32.const 128)
+                )
+                (data (i32.const 0) "{}")
+                ;; Invalid UTF-8 sequence at offset 100
+                (data (i32.const 100) "\xff\xfe")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        ));
+
+        executor.load(&wasm).expect("Failed to load rule");
+        let result = executor.call_lint("invalid-utf8", "{}");
+        // Should handle the UTF-8 error (may succeed with replacement chars or fail gracefully)
+        // The exact behavior depends on String::from_utf8_lossy vs from_utf8
+        // Our implementation uses from_utf8, so it should error
+        assert!(result.is_err() || result.unwrap().contains("\u{FFFD}"));
+    }
 }

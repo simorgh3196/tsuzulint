@@ -355,4 +355,165 @@ mod tests {
             expected_error_part
         );
     }
+
+    #[test]
+    fn test_config_hash_consistency() {
+        let config1 = LinterConfig::new();
+        let config2 = LinterConfig::new();
+
+        // Same configs should produce same hash
+        assert_eq!(config1.hash(), config2.hash());
+    }
+
+    #[test]
+    fn test_config_hash_changes_with_content() {
+        let mut config1 = LinterConfig::new();
+        let mut config2 = LinterConfig::new();
+
+        config2.cache = false;
+
+        // Different configs should produce different hashes
+        assert_ne!(config1.hash(), config2.hash());
+
+        // Adding rules should change hash
+        config1.rules.push(RuleDefinition::Simple("test-rule".to_string()));
+        let hash_after_rule = config1.hash();
+        assert_ne!(LinterConfig::new().hash(), hash_after_rule);
+    }
+
+    #[test]
+    fn test_config_from_file_sets_base_dir() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".tsuzulint.json");
+        fs::write(&config_path, r#"{"cache": true}"#).unwrap();
+
+        let config = LinterConfig::from_file(&config_path).unwrap();
+        assert_eq!(config.base_dir, Some(temp_dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn test_config_from_file_handles_root_directory() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join(".tsuzulint.json");
+        fs::write(&config_path, r#"{}"#).unwrap();
+
+        let config = LinterConfig::from_file(&config_path).unwrap();
+        assert!(config.base_dir.is_some());
+    }
+
+    #[test]
+    fn test_enabled_rules_excludes_disabled() {
+        let json = r#"{
+            "options": {
+                "enabled": true,
+                "disabled": false,
+                "off": "off"
+            }
+        }"#;
+
+        let config = LinterConfig::from_json(json).unwrap();
+        let enabled = config.enabled_rules();
+
+        assert_eq!(enabled.len(), 1);
+        assert!(enabled.iter().any(|(name, _)| *name == "enabled"));
+        assert!(!enabled.iter().any(|(name, _)| *name == "disabled"));
+        assert!(!enabled.iter().any(|(name, _)| *name == "off"));
+    }
+
+    #[test]
+    fn test_rule_definition_detail_equality() {
+        let def1 = RuleDefinitionDetail {
+            github: Some("owner/repo".to_string()),
+            url: None,
+            path: None,
+            r#as: Some("alias".to_string()),
+        };
+
+        let def2 = RuleDefinitionDetail {
+            github: Some("owner/repo".to_string()),
+            url: None,
+            path: None,
+            r#as: Some("alias".to_string()),
+        };
+
+        let def3 = RuleDefinitionDetail {
+            github: Some("other/repo".to_string()),
+            url: None,
+            path: None,
+            r#as: Some("alias".to_string()),
+        };
+
+        assert_eq!(def1, def2);
+        assert_ne!(def1, def3);
+    }
+
+    #[test]
+    fn test_rule_option_severity_variants() {
+        let error = RuleOption::Severity("error".to_string());
+        let warning = RuleOption::Severity("warning".to_string());
+        let off = RuleOption::Severity("off".to_string());
+
+        assert!(error.is_enabled());
+        assert!(warning.is_enabled());
+        assert!(!off.is_enabled());
+    }
+
+    #[test]
+    fn test_config_from_json_with_null_value() {
+        let json = r#"null"#;
+
+        // Should handle null as empty config or error
+        let result = LinterConfig::from_json(json);
+        // null is not a valid object, so it should fail validation
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_cache_dir_default() {
+        let config = LinterConfig::new();
+        assert_eq!(config.cache_dir, ".tsuzulint-cache");
+    }
+
+    #[test]
+    fn test_config_include_exclude_empty_by_default() {
+        let config = LinterConfig::new();
+        assert!(config.include.is_empty());
+        assert!(config.exclude.is_empty());
+    }
+
+    #[test]
+    fn test_config_with_complex_rule_definitions() {
+        let json = r#"{
+            "rules": [
+                "simple/rule",
+                { "github": "owner/repo@v1.0.0", "as": "custom-name" },
+                { "url": "https://example.com/rule.wasm", "as": "url-rule" },
+                { "path": "./local/rule.wasm", "as": "local-rule" }
+            ]
+        }"#;
+
+        let config = LinterConfig::from_json(json).unwrap();
+        assert_eq!(config.rules.len(), 4);
+
+        // Verify first is Simple
+        match &config.rules[0] {
+            RuleDefinition::Simple(s) => assert_eq!(s, "simple/rule"),
+            _ => panic!("Expected Simple"),
+        }
+
+        // Verify second is Detail with github
+        match &config.rules[1] {
+            RuleDefinition::Detail(d) => {
+                assert_eq!(d.github.as_deref(), Some("owner/repo@v1.0.0"));
+                assert_eq!(d.r#as.as_deref(), Some("custom-name"));
+            }
+            _ => panic!("Expected Detail"),
+        }
+    }
 }

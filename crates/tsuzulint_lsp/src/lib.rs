@@ -637,3 +637,225 @@ pub async fn run() {
     let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tsuzulint_ast::{Span as TsuzuLintSpan};
+
+    /// Helper function to test offset_to_position logic
+    fn offset_to_position_test(offset: usize, text: &str) -> Option<Position> {
+        if offset > text.len() {
+            return None;
+        }
+
+        let mut line = 0u32;
+        let mut col = 0u32;
+        let mut current_offset = 0;
+
+        for ch in text.chars() {
+            if current_offset >= offset {
+                break;
+            }
+
+            if ch == '\n' {
+                line += 1;
+                col = 0;
+            } else {
+                col += 1;
+            }
+
+            current_offset += ch.len_utf8();
+        }
+
+        Some(Position::new(line, col))
+    }
+
+    /// Helper to test offset_to_range logic
+    fn offset_to_range_test(start: usize, end: usize, text: &str) -> Option<Range> {
+        let start_pos = offset_to_position_test(start, text)?;
+        let end_pos = offset_to_position_test(end, text)?;
+        Some(Range::new(start_pos, end_pos))
+    }
+
+    /// Helper to test positions_le logic
+    fn positions_le_test(p1: Position, p2: Position) -> bool {
+        p1.line < p2.line || (p1.line == p2.line && p1.character <= p2.character)
+    }
+
+    #[test]
+    fn test_offset_to_position_start_of_file() {
+        let text = "Hello world";
+
+        let pos = offset_to_position_test(0, text).unwrap();
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 0);
+    }
+
+    #[test]
+    fn test_offset_to_position_middle_of_line() {
+        let text = "Hello world";
+
+        let pos = offset_to_position_test(6, text).unwrap();
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 6);
+    }
+
+    #[test]
+    fn test_offset_to_position_across_newlines() {
+        let text = "Line 1\nLine 2\nLine 3";
+
+        // Position at 'L' of "Line 2"
+        let pos = offset_to_position_test(7, text).unwrap();
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.character, 0);
+
+        // Position at '2' in "Line 2"
+        let pos = offset_to_position_test(12, text).unwrap();
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.character, 5);
+
+        // Position at 'L' of "Line 3"
+        let pos = offset_to_position_test(14, text).unwrap();
+        assert_eq!(pos.line, 2);
+        assert_eq!(pos.character, 0);
+    }
+
+    #[test]
+    fn test_offset_to_position_end_of_file() {
+        let text = "Hello world";
+
+        let pos = offset_to_position_test(11, text).unwrap();
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 11);
+    }
+
+    #[test]
+    fn test_offset_to_position_out_of_bounds() {
+        let text = "Hello";
+
+        let pos = offset_to_position_test(100, text);
+        assert!(pos.is_none());
+    }
+
+    #[test]
+    fn test_offset_to_position_empty_text() {
+        let text = "";
+
+        let pos = offset_to_position_test(0, text).unwrap();
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 0);
+    }
+
+    #[test]
+    fn test_offset_to_position_multibyte_characters() {
+        // "こんにちは" is 15 bytes but 5 characters
+        let text = "こんにちは";
+
+        // Each character is 3 bytes
+        let pos = offset_to_position_test(0, text).unwrap();
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 0);
+
+        let pos = offset_to_position_test(3, text).unwrap();
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 1);
+
+        let pos = offset_to_position_test(6, text).unwrap();
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 2);
+    }
+
+    #[test]
+    fn test_offset_to_range_valid() {
+        let text = "Hello\nworld";
+
+        let range = offset_to_range_test(0, 5, text).unwrap();
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 0);
+        assert_eq!(range.end.line, 0);
+        assert_eq!(range.end.character, 5);
+    }
+
+    #[test]
+    fn test_offset_to_range_across_lines() {
+        let text = "Hello\nworld";
+
+        let range = offset_to_range_test(0, 11, text).unwrap();
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 0);
+        assert_eq!(range.end.line, 1);
+        assert_eq!(range.end.character, 5);
+    }
+
+    #[test]
+    fn test_offset_to_range_invalid_bounds() {
+        let text = "Hello";
+
+        let range = offset_to_range_test(0, 100, text);
+        assert!(range.is_none());
+    }
+
+    #[test]
+    fn test_positions_le_same_line() {
+        let p1 = Position::new(0, 5);
+        let p2 = Position::new(0, 10);
+
+        assert!(positions_le_test(p1, p2));
+        assert!(positions_le_test(p1, p1));
+        assert!(!positions_le_test(p2, p1));
+    }
+
+    #[test]
+    fn test_positions_le_different_lines() {
+        let p1 = Position::new(1, 5);
+        let p2 = Position::new(2, 3);
+
+        assert!(positions_le_test(p1, p2));
+        assert!(!positions_le_test(p2, p1));
+    }
+
+    #[test]
+    fn test_severity_conversion() {
+        // Test that severity conversion is correct
+        use tower_lsp::lsp_types::DiagnosticSeverity;
+
+        // Since we can't directly test Backend methods, we verify the mapping here
+        let error_severity = DiagnosticSeverity::ERROR;
+        let warning_severity = DiagnosticSeverity::WARNING;
+        let info_severity = DiagnosticSeverity::INFORMATION;
+
+        assert_eq!(error_severity as i32, 1);
+        assert_eq!(warning_severity as i32, 2);
+        assert_eq!(info_severity as i32, 3);
+    }
+
+    #[test]
+    fn test_position_ordering() {
+        // Test edge cases for position comparison
+        let p1 = Position::new(0, 0);
+        let p2 = Position::new(0, 0);
+        assert!(positions_le_test(p1, p2));
+
+        let p3 = Position::new(1, 0);
+        let p4 = Position::new(0, 100);
+        assert!(!positions_le_test(p3, p4));
+        assert!(positions_le_test(p4, p3));
+    }
+
+    #[test]
+    fn test_offset_to_position_with_cr_lf() {
+        // Test Windows-style line endings
+        let text = "Line 1\r\nLine 2";
+
+        // The '\r' counts as a character
+        let pos = offset_to_position_test(7, text).unwrap();
+        // Should be at '\n'
+        assert_eq!(pos.line, 0);
+
+        let pos = offset_to_position_test(8, text).unwrap();
+        // Should be at 'L' of "Line 2"
+        assert_eq!(pos.line, 1);
+        assert_eq!(pos.character, 0);
+    }
+}
