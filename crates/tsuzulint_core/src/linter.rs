@@ -448,15 +448,27 @@ impl Linter {
 
         // Run rules
         {
+            // Pre-serialize source content (escape string once)
+            // This avoids re-escaping the source string for every rule execution
+            let source_json = serde_json::to_string(&content)
+                .map_err(|e| LinterError::Internal(format!("Failed to serialize content: {}", e)))?;
+            let source_raw = serde_json::value::RawValue::from_string(source_json)
+                .map_err(|e| LinterError::Internal(format!("Failed to create RawValue: {}", e)))?;
+
             // A. Run Global Rules
             // Global rules must always run on the full document if anything changed
             // because they depend on the full context.
             let global_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Global);
             if !global_rule_names.is_empty() {
-                let ast_json = self.ast_to_json(&ast, &content);
+                // Serialize AST once for global rules
+                let ast_json = serde_json::to_string(&ast)
+                    .map_err(|e| LinterError::Internal(format!("Failed to serialize AST: {}", e)))?;
+                let ast_raw = serde_json::value::RawValue::from_string(ast_json)
+                    .map_err(|e| LinterError::Internal(format!("Failed to create RawValue: {}", e)))?;
+
                 for rule in global_rule_names {
                     let start = Instant::now();
-                    match host.run_rule(&rule, &ast_json, &content, path.to_str()) {
+                    match host.run_rule(&rule, &ast_raw, &source_raw, path.to_str()) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
@@ -476,17 +488,24 @@ impl Linter {
                     if block_index < matched_mask.len() {
                         if !matched_mask[block_index] {
                             // This block changed. Run block rules on it.
-                            let node_json = self.ast_to_json(node, &content);
-                            for rule in &block_rule_names {
-                                let start = Instant::now();
-                                match host.run_rule(rule, &node_json, &content, path.to_str()) {
-                                    Ok(diags) => block_diagnostics.extend(diags),
-                                    Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                            if let Ok(node_json) = serde_json::to_string(node) {
+                                if let Ok(node_raw) = serde_json::value::RawValue::from_string(node_json) {
+                                    for rule in &block_rule_names {
+                                        let start = Instant::now();
+                                        match host.run_rule(rule, &node_raw, &source_raw, path.to_str()) {
+                                            Ok(diags) => block_diagnostics.extend(diags),
+                                            Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                                        }
+                                        if self.config.timings {
+                                            *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
+                                                start.elapsed();
+                                        }
+                                    }
+                                } else {
+                                    warn!("Failed to create RawValue for block node");
                                 }
-                                if self.config.timings {
-                                    *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
-                                        start.elapsed();
-                                }
+                            } else {
+                                warn!("Failed to serialize block node");
                             }
                         }
                         block_index += 1;
@@ -673,7 +692,17 @@ impl Linter {
             .map_err(|e| LinterError::parse(e.to_string()))?;
 
         // Convert AST to JSON for plugin system
-        let ast_json = self.ast_to_json(&ast, content);
+        // Serialize to string + RawValue to avoid serialization overhead in rules
+        let ast_json = serde_json::to_string(&ast)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize AST: {}", e)))?;
+        let ast_raw = serde_json::value::RawValue::from_string(ast_json)
+            .map_err(|e| LinterError::Internal(format!("Failed to create RawValue for AST: {}", e)))?;
+
+        // Pre-serialize source
+        let source_json = serde_json::to_string(&content)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize content: {}", e)))?;
+        let source_raw = serde_json::value::RawValue::from_string(source_json)
+            .map_err(|e| LinterError::Internal(format!("Failed to create RawValue for content: {}", e)))?;
 
         // Run rules
         let diagnostics = {
@@ -681,7 +710,7 @@ impl Linter {
                 .plugin_host
                 .lock()
                 .map_err(|_| LinterError::Internal("Plugin host lock poisoned".to_string()))?;
-            host.run_all_rules(&ast_json, content, path.to_str())?
+            host.run_all_rules(&ast_raw, &source_raw, path.to_str())?
         };
 
         Ok(diagnostics)
@@ -698,18 +727,6 @@ impl Linter {
         }
 
         versions
-    }
-
-    /// Converts a TxtNode to JSON for the plugin system.
-    fn ast_to_json(&self, node: &tsuzulint_ast::TxtNode, _source: &str) -> serde_json::Value {
-        // Simplified JSON representation
-        serde_json::json!({
-            "type": format!("{}", node.node_type),
-            "range": [node.span.start, node.span.end],
-            "children": node.children.iter()
-                .map(|c| self.ast_to_json(c, _source))
-                .collect::<Vec<_>>(),
-        })
     }
 }
 
@@ -851,25 +868,6 @@ mod tests {
         assert!(globset.is_match("file.md"));
         assert!(globset.is_match("dir/file.txt"));
         assert!(globset.is_match("docs/readme.md"));
-    }
-
-    #[test]
-    fn test_linter_ast_to_json() {
-        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
-
-        let (config, _temp) = test_config();
-        let linter = Linter::new(config).unwrap();
-
-        let arena = AstArena::new();
-        let text_node = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello"));
-        let children = arena.alloc_slice_copy(&[*text_node]);
-        let doc = TxtNode::new_parent(NodeType::Document, Span::new(0, 5), children);
-
-        let json = linter.ast_to_json(&doc, "hello");
-
-        assert_eq!(json["type"], "Document");
-        assert!(json["range"].is_array());
-        assert!(json["children"].is_array());
     }
 
     #[test]

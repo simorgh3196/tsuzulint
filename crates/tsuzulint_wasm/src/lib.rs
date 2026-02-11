@@ -158,12 +158,19 @@ impl TextLinter {
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
 
         // Convert AST to JSON for plugin consumption
-        let ast_json = ast_to_json(&ast);
+        let ast_json = serde_json::to_string(&ast).map_err(|e| JsError::new(&e.to_string()))?;
+        let ast_raw = serde_json::value::RawValue::from_string(ast_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        // Pre-serialize source
+        let source_json = serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
+        let source_raw = serde_json::value::RawValue::from_string(source_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Run all rules
         let diagnostics = self
             .host
-            .run_all_rules(&ast_json, content, None)
+            .run_all_rules(&ast_raw, &source_raw, None)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Convert diagnostics to JavaScript objects
@@ -194,12 +201,19 @@ impl TextLinter {
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
 
         // Convert AST to JSON for plugin consumption
-        let ast_json = ast_to_json(&ast);
+        let ast_json = serde_json::to_string(&ast).map_err(|e| JsError::new(&e.to_string()))?;
+        let ast_raw = serde_json::value::RawValue::from_string(ast_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        // Pre-serialize source
+        let source_json = serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
+        let source_raw = serde_json::value::RawValue::from_string(source_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Run all rules
         let diagnostics = self
             .host
-            .run_all_rules(&ast_json, content, None)
+            .run_all_rules(&ast_raw, &source_raw, None)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         serde_json::to_string(&diagnostics).map_err(|e| JsError::new(&e.to_string()))
@@ -259,61 +273,6 @@ impl From<Diagnostic> for JsDiagnostic {
             }),
         }
     }
-}
-
-/// Converts a TxtNode to a JSON value.
-fn ast_to_json(node: &tsuzulint_ast::TxtNode) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-
-    obj.insert(
-        "type".to_string(),
-        serde_json::Value::String(format!("{:?}", node.node_type)),
-    );
-
-    obj.insert(
-        "range".to_string(),
-        serde_json::json!([node.span.start, node.span.end]),
-    );
-
-    if let Some(value) = node.value {
-        obj.insert(
-            "value".to_string(),
-            serde_json::Value::String(value.to_string()),
-        );
-    }
-
-    if node.node_type.is_parent() || !node.children.is_empty() {
-        let children: Vec<serde_json::Value> = node.children.iter().map(ast_to_json).collect();
-        obj.insert("children".to_string(), serde_json::Value::Array(children));
-    }
-
-    // Add node data if present
-    if let Some(url) = node.data.url {
-        obj.insert(
-            "url".to_string(),
-            serde_json::Value::String(url.to_string()),
-        );
-    }
-    if let Some(title) = node.data.title {
-        obj.insert(
-            "title".to_string(),
-            serde_json::Value::String(title.to_string()),
-        );
-    }
-    if let Some(depth) = node.data.depth {
-        obj.insert("depth".to_string(), serde_json::Value::Number(depth.into()));
-    }
-    if let Some(ordered) = node.data.ordered {
-        obj.insert("ordered".to_string(), serde_json::Value::Bool(ordered));
-    }
-    if let Some(lang) = node.data.lang {
-        obj.insert(
-            "lang".to_string(),
-            serde_json::Value::String(lang.to_string()),
-        );
-    }
-
-    serde_json::Value::Object(obj)
 }
 
 #[cfg(test)]
@@ -424,7 +383,7 @@ mod tests {
 
         let doc = TxtNode::new_parent(NodeType::Document, Span::new(0, 10), &[]);
 
-        let json = ast_to_json(&doc);
+        let json = serde_json::to_value(&doc).unwrap();
 
         assert_eq!(json["type"], "Document");
         assert_eq!(json["range"][0], 0);
@@ -440,7 +399,7 @@ mod tests {
         let arena = AstArena::new();
         let text_node = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello"));
 
-        let json = ast_to_json(text_node);
+        let json = serde_json::to_value(text_node).unwrap();
 
         assert!(json["value"].is_string());
         assert_eq!(json["value"], "hello");
@@ -456,7 +415,7 @@ mod tests {
         let children = arena.alloc_slice_copy(&[*child1, *child2]);
         let parent = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 11), children);
 
-        let json = ast_to_json(&parent);
+        let json = serde_json::to_value(&parent).unwrap();
 
         assert!(json["children"].is_array());
         let children_arr = json["children"].as_array().unwrap();
@@ -475,7 +434,7 @@ mod tests {
         node.data.lang = Some(arena.alloc_str("rust"));
         node.data.ordered = Some(true);
 
-        let json = ast_to_json(&node);
+        let json = serde_json::to_value(&node).unwrap();
 
         assert_eq!(json["depth"], 2);
         assert_eq!(json["url"], "https://example.com");

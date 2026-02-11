@@ -39,11 +39,13 @@ compile_error!("Either 'native' or 'browser' feature must be enabled.");
 #[derive(Debug, Serialize)]
 struct LintRequest<'a> {
     /// The node to lint (serialized).
-    node: &'a serde_json::Value,
+    #[serde(borrow)]
+    node: &'a serde_json::value::RawValue,
     /// Rule configuration.
     config: serde_json::Value,
     /// Source text.
-    source: &'a str,
+    #[serde(borrow)]
+    source: &'a serde_json::value::RawValue,
     /// File path (if available).
     file_path: Option<&'a str>,
 }
@@ -226,7 +228,7 @@ impl PluginHost {
     ///
     /// * `name` - Rule name
     /// * `node` - The AST node (serialized as JSON)
-    /// * `source` - The source text
+    /// * `source` - The source text (serialized as JSON string)
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -235,8 +237,8 @@ impl PluginHost {
     pub fn run_rule(
         &mut self,
         name: &str,
-        node: &serde_json::Value,
-        source: &str,
+        node: &serde_json::value::RawValue,
+        source: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let config = self
@@ -268,7 +270,7 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `node` - The AST node (serialized as JSON)
-    /// * `source` - The source text
+    /// * `source` - The source text (serialized as JSON string)
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -276,8 +278,8 @@ impl PluginHost {
     /// All diagnostics from all rules.
     pub fn run_all_rules(
         &mut self,
-        node: &serde_json::Value,
-        source: &str,
+        node: &serde_json::value::RawValue,
+        source: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         // Run against all rules visible in manifests (including aliases)
@@ -343,8 +345,12 @@ mod tests {
     #[test]
     fn test_plugin_host_not_found() {
         let mut host = PluginHost::new();
-        let node = serde_json::json!({});
-        let result = host.run_rule("nonexistent", &node, "", None);
+        let node_json = serde_json::to_string(&serde_json::json!({})).unwrap();
+        let node = serde_json::value::RawValue::from_string(node_json).unwrap();
+        let source_json = serde_json::to_string("").unwrap();
+        let source = serde_json::value::RawValue::from_string(source_json).unwrap();
+
+        let result = host.run_rule("nonexistent", &node, &source, None);
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 
