@@ -132,13 +132,13 @@ impl Backend {
 
     /// Converts byte offsets to an LSP range.
     fn offset_to_range(&self, start: usize, end: usize, text: &str) -> Option<Range> {
-        let start_pos = self.offset_to_position(start, text)?;
-        let end_pos = self.offset_to_position(end, text)?;
+        let start_pos = Self::offset_to_position(start, text)?;
+        let end_pos = Self::offset_to_position(end, text)?;
         Some(Range::new(start_pos, end_pos))
     }
 
     /// Converts a byte offset to an LSP position.
-    fn offset_to_position(&self, offset: usize, text: &str) -> Option<Position> {
+    fn offset_to_position(offset: usize, text: &str) -> Option<Position> {
         if offset > text.len() {
             return None;
         }
@@ -633,4 +633,84 @@ pub async fn run() {
 
     let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::Position;
+
+    #[test]
+    fn test_offset_to_position() {
+        // Case 1: Simple ASCII
+        let text = "Hello World";
+        // 'H' -> offset 0 -> line 0, col 0
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        );
+        // ' ' -> offset 5 -> line 0, col 5
+        assert_eq!(
+            Backend::offset_to_position(5, text),
+            Some(Position::new(0, 5))
+        );
+        // 'd' -> offset 10 -> line 0, col 10
+        assert_eq!(
+            Backend::offset_to_position(10, text),
+            Some(Position::new(0, 10))
+        );
+        // End of string -> offset 11 -> line 0, col 11
+        assert_eq!(
+            Backend::offset_to_position(11, text),
+            Some(Position::new(0, 11))
+        );
+        // Out of bounds -> offset 12 -> None
+        assert_eq!(Backend::offset_to_position(12, text), None);
+
+        // Case 2: Multi-line
+        let text = "Line 1\nLine 2\nLine 3";
+        // 'L' (line 2) -> offset "Line 1\n".len() = 7 -> line 1, col 0
+        assert_eq!(
+            Backend::offset_to_position(7, text),
+            Some(Position::new(1, 0))
+        );
+        // End of last line
+        // "Line 1\n" (7) + "Line 2\n" (7) + "Line 3" (6) = 20
+        assert_eq!(
+            Backend::offset_to_position(20, text),
+            Some(Position::new(2, 6))
+        );
+
+        // Case 3: Unicode
+        // 'あ' is 3 bytes.
+        let text = "あいう";
+        // 'あ' -> 0 -> 0, 0
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        );
+        // 'い' -> 3 -> 0, 1
+        assert_eq!(
+            Backend::offset_to_position(3, text),
+            Some(Position::new(0, 1))
+        );
+        // 'う' -> 6 -> 0, 2
+        assert_eq!(
+            Backend::offset_to_position(6, text),
+            Some(Position::new(0, 2))
+        );
+        // End -> 9 -> 0, 3
+        assert_eq!(
+            Backend::offset_to_position(9, text),
+            Some(Position::new(0, 3))
+        );
+
+        // Case 4: Empty string
+        let text = "";
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        );
+        assert_eq!(Backend::offset_to_position(1, text), None);
+    }
 }
