@@ -253,33 +253,28 @@ impl Backend {
             }
         };
 
-        let config_files = [".tsuzulint.jsonc", ".tsuzulint.json"];
-        for name in config_files {
-            let config_path = path.join(name);
-            if config_path.exists() {
-                info!("Found config file: {}", config_path.display());
-                match LinterConfig::from_file(&config_path) {
-                    Ok(config) => {
-                        info!("Loaded configuration from workspace");
-                        match self.linter.write() {
-                            Ok(mut linter_guard) => match Linter::new(config) {
-                                Ok(new_linter) => {
-                                    *linter_guard = Some(new_linter);
-                                    info!("Linter re-initialized with new config");
-                                }
-                                Err(e) => {
-                                    error!("Failed to create new linter: {}", e);
-                                    *linter_guard = None;
-                                }
-                            },
-                            Err(e) => error!("Linter lock poisoned: {}", e),
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to load config: {}", e);
+        if let Some(config_path) = LinterConfig::discover(path) {
+            info!("Found config file: {}", config_path.display());
+            match LinterConfig::from_file(&config_path) {
+                Ok(config) => {
+                    info!("Loaded configuration from workspace");
+                    match self.linter.write() {
+                        Ok(mut linter_guard) => match Linter::new(config) {
+                            Ok(new_linter) => {
+                                *linter_guard = Some(new_linter);
+                                info!("Linter re-initialized with new config");
+                            }
+                            Err(e) => {
+                                error!("Failed to create new linter: {}", e);
+                                *linter_guard = None;
+                            }
+                        },
+                        Err(e) => error!("Linter lock poisoned: {}", e),
                     }
                 }
-                break;
+                Err(e) => {
+                    error!("Failed to load config: {}", e);
+                }
             }
         }
     }
@@ -422,7 +417,9 @@ impl LanguageServer for Backend {
         // Check if any config files changed
         let config_changed = params.changes.iter().any(|change| {
             let path = change.uri.path();
-            path.ends_with(".tsuzulint.json") || path.ends_with(".tsuzulint.jsonc")
+            LinterConfig::CONFIG_FILES
+                .iter()
+                .any(|name| path.ends_with(name))
         });
 
         if config_changed {

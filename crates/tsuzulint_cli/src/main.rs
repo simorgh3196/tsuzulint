@@ -283,14 +283,9 @@ fn run_lint(
 }
 
 fn find_config() -> Result<LinterConfig> {
-    let config_files = [".tsuzulint.jsonc", ".tsuzulint.json"];
-
-    for name in config_files {
-        let path = PathBuf::from(name);
-        if path.exists() {
-            info!("Using config: {}", name);
-            return LinterConfig::from_file(&path).into_diagnostic();
-        }
+    if let Some(path) = LinterConfig::discover(".") {
+        info!("Using config: {}", path.display());
+        return LinterConfig::from_file(&path).into_diagnostic();
     }
 
     // Return default config if no file found
@@ -388,7 +383,7 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
 }
 
 fn run_init(force: bool) -> Result<()> {
-    let config_path = PathBuf::from(".tsuzulint.jsonc");
+    let config_path = PathBuf::from(LinterConfig::CONFIG_FILES[0]);
 
     if config_path.exists() && !force {
         return Err(miette::miette!(
@@ -618,20 +613,12 @@ fn update_config_with_plugin(
 ) -> Result<()> {
     let path_to_use = if let Some(path) = config_path {
         path
+    } else if let Some(path) = LinterConfig::discover(".") {
+        path
     } else {
-        let config_path = PathBuf::from(".tsuzulint.jsonc");
-        if config_path.exists() {
-            config_path
-        } else {
-            let json_path = PathBuf::from(".tsuzulint.json");
-            if json_path.exists() {
-                json_path
-            } else {
-                // Create default .tsuzulint.jsonc
-                run_init(false)?;
-                config_path
-            }
-        }
+        // Create default config file if none found
+        run_init(false)?;
+        PathBuf::from(LinterConfig::CONFIG_FILES[0])
     };
 
     let content = std::fs::read_to_string(&path_to_use).into_diagnostic()?;
