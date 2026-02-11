@@ -333,18 +333,6 @@ impl Linter {
         }
     }
 
-    /// Lints a single file using the shared PluginHost.
-    ///
-    /// For sequential processing or when using the linter's shared PluginHost.
-    #[allow(dead_code)]
-    fn lint_file(&self, path: &Path) -> Result<LintResult, LinterError> {
-        let mut host = self
-            .plugin_host
-            .lock()
-            .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
-        self.lint_file_internal(path, &mut host)
-    }
-
     /// Lints a single file with a provided PluginHost.
     ///
     /// Used for parallel processing where each thread has its own PluginHost.
