@@ -38,5 +38,8 @@ pub use formatters::generate_sarif;
 pub use linter::Linter;
 pub use result::LintResult;
 
+#[cfg(test)]
+pub mod test_utils;
+
 // Re-export commonly used types
 pub use tsuzulint_plugin::{Diagnostic, Fix, Severity};

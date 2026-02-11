@@ -1019,4 +1019,35 @@ mod tests {
         // Verify that the hash stored in Linter matches the one computed from config
         assert_eq!(linter.config_hash, expected_hash);
     }
+
+    #[test]
+    fn test_lint_content_with_simple_rule() {
+        // Build the test rule WASM
+        let wasm_path = crate::test_utils::build_simple_rule_wasm();
+
+        let (config, _temp) = test_config();
+
+        // Create linter
+        let linter = Linter::new(config).unwrap();
+
+        // Load the rule dynamically
+        linter.load_rule(&wasm_path).expect("Failed to load test rule");
+
+        // Test case 1: Content with error
+        let content = "This text contains an error keyword.";
+        let path = Path::new("test.md");
+
+        let diagnostics = linter.lint_content(content, path).unwrap();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule_id, "test-rule");
+        assert_eq!(diagnostics[0].message, "Found error keyword");
+        assert_eq!(diagnostics[0].span.start, 22);
+        assert_eq!(diagnostics[0].span.end, 27);
+
+        // Test case 2: Content without error
+        let clean_content = "This text is clean.";
+        let diagnostics = linter.lint_content(clean_content, path).unwrap();
+        assert_eq!(diagnostics.len(), 0);
+    }
 }
