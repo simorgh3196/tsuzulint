@@ -1019,4 +1019,14 @@ mod tests {
         // Verify that the hash stored in Linter matches the one computed from config
         assert_eq!(linter.config_hash, expected_hash);
     }
+
+    #[test]
+    fn test_linter_config_hash_caching() {
+        let (config, _temp) = test_config();
+        let expected_hash = config.hash();
+        let linter = Linter::new(config).unwrap();
+
+        // Verify that the hash stored in Linter matches the one computed from config
+        assert_eq!(linter.config_hash, expected_hash);
+    }
 }

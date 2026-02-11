@@ -140,6 +140,7 @@ enum CacheCommands {
     Clean,
 }
 
+/// Main entry point for the TsuzuLint CLI.
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -171,6 +172,7 @@ fn main() -> ExitCode {
     }
 }
 
+/// Runs the command specified in the CLI arguments.
 fn run(cli: Cli) -> Result<bool> {
     match &cli.command {
         Commands::Lint {
@@ -216,6 +218,7 @@ fn run(cli: Cli) -> Result<bool> {
     }
 }
 
+/// Starts the Language Server Protocol (LSP) server.
 fn run_lsp() -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -227,6 +230,9 @@ fn run_lsp() -> Result<()> {
     Ok(())
 }
 
+/// Lints the files matching the given patterns.
+///
+/// Returns `Ok(true)` if any errors were found, `Ok(false)` otherwise.
 fn run_lint(
     cli: &Cli,
     patterns: &[String],
@@ -377,6 +383,7 @@ fn run_lint(
     Ok(has_errors || !failures.is_empty())
 }
 
+/// Attempts to find a configuration file in the current directory.
 fn find_config() -> Result<LinterConfig> {
     if let Some(path) = LinterConfig::discover(".") {
         info!("Using config: {}", path.display());
@@ -388,6 +395,7 @@ fn find_config() -> Result<LinterConfig> {
     Ok(LinterConfig::new())
 }
 
+/// Outputs the linting results in the specified format.
 fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result<bool> {
     let has_errors = results.iter().any(|r| r.has_errors());
 
@@ -477,6 +485,7 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
     Ok(has_errors)
 }
 
+/// Initializes a new TsuzuLint configuration file in the current directory.
 fn run_init(force: bool) -> Result<()> {
     let config_path = PathBuf::from(LinterConfig::CONFIG_FILES[0]);
 
@@ -499,6 +508,7 @@ fn run_init(force: bool) -> Result<()> {
     Ok(())
 }
 
+/// Creates a new rule project directory with a template.
 fn run_create_rule(name: &str) -> Result<()> {
     let rule_dir = PathBuf::from(name);
 
@@ -622,6 +632,7 @@ pub fn lint(input: String) -> FnResult<String> {{
     Ok(())
 }
 
+/// Adds a WASM rule to the configuration (stub).
 fn run_add_rule(path: &Path) -> Result<()> {
     if !path.exists() {
         return Err(miette::miette!("File not found: {}", path.display()));
@@ -634,6 +645,7 @@ fn run_add_rule(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Cleans the plugin cache directory.
 fn run_plugin_cache_clean() -> Result<()> {
     use tsuzulint_registry::cache::PluginCache;
 
@@ -644,6 +656,7 @@ fn run_plugin_cache_clean() -> Result<()> {
     Ok(())
 }
 
+/// Installs a plugin from a specification or URL.
 fn run_plugin_install(
     spec_str: Option<String>,
     url: Option<String>,
@@ -713,6 +726,7 @@ fn run_plugin_install(
     update_config_with_plugin(&spec, &resolved.alias, &resolved.manifest, config_path)
 }
 
+/// Updates the configuration file to include the newly installed plugin.
 fn update_config_with_plugin(
     spec: &PluginSpec,
     alias: &str,
