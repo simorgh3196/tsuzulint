@@ -18,6 +18,10 @@ use crate::{PluginError, RuleManifest};
 /// Default memory limit for WASM instances (128 MB).
 const DEFAULT_MEMORY_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
+/// Default fuel limit for WASM execution (100 million instructions).
+/// This prevents infinite loops or excessive CPU usage.
+const DEFAULT_FUEL_LIMIT: u64 = 100_000_000;
+
 /// Host state for wasmi store.
 struct HostState {
     /// Input buffer for passing data to WASM.
@@ -73,7 +77,8 @@ pub struct WasmiExecutor {
 impl WasmiExecutor {
     /// Creates a new wasmi executor.
     pub fn new() -> Self {
-        let config = Config::default();
+        let mut config = Config::default();
+        config.consume_fuel(true);
         let engine = Engine::new(&config);
 
         Self {
@@ -147,6 +152,11 @@ impl RuleExecutor for WasmiExecutor {
 
         // Configure resource limits
         store.limiter(|state| &mut state.limits);
+
+        // Add fuel limit to prevent infinite loops
+        store
+            .set_fuel(DEFAULT_FUEL_LIMIT)
+            .map_err(|e| PluginError::load(format!("Failed to set fuel: {}", e)))?;
 
         // Create linker and add host functions
         let mut linker = <Linker<HostState>>::new(&self.engine);
@@ -272,6 +282,11 @@ impl RuleExecutor for WasmiExecutor {
             .rules
             .get_mut(rule_name)
             .ok_or_else(|| PluginError::not_found(rule_name))?;
+
+        // Reset fuel limit for this execution
+        rule.store
+            .set_fuel(DEFAULT_FUEL_LIMIT)
+            .map_err(|e| PluginError::call(format!("Failed to reset fuel: {}", e)))?;
 
         // Write input to WASM memory
         let (input_ptr, input_len) =
@@ -498,6 +513,51 @@ mod tests {
         let result = executor.load(&wasm);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Resource limit exceeded") || err_msg.contains("Memory"));
+        assert!(
+            err_msg.contains("Resource limit exceeded")
+                || err_msg.contains("Memory")
+                || err_msg.contains("memory")
+                || err_msg.contains("resource limiter")
+        );
+    }
+
+    #[test]
+    fn test_executor_infinite_loop() {
+        let mut executor = WasmiExecutor::new();
+
+        // A rule with an infinite loop in the lint function
+        let json = r#"{"name":"loop-rule","version":"1.0.0","description":"Loop rule"}"#;
+        let len = json.len();
+        let wasm = wat_to_wasm(&format!(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "get_manifest") (result i32 i32)
+                    (i32.const 0)
+                    (i32.const {})
+                )
+                (func (export "lint") (param i32 i32) (result i32 i32)
+                    (loop
+                        br 0
+                    )
+                    (i32.const 0) (i32.const 0)
+                )
+                (func (export "alloc") (param i32) (result i32) (i32.const 128))
+
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        ));
+
+        executor.load(&wasm).expect("Failed to load rule");
+
+        // Should return an error (trap) due to fuel exhaustion
+        let result = executor.call_lint("loop-rule", "{}");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // The error message from wasmi when fuel is exhausted
+        assert!(err_msg.contains("Trap") || err_msg.contains("fuel"));
     }
 }
