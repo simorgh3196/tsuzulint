@@ -5,7 +5,7 @@ pub mod downloader;
 pub mod error;
 pub mod fetcher;
 pub mod hash;
-pub mod manifest;
+pub use tsuzulint_manifest as manifest;
 pub mod resolver;
 
 pub use downloader::{DownloadError, DownloadResult, WasmDownloader};
