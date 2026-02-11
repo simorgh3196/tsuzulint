@@ -1041,10 +1041,15 @@ pub(crate) fn build_spec_from_detail(
         map.insert("as".to_string(), serde_json::Value::String(a.to_string()));
     }
     let val = serde_json::Value::Object(map);
-    if let Ok(spec) = PluginSpec::parse(&val) {
-        (Some(spec), alias.map(String::from))
-    } else {
-        (None, None)
+    match PluginSpec::parse(&val) {
+        Ok(spec) => (Some(spec), alias.map(String::from)),
+        Err(e) => {
+            warn!(
+                "Failed to parse rule detail (key={}, value={}): {}",
+                key, value, e
+            );
+            (None, None)
+        }
     }
 }
 
@@ -1056,6 +1061,10 @@ mod tests {
     fn test_build_spec_from_detail() {
         let (spec, alias) = build_spec_from_detail("github", "owner/repo", Some("alias"));
         assert!(spec.is_some());
+        assert!(matches!(
+            spec.as_ref().unwrap().source,
+            PluginSource::GitHub { .. }
+        ));
         assert_eq!(alias, Some("alias".to_string()));
 
         let (spec, alias) = build_spec_from_detail("invalid", "value", None);
@@ -1068,6 +1077,10 @@ mod tests {
         let (spec, alias) =
             build_spec_from_detail("url", "https://example.com/rule.wasm", Some("my-rule"));
         assert!(spec.is_some());
+        assert!(matches!(
+            spec.as_ref().unwrap().source,
+            PluginSource::Url(_)
+        ));
         assert_eq!(alias, Some("my-rule".to_string()));
     }
 
@@ -1075,6 +1088,10 @@ mod tests {
     fn test_build_spec_from_detail_github_no_alias() {
         let (spec, alias) = build_spec_from_detail("github", "owner/repo", None);
         assert!(spec.is_some());
+        assert!(matches!(
+            spec.as_ref().unwrap().source,
+            PluginSource::GitHub { .. }
+        ));
         assert!(alias.is_none());
     }
 }

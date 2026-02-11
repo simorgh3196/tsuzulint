@@ -160,35 +160,12 @@ impl PluginSpec {
         }
 
         if let Some(path_str) = obj.path {
-            let mut alias = obj.alias;
-            // Validate manifest structure if alias is missing, to infer name
-            // Note: We use tsuzulint_manifest::validate_manifest for correctness,
-            // but reading file in parse() is side-effect heavy. Ideally this should
-            // be deferred to resolve(). However, to satisfy the requirement that
-            // PluginSpec has a valid alias (or inferable one), we do it here.
-            // A better architecture might be to allow alias=None in PluginSpec and
-            // resolve it later, but PluginSpec definition implies resolved intent.
-            if alias.is_none() {
-                let path = PathBuf::from(&path_str);
-                let content = std::fs::read_to_string(&path).map_err(|e| {
-                    ParseError::InvalidObject(format!(
-                        "Failed to read manifest at {}: {}",
-                        path_str, e
-                    ))
-                })?;
-
-                let manifest = tsuzulint_manifest::validate_manifest(&content).map_err(|e| {
-                    ParseError::InvalidObject(format!(
-                        "Failed to validate manifest at {}: {}",
-                        path_str, e
-                    ))
-                })?;
-                alias = Some(manifest.rule.name);
-            }
-
+            // We do NOT read the file here to infer alias.
+            // This avoids side effects in parse() and defers IO to resolve().
+            // Missing alias will be handled in resolve() by falling back to manifest name.
             return Ok(Self {
                 source: PluginSource::Path(PathBuf::from(path_str)),
-                alias,
+                alias: obj.alias,
             });
         }
 
@@ -232,18 +209,30 @@ impl PluginResolver {
 
     /// Resolve a plugin specification to a usable WASM module.
     pub async fn resolve(&self, spec: &PluginSpec) -> Result<ResolvedPlugin, ResolveError> {
-        let fetcher_source = match &spec.source {
+        // Pre-process source for fetching
+        let (fetcher_source, manifest_path_buf) = match &spec.source {
             PluginSource::GitHub {
                 owner,
                 repo,
                 version,
-            } => FetcherSource::GitHub {
-                owner: owner.clone(),
-                repo: repo.clone(),
-                version: version.clone(),
-            },
-            PluginSource::Url(url) => FetcherSource::Url(url.clone()),
-            PluginSource::Path(path) => FetcherSource::Path(path.clone()),
+            } => (
+                FetcherSource::GitHub {
+                    owner: owner.clone(),
+                    repo: repo.clone(),
+                    version: version.clone(),
+                },
+                None,
+            ),
+            PluginSource::Url(url) => (FetcherSource::Url(url.clone()), None),
+            PluginSource::Path(path) => {
+                // If the path is a directory, look for tsuzulint-rule.json
+                let p = if path.is_dir() {
+                    path.join("tsuzulint-rule.json")
+                } else {
+                    path.clone()
+                };
+                (FetcherSource::Path(p.clone()), Some(p))
+            }
         };
 
         // Fail fast: strict alias check for Url sources
@@ -345,12 +334,16 @@ impl PluginResolver {
                     alias,
                 })
             }
-            PluginSource::Path(base_path) => {
+            PluginSource::Path(_) => {
+                // Use the normalized manifest path (file path)
+                let manifest_path = manifest_path_buf.expect("Path source must have manifest path");
+
                 // Resolve relative path
                 let wasm_relative_str = &manifest.artifacts.wasm;
                 let wasm_relative = Path::new(wasm_relative_str);
 
                 // 1. Reject absolute paths and '..' components
+                // Also reject rooted paths (Windows)
                 if wasm_relative.is_absolute() || wasm_relative.has_root() {
                     return Err(ResolveError::DownloadError(DownloadError::NotFound(
                         format!(
@@ -371,12 +364,8 @@ impl PluginResolver {
                     )));
                 }
 
-                // If base_path is a file (manifest.json), we want its parent
-                let parent = if base_path.is_file() {
-                    base_path.parent().unwrap_or(Path::new("."))
-                } else {
-                    base_path.as_path()
-                };
+                // manifest_path is a file, so parent() gives the dir
+                let parent = manifest_path.parent().unwrap_or(Path::new("."));
 
                 let wasm_path = parent.join(wasm_relative);
 
@@ -412,7 +401,7 @@ impl PluginResolver {
 
                 Ok(ResolvedPlugin {
                     wasm_path,
-                    manifest_path: base_path.clone(),
+                    manifest_path,
                     manifest,
                     alias,
                 })
@@ -510,19 +499,12 @@ mod tests {
 
     #[test]
     fn test_parse_object_path_optional_alias() {
-        let dir = tempdir().unwrap();
-        let manifest_path = dir.path().join("tsuzulint-rule.json");
-        let manifest = json!({
-            "rule": { "name": "test-rule-name", "version": "1.0.0" },
-            "artifacts": { "wasm": "rule.wasm", "sha256": "0000000000000000000000000000000000000000000000000000000000000000" }
-        });
-        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
-
+        // No I/O in parse, so this should pass with None alias
         let value = json!({
-            "path": manifest_path.to_str().unwrap()
+            "path": "./local/rule"
         });
         let spec = PluginSpec::parse(&value).expect("Parsing should succeed now");
-        assert_eq!(spec.alias, Some("test-rule-name".to_string()));
+        assert_eq!(spec.alias, None);
     }
 
     #[test]
@@ -866,5 +848,39 @@ mod tests {
             }
             _ => panic!("Should fail with InvalidObject"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_directory() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+        let wasm_content = b"wasm content";
+        std::fs::write(&wasm_path, wasm_content).unwrap();
+
+        let manifest = json!({
+            "rule": { "name": "dir-rule", "version": "1.0.0" },
+            "artifacts": {
+                "wasm": "rule.wasm",
+                "sha256": HashVerifier::compute(wasm_content)
+            }
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let resolver = PluginResolver::new().unwrap();
+
+        // Use directory path
+        let spec = PluginSpec {
+            source: PluginSource::Path(dir.path().to_path_buf()),
+            alias: None,
+        };
+
+        let resolved = resolver
+            .resolve(&spec)
+            .await
+            .expect("Resolve should succeed with directory path");
+        assert_eq!(resolved.alias, "dir-rule");
+        // Verify manifest_path is pointing to the file, not dir
+        assert!(resolved.manifest_path.ends_with("tsuzulint-rule.json"));
     }
 }

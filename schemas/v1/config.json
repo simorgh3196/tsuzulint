@@ -17,6 +17,7 @@
           {
             "type": "string",
             "description": "Rule specification: 'owner/repo' or 'owner/repo@version'",
+            "pattern": "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(@.+)?$",
             "examples": [
               "simorgh3196/tsuzulint-rule-no-doubled-joshi",
               "simorgh3196/tsuzulint-rule-sentence-length@1.2.0"
@@ -32,6 +33,7 @@
               "github": {
                 "type": "string",
                 "description": "GitHub repository: 'owner/repo' or 'owner/repo@version'",
+                "pattern": "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(@.+)?$",
                 "examples": [
                   "alice/tsuzulint-rule-foo",
                   "alice/tsuzulint-rule-foo@1.0.0"
