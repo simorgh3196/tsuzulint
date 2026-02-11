@@ -864,4 +864,95 @@ mod tests {
         // With no plugins configured, no rules should be loaded
         assert!(host.loaded_rules().is_empty());
     }
+
+    #[test]
+    fn test_discover_files_respects_exclude() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let node_modules = temp_dir.path().join("node_modules");
+        fs::create_dir(&node_modules).unwrap();
+        let excluded_file = node_modules.join("excluded.md");
+
+        fs::write(&test_file, "# Test").unwrap();
+        fs::write(&excluded_file, "# Excluded").unwrap();
+
+        let (mut config, _temp) = test_config();
+        config.exclude = vec!["**/node_modules/**".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+
+        // Change to temp dir for discovery
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+
+        let files = linter.discover_files(&["**/*.md".to_string()]).unwrap();
+
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // Should find test.md but not excluded.md
+        assert!(files.iter().any(|f| f.ends_with("test.md")));
+        assert!(
+            !files
+                .iter()
+                .any(|f| f.to_string_lossy().contains("node_modules"))
+        );
+    }
+
+    #[test]
+    fn test_discover_files_respects_include() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let md_file = temp_dir.path().join("test.md");
+        let txt_file = temp_dir.path().join("test.txt");
+
+        fs::write(&md_file, "# Test").unwrap();
+        fs::write(&txt_file, "Test").unwrap();
+
+        let (mut config, _temp) = test_config();
+        config.include = vec!["**/*.md".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+
+        let files = linter.discover_files(&["**/*".to_string()]).unwrap();
+
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // Should only find .md files
+        assert!(files.iter().any(|f| f.ends_with("test.md")));
+        assert!(!files.iter().any(|f| f.ends_with("test.txt")));
+    }
+
+    #[test]
+    fn test_discover_files_deduplicates() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        fs::write(&test_file, "# Test").unwrap();
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+
+        // Use same pattern twice
+        let files = linter
+            .discover_files(&["*.md".to_string(), "*.md".to_string()])
+            .unwrap();
+
+        std::env::set_current_dir(original_dir).unwrap();
+
+        // Should only appear once
+        assert_eq!(files.len(), 1);
+    }
 }
