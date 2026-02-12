@@ -522,7 +522,8 @@ mod tests {
         let mut executor = WasmiExecutor::new();
 
         // Infinite loop rule
-        let json = r#"{"name":"infinite-loop","version":"1.0.0","description":"Infinite loop rule"}"#;
+        let json =
+            r#"{"name":"infinite-loop","version":"1.0.0","description":"Infinite loop rule"}"#;
         let len = json.len();
         let wasm = wat_to_wasm(&format!(
             r#"
