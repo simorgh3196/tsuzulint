@@ -1025,7 +1025,9 @@ mod tests {
         // Build the test rule WASM
         // If build fails (e.g. missing target), skip test
         let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() else {
-            println!("Skipping test_lint_content_with_simple_rule: WASM build failed (likely missing wasm32-wasip1 target)");
+            println!(
+                "Skipping test_lint_content_with_simple_rule: WASM build failed (likely missing wasm32-wasip1 target)"
+            );
             return;
         };
 
