@@ -255,12 +255,11 @@ impl MarkdownParser {
         children: &[markdown::mdast::Node],
         source: &str,
     ) -> &'a [TxtNode<'a>] {
-        let nodes: Vec<TxtNode<'a>> = children
-            .iter()
-            .map(|child| self.convert_node(arena, child, source))
-            .collect();
-
-        arena.alloc_slice_clone(&nodes)
+        arena.alloc_slice_fill_iter(
+            children
+                .iter()
+                .map(|child| self.convert_node(arena, child, source)),
+        )
     }
 
     /// Gets the span for an mdast node.
