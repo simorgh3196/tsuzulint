@@ -661,7 +661,7 @@ fn main() {}
         let long_text = "A".repeat(10000);
         let source = format!("# {}", long_text);
 
-        let ast = parser.parse(&arena, source).unwrap();
+        let ast = parser.parse(&arena, &source).unwrap();
         assert_eq!(ast.node_type, NodeType::Document);
         assert!(!ast.children.is_empty());
     }
@@ -702,7 +702,7 @@ fn main() {}
         let ast = parser.parse(&arena, source).unwrap();
         assert_eq!(ast.node_type, NodeType::Document);
         // Should parse both the reference and definition
-        assert!(ast.children.len() >= 1);
+        assert!(!ast.children.is_empty());
     }
 
     #[test]

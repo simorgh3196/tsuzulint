@@ -226,8 +226,10 @@ mod lint_command_fix {
             .arg("--dry-run")
             .assert()
             .success()
-            .stdout(predicate::str::contains("No fixable issues found")
-                .or(predicate::str::contains("Would fix")));
+            .stdout(
+                predicate::str::contains("No fixable issues found")
+                    .or(predicate::str::contains("Would fix")),
+            );
     }
 
     #[test]
@@ -260,7 +262,8 @@ mod lint_command_fix {
             .failure();
 
         // clap will output an error about required argument
-        result.stderr(predicate::str::contains("required").or(predicate::str::contains("requires")));
+        result
+            .stderr(predicate::str::contains("required").or(predicate::str::contains("requires")));
     }
 }
 
@@ -279,7 +282,7 @@ mod lint_command_timings {
             .success()
             .stdout(predicate::str::contains("Performance Timings").or(
                 // May not show if no rules are loaded
-                predicate::str::contains("Checked")
+                predicate::str::contains("Checked"),
             ));
     }
 }
@@ -305,7 +308,9 @@ mod plugin_commands {
             .arg("install")
             .assert()
             .failure()
-            .stderr(predicate::str::contains("Must provide a plugin spec or --url"));
+            .stderr(predicate::str::contains(
+                "Must provide a plugin spec or --url",
+            ));
     }
 
     #[test]
@@ -349,7 +354,9 @@ mod config_file_handling {
             .arg(&test_file)
             .assert()
             .success()
-            .stderr(predicate::str::contains("No config file found, using defaults"));
+            .stderr(predicate::str::contains(
+                "No config file found, using defaults",
+            ));
     }
 
     #[test]
@@ -414,11 +421,7 @@ mod exit_codes {
     fn exits_with_zero_on_success_no_errors() {
         let sample_md = fixtures_dir().join("sample.md");
 
-        tsuzulint_cmd()
-            .arg("lint")
-            .arg(&sample_md)
-            .assert()
-            .code(0);
+        tsuzulint_cmd().arg("lint").arg(&sample_md).assert().code(0);
     }
 
     #[test]

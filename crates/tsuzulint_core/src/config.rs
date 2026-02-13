@@ -391,7 +391,9 @@ mod tests {
         assert_ne!(config1.hash(), config2.hash());
 
         // Adding rules should change hash
-        config1.rules.push(RuleDefinition::Simple("test-rule".to_string()));
+        config1
+            .rules
+            .push(RuleDefinition::Simple("test-rule".to_string()));
         let hash_after_rule = config1.hash();
         assert_ne!(LinterConfig::new().hash(), hash_after_rule);
     }
