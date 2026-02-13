@@ -422,10 +422,12 @@ mod tests {
     fn test_config_from_file_not_found() {
         let result = LinterConfig::from_file("non_existent_file_xyz.json");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Failed to read config"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to read config")
+        );
     }
 
     #[test]
