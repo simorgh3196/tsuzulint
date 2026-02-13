@@ -73,6 +73,16 @@ impl AstArena {
         self.bump.alloc_slice_clone(slice)
     }
 
+    /// Allocates a slice in the arena by filling it from an iterator.
+    #[inline]
+    pub fn alloc_slice_fill_iter<T, I>(&self, iter: I) -> &[T]
+    where
+        I: IntoIterator<Item = T>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        self.bump.alloc_slice_fill_iter(iter)
+    }
+
     /// Returns the total bytes allocated in this arena.
     #[inline]
     pub fn allocated_bytes(&self) -> usize {
@@ -117,6 +127,13 @@ mod tests {
         let arena = AstArena::new();
         let slice = arena.alloc_slice_copy(&[1, 2, 3, 4, 5]);
         assert_eq!(slice, &[1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_arena_alloc_slice_fill_iter() {
+        let arena = AstArena::new();
+        let slice = arena.alloc_slice_fill_iter((0..5).map(|x| x * 2));
+        assert_eq!(slice, &[0, 2, 4, 6, 8]);
     }
 
     #[test]
