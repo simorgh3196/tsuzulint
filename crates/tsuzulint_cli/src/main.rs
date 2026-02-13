@@ -324,7 +324,10 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
                     })
                 })
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&output).into_diagnostic()?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output).into_diagnostic()?
+            );
         }
         _ => {
             // Text format
