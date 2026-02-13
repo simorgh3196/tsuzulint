@@ -48,11 +48,12 @@ bumpalo = "3.19"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 jsonc-parser = "0.29.0"
-rkyv = "0.8"                                       # Zero-copy deserialization for cache
+rkyv = "0.8"                                               # Zero-copy deserialization for cache
 
 # Async/Parallel
 tokio = { version = "1.0", features = ["full"] }
 rayon = "1.10"
+tower-lsp = "0.20"
 
 # Hashing for cache
 blake3 = "1.5"
