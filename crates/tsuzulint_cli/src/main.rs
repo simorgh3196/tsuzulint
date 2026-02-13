@@ -406,7 +406,10 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
                     })
                 })
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output).into_diagnostic()?
+            );
         }
         _ => {
             // Text format
@@ -770,11 +773,12 @@ fn update_config_with_plugin(
         PluginSource::GitHub { owner, repo, .. } => {
             let version = &manifest.rule.version;
             let source_str = format!("{}/{}@{}", owner, repo, version);
+            let source_json = serde_json::to_string(&source_str).into_diagnostic()?;
             if let Some(a) = &spec.alias {
                 let alias_json = serde_json::to_string(a).into_diagnostic()?;
-                format!(r#"{{ "github": "{}", "as": {} }}"#, source_str, alias_json)
+                format!(r#"{{ "github": {}, "as": {} }}"#, source_json, alias_json)
             } else {
-                format!(r#""{}""#, source_str)
+                source_json
             }
         }
         PluginSource::Url(url) => {
