@@ -144,13 +144,13 @@ impl Backend {
 
     /// Converts byte offsets to an LSP range.
     fn offset_to_range(&self, start: usize, end: usize, text: &str) -> Option<Range> {
-        let start_pos = self.offset_to_position(start, text)?;
-        let end_pos = self.offset_to_position(end, text)?;
+        let start_pos = Self::offset_to_position(start, text)?;
+        let end_pos = Self::offset_to_position(end, text)?;
         Some(Range::new(start_pos, end_pos))
     }
 
     /// Converts a byte offset to an LSP position.
-    fn offset_to_position(&self, offset: usize, text: &str) -> Option<Position> {
+    fn offset_to_position(offset: usize, text: &str) -> Option<Position> {
         if offset > text.len() {
             return None;
         }
@@ -168,7 +168,7 @@ impl Backend {
                 line += 1;
                 col = 0;
             } else {
-                col += 1;
+                col += ch.len_utf16() as u32;
             }
 
             current_offset += ch.len_utf8();
@@ -679,4 +679,94 @@ pub async fn run() {
 
     let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tower_lsp::lsp_types::Position;
+
+    #[test]
+    fn test_offset_to_position_basic_ascii() {
+        let text = "Hello World";
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        );
+        assert_eq!(
+            Backend::offset_to_position(5, text),
+            Some(Position::new(0, 5))
+        );
+        assert_eq!(
+            Backend::offset_to_position(10, text),
+            Some(Position::new(0, 10))
+        );
+        assert_eq!(
+            Backend::offset_to_position(11, text),
+            Some(Position::new(0, 11))
+        );
+        assert_eq!(Backend::offset_to_position(12, text), None);
+    }
+
+    #[test]
+    fn test_offset_to_position_multiline() {
+        let text = "Line 1\nLine 2\nLine 3";
+        assert_eq!(
+            Backend::offset_to_position(7, text),
+            Some(Position::new(1, 0))
+        );
+        assert_eq!(
+            Backend::offset_to_position(20, text),
+            Some(Position::new(2, 6))
+        );
+    }
+
+    #[test]
+    fn test_offset_to_position_unicode_multibyte() {
+        // 'あ' is 3 bytes in UTF-8, 1 code unit in UTF-16
+        let text = "あいう";
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        );
+        assert_eq!(
+            Backend::offset_to_position(3, text),
+            Some(Position::new(0, 1))
+        );
+        assert_eq!(
+            Backend::offset_to_position(6, text),
+            Some(Position::new(0, 2))
+        );
+        assert_eq!(
+            Backend::offset_to_position(9, text),
+            Some(Position::new(0, 3))
+        );
+    }
+
+    #[test]
+    fn test_offset_to_position_supplementary_plane_chars() {
+        // '🎉' is 4 bytes in UTF-8, 2 code units in UTF-16
+        let text = "a🎉b";
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        ); // 'a'
+        assert_eq!(
+            Backend::offset_to_position(1, text),
+            Some(Position::new(0, 1))
+        ); // '🎉'
+        assert_eq!(
+            Backend::offset_to_position(5, text),
+            Some(Position::new(0, 3))
+        ); // 'b'
+    }
+
+    #[test]
+    fn test_offset_to_position_empty_string() {
+        assert_eq!(
+            Backend::offset_to_position(0, ""),
+            Some(Position::new(0, 0))
+        );
+        assert_eq!(Backend::offset_to_position(1, ""), None);
+    }
 }
