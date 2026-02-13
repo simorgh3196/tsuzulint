@@ -22,12 +22,22 @@ async fn test_did_change_validation_frequency() {
     let mut reader = tokio::io::BufReader::new(client_read);
     let mut writer = client_write;
 
+    // Background task to read messages from server and prevent deadlock
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(msg) = recv_msg(&mut reader).await {
+            if tx.send(msg).is_err() {
+                break; // Receiver dropped, stop reading
+            }
+        }
+    });
+
     // 1. Initialize
     let init_req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///tmp","capabilities":{}}}"#;
     send_msg(&mut writer, init_req).await;
 
     // Read initialize response
-    let _resp = recv_msg(&mut reader).await.unwrap();
+    let _resp = rx.recv().await.unwrap();
     // println!("Init Resp: {}", _resp);
 
     // 2. Initialized
@@ -39,42 +49,51 @@ async fn test_did_change_validation_frequency() {
     send_msg(&mut writer, did_open).await;
 
     // Expect publishDiagnostics from didOpen
-    // We might receive other notifications/requests (like logMessage), so we loop.
-    let mut diag = String::new();
-    for _ in 0..10 {
-        let msg = recv_msg(&mut reader).await.unwrap();
-        if msg.contains("publishDiagnostics") {
-            diag = msg;
-            break;
+    // We expect it relatively quickly.
+    let mut got_diagnostics = false;
+    let timeout = tokio::time::sleep(Duration::from_secs(1));
+    tokio::pin!(timeout);
+
+    loop {
+        tokio::select! {
+            msg_opt = rx.recv() => {
+                if let Some(msg) = msg_opt {
+                    if msg.contains("publishDiagnostics") {
+                        got_diagnostics = true;
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            _ = &mut timeout => break,
         }
     }
-    assert!(
-        diag.contains("publishDiagnostics"),
-        "Expected diagnostics after open, got: {}",
-        diag
-    );
+
+    assert!(got_diagnostics, "Expected diagnostics after open");
 
     // 4. Send multiple DidChange fast
+    // Because we are reading in background, server won't block on writing.
     for i in 1..=5 {
         let did_change = format!(
             r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"file:///tmp/test.md","version":{}}},"contentChanges":[{{"text":"change {}"}}]}}}}"#,
             i, i
         );
         send_msg(&mut writer, &did_change).await;
+        // Small delay to simulate typing but still fast enough to trigger debounce
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     // 5. Wait for debounce (300ms) + some buffer
     // We expect at most 1 or 2 messages.
-    // Only wait for a certain time.
     let timeout = tokio::time::sleep(Duration::from_millis(1000));
     tokio::pin!(timeout);
 
     let mut diagnostics_count = 0;
     loop {
         tokio::select! {
-            result = recv_msg(&mut reader) => {
-                match result {
+            msg_opt = rx.recv() => {
+                match msg_opt {
                     Some(msg) => {
                         if msg.contains("publishDiagnostics") {
                             diagnostics_count += 1;

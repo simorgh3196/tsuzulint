@@ -1,5 +1,4 @@
 use extism_pdk::*;
-use serde_json::json;
 use tsuzulint_rule_pdk::{Diagnostic, LintRequest, LintResponse, RuleManifest, Span};
 
 const RULE_ID: &str = "test-rule";
@@ -22,7 +21,7 @@ pub fn lint(input: String) -> FnResult<String> {
     // Check if the source contains "error"
     if request.source.contains("error") {
         for (idx, _) in request.source.match_indices("error") {
-             diagnostics.push(Diagnostic::new(
+            diagnostics.push(Diagnostic::new(
                 RULE_ID,
                 "Found error keyword",
                 Span::new(idx as u32, (idx + 5) as u32),
