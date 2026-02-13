@@ -64,3 +64,52 @@ pub trait Parser {
             .any(|ext| ext.eq_ignore_ascii_case(extension))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+
+    struct MockParser;
+
+    impl Parser for MockParser {
+        fn name(&self) -> &str {
+            "mock"
+        }
+
+        fn extensions(&self) -> &[&str] {
+            &["abc", "DEF"]
+        }
+
+        fn parse<'a>(
+            &self,
+            _arena: &'a AstArena,
+            _source: &str,
+        ) -> Result<TxtNode<'a>, crate::ParseError> {
+            Ok(TxtNode::new_leaf(NodeType::Document, Span::new(0, 0)))
+        }
+    }
+
+    #[test]
+    fn test_can_parse_default_impl() {
+        let parser = MockParser;
+
+        // Exact match
+        assert!(parser.can_parse("abc"));
+
+        // Case-insensitive match (extension in list is lowercase, input is uppercase)
+        assert!(parser.can_parse("ABC"));
+
+        // Case-insensitive match (extension in list is uppercase, input is lowercase)
+        assert!(parser.can_parse("def"));
+
+        // Case-insensitive match (both uppercase)
+        assert!(parser.can_parse("DEF"));
+
+        // No match
+        assert!(!parser.can_parse("xyz"));
+
+        // Empty extension
+        assert!(!parser.can_parse(""));
+    }
+}

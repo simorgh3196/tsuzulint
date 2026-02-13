@@ -29,13 +29,17 @@ pub mod formatters;
 mod linter;
 pub mod resolver;
 mod result;
+pub mod rule_manifest;
 
-pub use config::LinterConfig;
+pub use config::{LinterConfig, RuleDefinition, RuleDefinitionDetail};
 pub use error::LinterError;
 pub use fixer::{FixerResult, apply_fixes_to_content, apply_fixes_to_file};
 pub use formatters::generate_sarif;
 pub use linter::Linter;
 pub use result::LintResult;
+
+#[cfg(test)]
+pub mod test_utils;
 
 // Re-export commonly used types
 pub use tsuzulint_plugin::{Diagnostic, Fix, Severity};

@@ -18,6 +18,11 @@ use crate::{PluginError, RuleManifest};
 /// Default memory limit for WASM instances (128 MB).
 const DEFAULT_MEMORY_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
+/// Default fuel limit for WASM execution (instructions).
+/// 1 billion instructions should be enough for any reasonable rule,
+/// but will stop infinite loops.
+const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
+
 /// Host state for wasmi store.
 struct HostState {
     /// Input buffer for passing data to WASM.
@@ -73,7 +78,8 @@ pub struct WasmiExecutor {
 impl WasmiExecutor {
     /// Creates a new wasmi executor.
     pub fn new() -> Self {
-        let config = Config::default();
+        let mut config = Config::default();
+        config.consume_fuel(true);
         let engine = Engine::new(&config);
 
         Self {
@@ -90,7 +96,7 @@ impl WasmiExecutor {
             .ok_or_else(|| PluginError::call("Memory not initialized"))?;
 
         let data = memory
-            .data(&store)
+            .data(store)
             .get(ptr as usize..(ptr + len) as usize)
             .ok_or_else(|| PluginError::call("Memory access out of bounds"))?;
 
@@ -147,6 +153,11 @@ impl RuleExecutor for WasmiExecutor {
 
         // Configure resource limits
         store.limiter(|state| &mut state.limits);
+
+        // Set initial fuel for instantiation and loading
+        store
+            .set_fuel(DEFAULT_FUEL_LIMIT)
+            .map_err(|e| PluginError::load(format!("Failed to set fuel: {}", e)))?;
 
         // Create linker and add host functions
         let mut linker = <Linker<HostState>>::new(&self.engine);
@@ -272,6 +283,11 @@ impl RuleExecutor for WasmiExecutor {
             .rules
             .get_mut(rule_name)
             .ok_or_else(|| PluginError::not_found(rule_name))?;
+
+        // Reset fuel before execution
+        rule.store
+            .set_fuel(DEFAULT_FUEL_LIMIT)
+            .map_err(|e| PluginError::call(format!("Failed to set fuel: {}", e)))?;
 
         // Write input to WASM memory
         let (input_ptr, input_len) =
@@ -498,6 +514,58 @@ mod tests {
         let result = executor.load(&wasm);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Resource limit exceeded") || err_msg.contains("Memory"));
+        assert!(
+            err_msg.contains("Resource limit exceeded")
+                || err_msg.contains("Memory")
+                || err_msg.contains("memory")
+                || err_msg.contains("resource limiter")
+        );
+    }
+
+    #[test]
+    fn test_executor_infinite_loop() {
+        let mut executor = WasmiExecutor::new();
+
+        // Infinite loop rule
+        let json =
+            r#"{"name":"infinite-loop","version":"1.0.0","description":"Infinite loop rule"}"#;
+        let len = json.len();
+        let wasm = wat_to_wasm(&format!(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "get_manifest") (result i32 i32)
+                    (i32.const 0) ;; ptr
+                    (i32.const {}) ;; len
+                )
+                (func (export "lint") (param i32 i32) (result i32 i32)
+                    (loop
+                        (br 0)
+                    )
+                    (i32.const 0) (i32.const 0) ;; unreachable but needed for type check
+                )
+                (func (export "alloc") (param i32) (result i32)
+                    (i32.const 128)
+                )
+                ;; Write manifest to memory at offset 0
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        ));
+
+        executor.load(&wasm).expect("Failed to load rule");
+
+        // Should return an error (trap) due to fuel exhaustion
+        let result = executor.call_lint("infinite-loop", "{}");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // Wasmi fuel exhaustion error: "all fuel consumed by WebAssembly"
+        let err_lower = err_msg.to_lowercase();
+        assert!(
+            err_lower.contains("fuel"),
+            "Expected fuel exhaustion error, got: {err_msg}"
+        );
     }
 }
