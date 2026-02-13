@@ -96,7 +96,7 @@ impl WasmiExecutor {
             .ok_or_else(|| PluginError::call("Memory not initialized"))?;
 
         let data = memory
-            .data(&store)
+            .data(store)
             .get(ptr as usize..(ptr + len) as usize)
             .ok_or_else(|| PluginError::call("Memory access out of bounds"))?;
 
@@ -526,46 +526,6 @@ mod tests {
     fn test_executor_infinite_loop() {
         let mut executor = WasmiExecutor::new();
 
-        // A rule with an infinite loop in the lint function
-        let json = r#"{"name":"loop-rule","version":"1.0.0","description":"Loop rule"}"#;
-        let len = json.len();
-        let wasm = wat_to_wasm(&format!(
-            r#"
-            (module
-                (memory (export "memory") 1)
-                (func (export "get_manifest") (result i32 i32)
-                    (i32.const 0)
-                    (i32.const {})
-                )
-                (func (export "lint") (param i32 i32) (result i32 i32)
-                    (loop
-                        br 0
-                    )
-                    (i32.const 0) (i32.const 0)
-                )
-                (func (export "alloc") (param i32) (result i32) (i32.const 128))
-
-                (data (i32.const 0) "{}")
-            )
-            "#,
-            len,
-            json.replace("\"", "\\\"")
-        ));
-
-        executor.load(&wasm).expect("Failed to load rule");
-
-        // Should return an error (trap) due to fuel exhaustion
-        let result = executor.call_lint("loop-rule", "{}");
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        // The error message from wasmi when fuel is exhausted
-        assert!(err_msg.contains("Trap") || err_msg.contains("fuel"));
-    }
-
-    #[test]
-    fn test_executor_infinite_loop() {
-        let mut executor = WasmiExecutor::new();
-
         // Infinite loop rule
         let json =
             r#"{"name":"infinite-loop","version":"1.0.0","description":"Infinite loop rule"}"#;
@@ -597,14 +557,15 @@ mod tests {
 
         executor.load(&wasm).expect("Failed to load rule");
 
+        // Should return an error (trap) due to fuel exhaustion
         let result = executor.call_lint("infinite-loop", "{}");
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        // Wasmi error for out of fuel usually contains "fuel"
+        // Wasmi fuel exhaustion error: "all fuel consumed by WebAssembly"
+        let err_lower = err_msg.to_lowercase();
         assert!(
-            err_msg.contains("fuel") || err_msg.contains("exhausted"),
-            "Error message was: {}",
-            err_msg
+            err_lower.contains("fuel"),
+            "Expected fuel exhaustion error, got: {err_msg}"
         );
     }
 }
