@@ -1,0 +1,15 @@
+[package]
+name = "tsuzulint_manifest"
+version.workspace = true
+edition.workspace = true
+description = "Shared manifest types and validation for tsuzulint-rule.json"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+jsonschema.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

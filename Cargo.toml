@@ -9,6 +9,7 @@ members = [
     "crates/tsuzulint_cli",
     "crates/tsuzulint_lsp",
     "crates/tsuzulint_registry",
+    "crates/tsuzulint_manifest",
     "crates/tsuzulint_wasm",
 ]
 
@@ -29,6 +30,7 @@ tsuzulint_parser = { path = "crates/tsuzulint_parser" }
 tsuzulint_plugin = { path = "crates/tsuzulint_plugin", default-features = false }
 tsuzulint_cache = { path = "crates/tsuzulint_cache" }
 tsuzulint_core = { path = "crates/tsuzulint_core", default-features = false }
+tsuzulint_manifest = { path = "crates/tsuzulint_manifest" }
 
 # WASM Runtime - Extism uses wasmtime internally (native)
 extism = "1.7"
@@ -44,7 +46,7 @@ bumpalo = "3.19"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"] }
 jsonc-parser = "0.29.0"
 rkyv = "0.8"                                       # Zero-copy deserialization for cache
 
@@ -92,7 +94,8 @@ js-sys = "0.3"
 pretty_assertions = "1.4"
 rstest = "0.26"
 insta = { version = "1.46", features = ["json", "redactions"] }
-tempfile = "3.14"
+tempfile = "3.25"
 assert_fs = "1.1"
 assert_cmd = "2.0"
 predicates = "3.1"
+wiremock = "0.6"

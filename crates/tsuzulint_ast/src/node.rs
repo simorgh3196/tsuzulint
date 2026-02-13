@@ -2,6 +2,8 @@
 //!
 //! The core AST node type used throughout TsuzuLint.
 
+use serde::{Serialize, ser::SerializeStruct};
+
 use crate::{NodeType, Span};
 
 /// A node in the TxtAST.
@@ -77,6 +79,61 @@ pub struct NodeData<'a> {
 
     /// Label for reference nodes.
     pub label: Option<&'a str>,
+}
+
+impl<'a> Serialize for TxtNode<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Estimate field count: type + range = 2, children? value? data fields?
+        let mut state = serializer.serialize_struct("TxtNode", 5)?;
+
+        // 1. Type
+        // Serialize as string (Display implementation of NodeType matches PascalCase)
+        state.serialize_field("type", &self.node_type)?;
+
+        // 2. Range
+        // TextLint uses [start, end] array for range
+        state.serialize_field("range", &[self.span.start, self.span.end])?;
+
+        // 3. Children
+        // Include children if present OR if it's a parent type (even if empty)
+        // This matches tsuzulint_wasm behavior
+        if self.node_type.is_parent() || !self.children.is_empty() {
+            state.serialize_field("children", &self.children)?;
+        }
+
+        // 4. Value
+        if let Some(val) = self.value {
+            state.serialize_field("value", val)?;
+        }
+
+        // 5. Data fields (Flattened)
+        if let Some(url) = self.data.url {
+            state.serialize_field("url", url)?;
+        }
+        if let Some(title) = self.data.title {
+            state.serialize_field("title", title)?;
+        }
+        if let Some(depth) = self.data.depth {
+            state.serialize_field("depth", &depth)?;
+        }
+        if let Some(ordered) = self.data.ordered {
+            state.serialize_field("ordered", &ordered)?;
+        }
+        if let Some(lang) = self.data.lang {
+            state.serialize_field("lang", lang)?;
+        }
+        if let Some(identifier) = self.data.identifier {
+            state.serialize_field("identifier", identifier)?;
+        }
+        if let Some(label) = self.data.label {
+            state.serialize_field("label", label)?;
+        }
+
+        state.end()
+    }
 }
 
 impl<'a> TxtNode<'a> {
@@ -386,5 +443,59 @@ mod tests {
         assert_eq!(node.node_type, NodeType::CodeBlock);
         assert_eq!(node.data.lang, Some("rust"));
         assert_eq!(node.value, Some(code));
+    }
+
+    #[test]
+    fn test_serialization_basic() {
+        let node = TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello");
+        let json = serde_json::to_value(node).unwrap();
+
+        assert_eq!(json["type"], "Str");
+        assert_eq!(json["range"][0], 0);
+        assert_eq!(json["range"][1], 5);
+        assert_eq!(json["value"], "hello");
+        // No children for leaf text node
+        assert!(json.get("children").is_none());
+    }
+
+    #[test]
+    fn test_serialization_parent() {
+        let arena = AstArena::new();
+        let child = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello"));
+        let children = arena.alloc_slice_copy(&[*child]);
+        let node = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 5), children);
+
+        let json = serde_json::to_value(node).unwrap();
+
+        assert_eq!(json["type"], "Paragraph");
+        assert_eq!(json["range"][0], 0);
+        assert_eq!(json["range"][1], 5);
+        assert!(json["children"].is_array());
+        assert_eq!(json["children"].as_array().unwrap().len(), 1);
+        assert_eq!(json["children"][0]["type"], "Str");
+    }
+
+    #[test]
+    fn test_serialization_flattened_data() {
+        let mut node = TxtNode::new_parent(NodeType::Header, Span::new(0, 10), &[]);
+        node.data = NodeData::header(2);
+        node.data.url = Some("https://example.com");
+
+        let json = serde_json::to_value(node).unwrap();
+
+        assert_eq!(json["type"], "Header");
+        assert_eq!(json["depth"], 2);
+        assert_eq!(json["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_serialization_empty_parent() {
+        // Parent node with no children should still have "children": []
+        let node = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 0), &[]);
+        let json = serde_json::to_value(node).unwrap();
+
+        assert_eq!(json["type"], "Paragraph");
+        assert!(json["children"].is_array());
+        assert!(json["children"].as_array().unwrap().is_empty());
     }
 }

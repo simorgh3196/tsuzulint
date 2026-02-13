@@ -40,53 +40,44 @@ impl MarkdownParser {
 
         match node {
             Node::Root(root) => {
-                let children = self.convert_children(arena, &root.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::Document, span, children)
+                self.create_parent_node(arena, node, &root.children, source, NodeType::Document)
             }
 
             Node::Paragraph(para) => {
-                let children = self.convert_children(arena, &para.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::Paragraph, span, children)
+                self.create_parent_node(arena, node, &para.children, source, NodeType::Paragraph)
             }
 
             Node::Heading(heading) => {
-                let children = self.convert_children(arena, &heading.children, source);
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_parent(NodeType::Header, span, children);
+                let mut node = self.create_parent_node(
+                    arena,
+                    node,
+                    &heading.children,
+                    source,
+                    NodeType::Header,
+                );
                 node.data = NodeData::header(heading.depth);
                 node
             }
 
             Node::Text(text) => {
-                let span = self.node_span(node, source);
-                let value = arena.alloc_str(&text.value);
-                TxtNode::new_text(NodeType::Str, span, value)
+                self.create_text_node(arena, node, &text.value, source, NodeType::Str)
             }
 
             Node::Emphasis(em) => {
-                let children = self.convert_children(arena, &em.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::Emphasis, span, children)
+                self.create_parent_node(arena, node, &em.children, source, NodeType::Emphasis)
             }
 
             Node::Strong(strong) => {
-                let children = self.convert_children(arena, &strong.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::Strong, span, children)
+                self.create_parent_node(arena, node, &strong.children, source, NodeType::Strong)
             }
 
             Node::InlineCode(code) => {
-                let span = self.node_span(node, source);
-                let value = arena.alloc_str(&code.value);
-                TxtNode::new_text(NodeType::Code, span, value)
+                self.create_text_node(arena, node, &code.value, source, NodeType::Code)
             }
 
             Node::Code(code) => {
-                let span = self.node_span(node, source);
-                let value = arena.alloc_str(&code.value);
-                let mut node = TxtNode::new_text(NodeType::CodeBlock, span, value);
+                let mut node =
+                    self.create_text_node(arena, node, &code.value, source, NodeType::CodeBlock);
                 if let Some(lang) = &code.lang {
                     node.data = NodeData::code_block(Some(arena.alloc_str(lang)));
                 }
@@ -94,9 +85,8 @@ impl MarkdownParser {
             }
 
             Node::Link(link) => {
-                let children = self.convert_children(arena, &link.children, source);
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_parent(NodeType::Link, span, children);
+                let mut node =
+                    self.create_parent_node(arena, node, &link.children, source, NodeType::Link);
                 let url = arena.alloc_str(&link.url);
                 let title = link.title.as_ref().map(|t| arena.alloc_str(t));
                 node.data = NodeData::link(url, title);
@@ -104,8 +94,7 @@ impl MarkdownParser {
             }
 
             Node::Image(image) => {
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_leaf(NodeType::Image, span);
+                let mut node = self.create_leaf_node(node, source, NodeType::Image);
                 let url = arena.alloc_str(&image.url);
                 let title = image.title.as_ref().map(|t| arena.alloc_str(t));
                 node.data = NodeData::link(url, title);
@@ -113,71 +102,54 @@ impl MarkdownParser {
             }
 
             Node::List(list) => {
-                let children = self.convert_children(arena, &list.children, source);
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_parent(NodeType::List, span, children);
+                let mut node =
+                    self.create_parent_node(arena, node, &list.children, source, NodeType::List);
                 node.data = NodeData::list(list.ordered);
                 node
             }
 
             Node::ListItem(item) => {
-                let children = self.convert_children(arena, &item.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::ListItem, span, children)
+                self.create_parent_node(arena, node, &item.children, source, NodeType::ListItem)
             }
 
             Node::Blockquote(quote) => {
-                let children = self.convert_children(arena, &quote.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::BlockQuote, span, children)
+                self.create_parent_node(arena, node, &quote.children, source, NodeType::BlockQuote)
             }
 
-            Node::ThematicBreak(_) => {
-                let span = self.node_span(node, source);
-                TxtNode::new_leaf(NodeType::HorizontalRule, span)
-            }
+            Node::ThematicBreak(_) => self.create_leaf_node(node, source, NodeType::HorizontalRule),
 
-            Node::Break(_) => {
-                let span = self.node_span(node, source);
-                TxtNode::new_leaf(NodeType::Break, span)
-            }
+            Node::Break(_) => self.create_leaf_node(node, source, NodeType::Break),
 
             Node::Html(html) => {
-                let span = self.node_span(node, source);
-                let value = arena.alloc_str(&html.value);
-                TxtNode::new_text(NodeType::Html, span, value)
+                self.create_text_node(arena, node, &html.value, source, NodeType::Html)
             }
 
             Node::Delete(del) => {
-                let children = self.convert_children(arena, &del.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::Delete, span, children)
+                self.create_parent_node(arena, node, &del.children, source, NodeType::Delete)
             }
 
             // Table support (GFM)
             Node::Table(table) => {
-                let children = self.convert_children(arena, &table.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::Table, span, children)
+                self.create_parent_node(arena, node, &table.children, source, NodeType::Table)
             }
 
             Node::TableRow(row) => {
-                let children = self.convert_children(arena, &row.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::TableRow, span, children)
+                self.create_parent_node(arena, node, &row.children, source, NodeType::TableRow)
             }
 
             Node::TableCell(cell) => {
-                let children = self.convert_children(arena, &cell.children, source);
-                let span = self.node_span(node, source);
-                TxtNode::new_parent(NodeType::TableCell, span, children)
+                self.create_parent_node(arena, node, &cell.children, source, NodeType::TableCell)
             }
 
             // Footnotes (GFM)
             Node::FootnoteDefinition(def) => {
-                let children = self.convert_children(arena, &def.children, source);
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_parent(NodeType::FootnoteDefinition, span, children);
+                let mut node = self.create_parent_node(
+                    arena,
+                    node,
+                    &def.children,
+                    source,
+                    NodeType::FootnoteDefinition,
+                );
                 node.data.identifier = Some(arena.alloc_str(&def.identifier));
                 if let Some(label) = &def.label {
                     node.data.label = Some(arena.alloc_str(label));
@@ -186,8 +158,7 @@ impl MarkdownParser {
             }
 
             Node::FootnoteReference(ref_node) => {
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_leaf(NodeType::FootnoteReference, span);
+                let mut node = self.create_leaf_node(node, source, NodeType::FootnoteReference);
                 node.data.identifier = Some(arena.alloc_str(&ref_node.identifier));
                 if let Some(label) = &ref_node.label {
                     node.data.label = Some(arena.alloc_str(label));
@@ -197,9 +168,13 @@ impl MarkdownParser {
 
             // Reference nodes
             Node::LinkReference(ref_node) => {
-                let children = self.convert_children(arena, &ref_node.children, source);
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_parent(NodeType::LinkReference, span, children);
+                let mut node = self.create_parent_node(
+                    arena,
+                    node,
+                    &ref_node.children,
+                    source,
+                    NodeType::LinkReference,
+                );
                 node.data.identifier = Some(arena.alloc_str(&ref_node.identifier));
                 if let Some(label) = &ref_node.label {
                     node.data.label = Some(arena.alloc_str(label));
@@ -208,8 +183,7 @@ impl MarkdownParser {
             }
 
             Node::ImageReference(ref_node) => {
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_leaf(NodeType::ImageReference, span);
+                let mut node = self.create_leaf_node(node, source, NodeType::ImageReference);
                 node.data.identifier = Some(arena.alloc_str(&ref_node.identifier));
                 if let Some(label) = &ref_node.label {
                     node.data.label = Some(arena.alloc_str(label));
@@ -218,8 +192,7 @@ impl MarkdownParser {
             }
 
             Node::Definition(def) => {
-                let span = self.node_span(node, source);
-                let mut node = TxtNode::new_leaf(NodeType::Definition, span);
+                let mut node = self.create_leaf_node(node, source, NodeType::Definition);
                 node.data.identifier = Some(arena.alloc_str(&def.identifier));
                 node.data.url = Some(arena.alloc_str(&def.url));
                 if let Some(title) = &def.title {
@@ -232,11 +205,47 @@ impl MarkdownParser {
             }
 
             // Fallback for unsupported nodes
-            _ => {
-                let span = self.node_span(node, source);
-                TxtNode::new_leaf(NodeType::Html, span)
-            }
+            _ => self.create_leaf_node(node, source, NodeType::Html),
         }
+    }
+
+    /// Helper to create a parent node.
+    fn create_parent_node<'a>(
+        &self,
+        arena: &'a AstArena,
+        node: &markdown::mdast::Node,
+        children: &[markdown::mdast::Node],
+        source: &str,
+        node_type: NodeType,
+    ) -> TxtNode<'a> {
+        let children = self.convert_children(arena, children, source);
+        let span = self.node_span(node, source);
+        TxtNode::new_parent(node_type, span, children)
+    }
+
+    /// Helper to create a text node.
+    fn create_text_node<'a>(
+        &self,
+        arena: &'a AstArena,
+        node: &markdown::mdast::Node,
+        text: &str,
+        source: &str,
+        node_type: NodeType,
+    ) -> TxtNode<'a> {
+        let span = self.node_span(node, source);
+        let value = arena.alloc_str(text);
+        TxtNode::new_text(node_type, span, value)
+    }
+
+    /// Helper to create a leaf node.
+    fn create_leaf_node<'a>(
+        &self,
+        node: &markdown::mdast::Node,
+        source: &str,
+        node_type: NodeType,
+    ) -> TxtNode<'a> {
+        let span = self.node_span(node, source);
+        TxtNode::new_leaf(node_type, span)
     }
 
     /// Converts a list of mdast children to TxtNode slice.
@@ -246,12 +255,11 @@ impl MarkdownParser {
         children: &[markdown::mdast::Node],
         source: &str,
     ) -> &'a [TxtNode<'a>] {
-        let nodes: Vec<TxtNode<'a>> = children
-            .iter()
-            .map(|child| self.convert_node(arena, child, source))
-            .collect();
-
-        arena.alloc_slice_clone(&nodes)
+        arena.alloc_slice_fill_iter(
+            children
+                .iter()
+                .map(|child| self.convert_node(arena, child, source)),
+        )
     }
 
     /// Gets the span for an mdast node.

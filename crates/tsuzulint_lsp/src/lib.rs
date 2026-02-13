@@ -132,13 +132,13 @@ impl Backend {
 
     /// Converts byte offsets to an LSP range.
     fn offset_to_range(&self, start: usize, end: usize, text: &str) -> Option<Range> {
-        let start_pos = self.offset_to_position(start, text)?;
-        let end_pos = self.offset_to_position(end, text)?;
+        let start_pos = Self::offset_to_position(start, text)?;
+        let end_pos = Self::offset_to_position(end, text)?;
         Some(Range::new(start_pos, end_pos))
     }
 
     /// Converts a byte offset to an LSP position.
-    fn offset_to_position(&self, offset: usize, text: &str) -> Option<Position> {
+    fn offset_to_position(offset: usize, text: &str) -> Option<Position> {
         if offset > text.len() {
             return None;
         }
@@ -156,7 +156,7 @@ impl Backend {
                 line += 1;
                 col = 0;
             } else {
-                col += 1;
+                col += ch.len_utf16() as u32;
             }
 
             current_offset += ch.len_utf8();
@@ -253,33 +253,28 @@ impl Backend {
             }
         };
 
-        let config_files = [".tsuzulint.jsonc", ".tsuzulint.json"];
-        for name in config_files {
-            let config_path = path.join(name);
-            if config_path.exists() {
-                info!("Found config file: {}", config_path.display());
-                match LinterConfig::from_file(&config_path) {
-                    Ok(config) => {
-                        info!("Loaded configuration from workspace");
-                        match self.linter.write() {
-                            Ok(mut linter_guard) => match Linter::new(config) {
-                                Ok(new_linter) => {
-                                    *linter_guard = Some(new_linter);
-                                    info!("Linter re-initialized with new config");
-                                }
-                                Err(e) => {
-                                    error!("Failed to create new linter: {}", e);
-                                    *linter_guard = None;
-                                }
-                            },
-                            Err(e) => error!("Linter lock poisoned: {}", e),
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to load config: {}", e);
+        if let Some(config_path) = LinterConfig::discover(path) {
+            info!("Found config file: {}", config_path.display());
+            match LinterConfig::from_file(&config_path) {
+                Ok(config) => {
+                    info!("Loaded configuration from workspace");
+                    match self.linter.write() {
+                        Ok(mut linter_guard) => match Linter::new(config) {
+                            Ok(new_linter) => {
+                                *linter_guard = Some(new_linter);
+                                info!("Linter re-initialized with new config");
+                            }
+                            Err(e) => {
+                                error!("Failed to create new linter: {}", e);
+                                *linter_guard = None;
+                            }
+                        },
+                        Err(e) => error!("Linter lock poisoned: {}", e),
                     }
                 }
-                break;
+                Err(e) => {
+                    error!("Failed to load config: {}", e);
+                }
             }
         }
     }
@@ -422,7 +417,9 @@ impl LanguageServer for Backend {
         // Check if any config files changed
         let config_changed = params.changes.iter().any(|change| {
             let path = change.uri.path();
-            path.ends_with(".tsuzulint.json") || path.ends_with(".tsuzulint.jsonc")
+            LinterConfig::CONFIG_FILES
+                .iter()
+                .any(|name| path.ends_with(name))
         });
 
         if config_changed {
@@ -641,221 +638,89 @@ pub async fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tsuzulint_ast::{Span as TsuzuLintSpan};
+    use tower_lsp::lsp_types::Position;
 
-    /// Helper function to test offset_to_position logic
-    fn offset_to_position_test(offset: usize, text: &str) -> Option<Position> {
-        if offset > text.len() {
-            return None;
-        }
-
-        let mut line = 0u32;
-        let mut col = 0u32;
-        let mut current_offset = 0;
-
-        for ch in text.chars() {
-            if current_offset >= offset {
-                break;
-            }
-
-            if ch == '\n' {
-                line += 1;
-                col = 0;
-            } else {
-                col += 1;
-            }
-
-            current_offset += ch.len_utf8();
-        }
-
-        Some(Position::new(line, col))
-    }
-
-    /// Helper to test offset_to_range logic
-    fn offset_to_range_test(start: usize, end: usize, text: &str) -> Option<Range> {
-        let start_pos = offset_to_position_test(start, text)?;
-        let end_pos = offset_to_position_test(end, text)?;
-        Some(Range::new(start_pos, end_pos))
-    }
-
-    /// Helper to test positions_le logic
-    fn positions_le_test(p1: Position, p2: Position) -> bool {
-        p1.line < p2.line || (p1.line == p2.line && p1.character <= p2.character)
+    #[test]
+    fn test_offset_to_position_basic_ascii() {
+        let text = "Hello World";
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        );
+        assert_eq!(
+            Backend::offset_to_position(5, text),
+            Some(Position::new(0, 5))
+        );
+        assert_eq!(
+            Backend::offset_to_position(10, text),
+            Some(Position::new(0, 10))
+        );
+        assert_eq!(
+            Backend::offset_to_position(11, text),
+            Some(Position::new(0, 11))
+        );
+        assert_eq!(Backend::offset_to_position(12, text), None);
     }
 
     #[test]
-    fn test_offset_to_position_start_of_file() {
-        let text = "Hello world";
-
-        let pos = offset_to_position_test(0, text).unwrap();
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 0);
-    }
-
-    #[test]
-    fn test_offset_to_position_middle_of_line() {
-        let text = "Hello world";
-
-        let pos = offset_to_position_test(6, text).unwrap();
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 6);
-    }
-
-    #[test]
-    fn test_offset_to_position_across_newlines() {
+    fn test_offset_to_position_multiline() {
         let text = "Line 1\nLine 2\nLine 3";
-
-        // Position at 'L' of "Line 2"
-        let pos = offset_to_position_test(7, text).unwrap();
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 0);
-
-        // Position at '2' in "Line 2"
-        let pos = offset_to_position_test(12, text).unwrap();
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 5);
-
-        // Position at 'L' of "Line 3"
-        let pos = offset_to_position_test(14, text).unwrap();
-        assert_eq!(pos.line, 2);
-        assert_eq!(pos.character, 0);
+        assert_eq!(
+            Backend::offset_to_position(7, text),
+            Some(Position::new(1, 0))
+        );
+        assert_eq!(
+            Backend::offset_to_position(20, text),
+            Some(Position::new(2, 6))
+        );
     }
 
     #[test]
-    fn test_offset_to_position_end_of_file() {
-        let text = "Hello world";
-
-        let pos = offset_to_position_test(11, text).unwrap();
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 11);
+    fn test_offset_to_position_unicode_multibyte() {
+        // 'あ' is 3 bytes in UTF-8, 1 code unit in UTF-16
+        let text = "あいう";
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        );
+        assert_eq!(
+            Backend::offset_to_position(3, text),
+            Some(Position::new(0, 1))
+        );
+        assert_eq!(
+            Backend::offset_to_position(6, text),
+            Some(Position::new(0, 2))
+        );
+        assert_eq!(
+            Backend::offset_to_position(9, text),
+            Some(Position::new(0, 3))
+        );
     }
 
     #[test]
-    fn test_offset_to_position_out_of_bounds() {
-        let text = "Hello";
-
-        let pos = offset_to_position_test(100, text);
-        assert!(pos.is_none());
+    fn test_offset_to_position_supplementary_plane_chars() {
+        // '🎉' is 4 bytes in UTF-8, 2 code units in UTF-16
+        let text = "a🎉b";
+        assert_eq!(
+            Backend::offset_to_position(0, text),
+            Some(Position::new(0, 0))
+        ); // 'a'
+        assert_eq!(
+            Backend::offset_to_position(1, text),
+            Some(Position::new(0, 1))
+        ); // '🎉'
+        assert_eq!(
+            Backend::offset_to_position(5, text),
+            Some(Position::new(0, 3))
+        ); // 'b'
     }
 
     #[test]
-    fn test_offset_to_position_empty_text() {
-        let text = "";
-
-        let pos = offset_to_position_test(0, text).unwrap();
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 0);
-    }
-
-    #[test]
-    fn test_offset_to_position_multibyte_characters() {
-        // "こんにちは" is 15 bytes but 5 characters
-        let text = "こんにちは";
-
-        // Each character is 3 bytes
-        let pos = offset_to_position_test(0, text).unwrap();
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 0);
-
-        let pos = offset_to_position_test(3, text).unwrap();
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 1);
-
-        let pos = offset_to_position_test(6, text).unwrap();
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 2);
-    }
-
-    #[test]
-    fn test_offset_to_range_valid() {
-        let text = "Hello\nworld";
-
-        let range = offset_to_range_test(0, 5, text).unwrap();
-        assert_eq!(range.start.line, 0);
-        assert_eq!(range.start.character, 0);
-        assert_eq!(range.end.line, 0);
-        assert_eq!(range.end.character, 5);
-    }
-
-    #[test]
-    fn test_offset_to_range_across_lines() {
-        let text = "Hello\nworld";
-
-        let range = offset_to_range_test(0, 11, text).unwrap();
-        assert_eq!(range.start.line, 0);
-        assert_eq!(range.start.character, 0);
-        assert_eq!(range.end.line, 1);
-        assert_eq!(range.end.character, 5);
-    }
-
-    #[test]
-    fn test_offset_to_range_invalid_bounds() {
-        let text = "Hello";
-
-        let range = offset_to_range_test(0, 100, text);
-        assert!(range.is_none());
-    }
-
-    #[test]
-    fn test_positions_le_same_line() {
-        let p1 = Position::new(0, 5);
-        let p2 = Position::new(0, 10);
-
-        assert!(positions_le_test(p1, p2));
-        assert!(positions_le_test(p1, p1));
-        assert!(!positions_le_test(p2, p1));
-    }
-
-    #[test]
-    fn test_positions_le_different_lines() {
-        let p1 = Position::new(1, 5);
-        let p2 = Position::new(2, 3);
-
-        assert!(positions_le_test(p1, p2));
-        assert!(!positions_le_test(p2, p1));
-    }
-
-    #[test]
-    fn test_severity_conversion() {
-        // Test that severity conversion is correct
-        use tower_lsp::lsp_types::DiagnosticSeverity;
-
-        // Since we can't directly test Backend methods, we verify the mapping here
-        let error_severity = DiagnosticSeverity::ERROR;
-        let warning_severity = DiagnosticSeverity::WARNING;
-        let info_severity = DiagnosticSeverity::INFORMATION;
-
-        assert_eq!(error_severity as i32, 1);
-        assert_eq!(warning_severity as i32, 2);
-        assert_eq!(info_severity as i32, 3);
-    }
-
-    #[test]
-    fn test_position_ordering() {
-        // Test edge cases for position comparison
-        let p1 = Position::new(0, 0);
-        let p2 = Position::new(0, 0);
-        assert!(positions_le_test(p1, p2));
-
-        let p3 = Position::new(1, 0);
-        let p4 = Position::new(0, 100);
-        assert!(!positions_le_test(p3, p4));
-        assert!(positions_le_test(p4, p3));
-    }
-
-    #[test]
-    fn test_offset_to_position_with_cr_lf() {
-        // Test Windows-style line endings
-        let text = "Line 1\r\nLine 2";
-
-        // The '\r' counts as a character
-        let pos = offset_to_position_test(7, text).unwrap();
-        // Should be at '\n'
-        assert_eq!(pos.line, 0);
-
-        let pos = offset_to_position_test(8, text).unwrap();
-        // Should be at 'L' of "Line 2"
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 0);
+    fn test_offset_to_position_empty_string() {
+        assert_eq!(
+            Backend::offset_to_position(0, ""),
+            Some(Position::new(0, 0))
+        );
+        assert_eq!(Backend::offset_to_position(1, ""), None);
     }
 }

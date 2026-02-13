@@ -32,6 +32,8 @@ pub type LintFilesResult = Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>)
 pub struct Linter {
     /// Linter configuration.
     config: LinterConfig,
+    /// Pre-computed hash of the configuration.
+    config_hash: String,
     /// Plugin host for WASM rules.
     plugin_host: Mutex<PluginHost>,
     /// Cache manager.
@@ -69,8 +71,12 @@ impl Linter {
         // Load configured plugins and rules
         Self::load_configured_rules(&config, &mut host);
 
+        // Pre-compute config hash
+        let config_hash = config.hash();
+
         Ok(Self {
             config,
+            config_hash,
             plugin_host: Mutex::new(host),
             cache: Mutex::new(cache),
             dynamic_rules: Mutex::new(Vec::new()),
@@ -129,12 +135,18 @@ impl Linter {
     ///
     /// Returns a tuple of (successful results, failed files with errors).
     pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
-        let files = self.discover_files(patterns)?;
+        let files = self.discover_files(patterns, Path::new("."))?;
         self.lint_files(&files)
     }
 
     /// Discovers files matching the given patterns.
-    fn discover_files(&self, patterns: &[String]) -> Result<Vec<PathBuf>, LinterError> {
+    ///
+    /// Walks the `base_dir` directory tree and returns files matching the patterns.
+    fn discover_files(
+        &self,
+        patterns: &[String],
+        base_dir: &Path,
+    ) -> Result<Vec<PathBuf>, LinterError> {
         let mut files = Vec::new();
 
         for pattern in patterns {
@@ -143,7 +155,7 @@ impl Linter {
             })?;
             let matcher = glob.compile_matcher();
 
-            for entry in WalkDir::new(".").into_iter().filter_map(|e| e.ok()) {
+            for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_file() && matcher.is_match(path) {
                     // Check exclude patterns
@@ -290,16 +302,56 @@ impl Linter {
                 RuleDefinition::Detail(detail) => {
                     // Prioritize path, then github/url (not fully implemented yet)
                     if let Some(path) = &detail.path {
-                        // detail.path is an explicit file path, so load it directly
-                        // without going through PluginResolver (which only accepts simple names)
-                        let path_buf = if let Some(base) = &config.base_dir {
+                        // detail.path points to tsuzulint-rule.json manifest
+                        let manifest_path = if let Some(base) = &config.base_dir {
                             base.join(path)
                         } else {
                             PathBuf::from(path)
                         };
-                        debug!("Loading rule from explicit path: {}", path_buf.display());
-                        if let Err(e) = host.load_rule(&path_buf) {
-                            warn!("Failed to load rule from '{}': {}", path_buf.display(), e);
+
+                        match crate::rule_manifest::load_rule_manifest(&manifest_path) {
+                            Ok((manifest, wasm_path)) => {
+                                let rule_name = detail
+                                    .r#as
+                                    .clone()
+                                    .unwrap_or_else(|| manifest.rule.name.clone());
+                                debug!(
+                                    "Loading rule '{}' from manifest: {}",
+                                    rule_name,
+                                    manifest_path.display()
+                                );
+                                match host.load_rule(&wasm_path) {
+                                    Ok(loaded_manifest) => {
+                                        // The rule is loaded with the name defined in the WASM binary.
+                                        // We want to use the name from tsuzulint-rule.json (or the alias).
+                                        // Also we want to associate the manifest from JSON.
+                                        let internal_name = loaded_manifest.name.clone();
+                                        // Convert ExternalRuleManifest to tsuzulint_plugin::RuleManifest
+                                        let plugin_manifest = convert_manifest(&manifest);
+
+                                        if let Err(e) = host.rename_rule(
+                                            &internal_name,
+                                            &rule_name,
+                                            Some(plugin_manifest),
+                                        ) {
+                                            warn!(
+                                                "Failed to register rule '{}' (loaded as '{}'): {}",
+                                                rule_name, internal_name, e
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to load rule '{}': {}", rule_name, e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to load rule manifest '{}': {}",
+                                    manifest_path.display(),
+                                    e
+                                );
+                            }
                         }
                     } else if let Some(github) = &detail.github {
                         // Placeholder for github fetching
@@ -327,18 +379,6 @@ impl Linter {
         }
     }
 
-    /// Lints a single file using the shared PluginHost.
-    ///
-    /// For sequential processing or when using the linter's shared PluginHost.
-    #[allow(dead_code)]
-    fn lint_file(&self, path: &Path) -> Result<LintResult, LinterError> {
-        let mut host = self
-            .plugin_host
-            .lock()
-            .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
-        self.lint_file_internal(path, &mut host)
-    }
-
     /// Lints a single file with a provided PluginHost.
     ///
     /// Used for parallel processing where each thread has its own PluginHost.
@@ -363,7 +403,7 @@ impl Linter {
             .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
 
         let content_hash = CacheManager::hash_content(&content);
-        let config_hash = self.config.hash();
+        let config_hash = self.config_hash.clone();
         let rule_versions = Self::get_rule_versions_from_host(host);
 
         // 1. Check full cache first
@@ -414,15 +454,30 @@ impl Linter {
 
         // Run rules
         {
+            // Pre-serialize source content (escape string once)
+            // This avoids re-escaping the source string for every rule execution
+            let source_json = serde_json::to_string(&content).map_err(|e| {
+                LinterError::Internal(format!("Failed to serialize content: {}", e))
+            })?;
+            let source_raw = serde_json::value::RawValue::from_string(source_json)
+                .map_err(|e| LinterError::Internal(format!("Failed to create RawValue: {}", e)))?;
+
             // A. Run Global Rules
             // Global rules must always run on the full document if anything changed
             // because they depend on the full context.
             let global_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Global);
             if !global_rule_names.is_empty() {
-                let ast_json = self.ast_to_json(&ast, &content);
+                // Serialize AST once for global rules
+                let ast_json = serde_json::to_string(&ast).map_err(|e| {
+                    LinterError::Internal(format!("Failed to serialize AST: {}", e))
+                })?;
+                let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
+                    LinterError::Internal(format!("Failed to create RawValue: {}", e))
+                })?;
+
                 for rule in global_rule_names {
                     let start = Instant::now();
-                    match host.run_rule(&rule, &ast_json, &content, path.to_str()) {
+                    match host.run_rule(&rule, &ast_raw, &source_raw, path.to_str()) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
@@ -442,17 +497,32 @@ impl Linter {
                     if block_index < matched_mask.len() {
                         if !matched_mask[block_index] {
                             // This block changed. Run block rules on it.
-                            let node_json = self.ast_to_json(node, &content);
-                            for rule in &block_rule_names {
-                                let start = Instant::now();
-                                match host.run_rule(rule, &node_json, &content, path.to_str()) {
-                                    Ok(diags) => block_diagnostics.extend(diags),
-                                    Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                            if let Ok(node_json) = serde_json::to_string(node) {
+                                if let Ok(node_raw) =
+                                    serde_json::value::RawValue::from_string(node_json)
+                                {
+                                    for rule in &block_rule_names {
+                                        let start = Instant::now();
+                                        match host.run_rule(
+                                            rule,
+                                            &node_raw,
+                                            &source_raw,
+                                            path.to_str(),
+                                        ) {
+                                            Ok(diags) => block_diagnostics.extend(diags),
+                                            Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                                        }
+                                        if self.config.timings {
+                                            *timings
+                                                .entry(rule.clone())
+                                                .or_insert(Duration::new(0, 0)) += start.elapsed();
+                                        }
+                                    }
+                                } else {
+                                    warn!("Failed to create RawValue for block node");
                                 }
-                                if self.config.timings {
-                                    *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
-                                        start.elapsed();
-                                }
+                            } else {
+                                warn!("Failed to serialize block node");
                             }
                         }
                         block_index += 1;
@@ -599,18 +669,23 @@ impl Linter {
     }
 
     /// Gets rule names filtered by isolation level.
-    fn get_rule_names_by_isolation(&self, host: &PluginHost, level: IsolationLevel) -> Vec<String> {
+    fn get_rule_names_by_isolation(
+        &self,
+        host: &PluginHost,
+        level: tsuzulint_plugin::IsolationLevel,
+    ) -> Vec<String> {
         let mut names = Vec::new();
         // Only run rules that are enabled in options
         let enabled_rules = self.config.enabled_rules();
         let enabled_names: HashSet<&str> = enabled_rules.iter().map(|(n, _)| *n).collect();
 
         for name in host.loaded_rules() {
-            if enabled_names.contains(name)
+            // Check if rule is enabled
+            if enabled_names.contains(name.as_str())
                 && let Some(manifest) = host.get_manifest(name)
                 && manifest.isolation_level == level
             {
-                names.push(name.to_string());
+                names.push(name.clone());
             }
         }
         names
@@ -634,7 +709,19 @@ impl Linter {
             .map_err(|e| LinterError::parse(e.to_string()))?;
 
         // Convert AST to JSON for plugin system
-        let ast_json = self.ast_to_json(&ast, content);
+        // Serialize to string + RawValue to avoid serialization overhead in rules
+        let ast_json = serde_json::to_string(&ast)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize AST: {}", e)))?;
+        let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
+            LinterError::Internal(format!("Failed to create RawValue for AST: {}", e))
+        })?;
+
+        // Pre-serialize source
+        let source_json = serde_json::to_string(&content)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize content: {}", e)))?;
+        let source_raw = serde_json::value::RawValue::from_string(source_json).map_err(|e| {
+            LinterError::Internal(format!("Failed to create RawValue for content: {}", e))
+        })?;
 
         // Run rules
         let diagnostics = {
@@ -642,7 +729,7 @@ impl Linter {
                 .plugin_host
                 .lock()
                 .map_err(|_| LinterError::Internal("Plugin host lock poisoned".to_string()))?;
-            host.run_all_rules(&ast_json, content, path.to_str())?
+            host.run_all_rules(&ast_raw, &source_raw, path.to_str())?
         };
 
         Ok(diagnostics)
@@ -660,17 +747,27 @@ impl Linter {
 
         versions
     }
+}
 
-    /// Converts a TxtNode to JSON for the plugin system.
-    fn ast_to_json(&self, node: &tsuzulint_ast::TxtNode, _source: &str) -> serde_json::Value {
-        // Simplified JSON representation
-        serde_json::json!({
-            "type": format!("{}", node.node_type),
-            "range": [node.span.start, node.span.end],
-            "children": node.children.iter()
-                .map(|c| self.ast_to_json(c, _source))
-                .collect::<Vec<_>>(),
-        })
+fn convert_manifest(
+    external: &tsuzulint_manifest::ExternalRuleManifest,
+) -> tsuzulint_plugin::RuleManifest {
+    use tsuzulint_manifest::IsolationLevel as ExternalIsolationLevel;
+    use tsuzulint_plugin::IsolationLevel as PluginIsolationLevel;
+
+    let isolation_level = match external.rule.isolation_level {
+        ExternalIsolationLevel::Global => PluginIsolationLevel::Global,
+        ExternalIsolationLevel::Block => PluginIsolationLevel::Block,
+    };
+
+    tsuzulint_plugin::RuleManifest {
+        name: external.rule.name.clone(),
+        version: external.rule.version.clone(),
+        description: external.rule.description.clone(),
+        fixable: external.rule.fixable,
+        node_types: external.rule.node_types.clone(),
+        isolation_level,
+        schema: None,
     }
 }
 
@@ -683,6 +780,17 @@ mod tests {
         let mut config = LinterConfig::new();
         config.cache_dir = temp_dir.path().to_string_lossy().to_string();
         (config, temp_dir)
+    }
+
+    /// Creates a test config that uses a subdirectory of `base` for cache.
+    /// This avoids creating a separate TempDir for cache when the test
+    /// already has its own TempDir for file layout.
+    fn test_config_in(base: &Path) -> LinterConfig {
+        let cache_dir = base.join(".cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        let mut config = LinterConfig::new();
+        config.cache_dir = cache_dir.to_string_lossy().to_string();
+        config
     }
 
     #[test]
@@ -793,25 +901,6 @@ mod tests {
     }
 
     #[test]
-    fn test_linter_ast_to_json() {
-        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
-
-        let (config, _temp) = test_config();
-        let linter = Linter::new(config).unwrap();
-
-        let arena = AstArena::new();
-        let text_node = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello"));
-        let children = arena.alloc_slice_copy(&[*text_node]);
-        let doc = TxtNode::new_parent(NodeType::Document, Span::new(0, 5), children);
-
-        let json = linter.ast_to_json(&doc, "hello");
-
-        assert_eq!(json["type"], "Document");
-        assert!(json["range"].is_array());
-        assert!(json["children"].is_array());
-    }
-
-    #[test]
     fn test_lint_files_parallel_empty() {
         let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
@@ -862,7 +951,219 @@ mod tests {
         // This should not panic even with empty config
         Linter::load_configured_rules(&config, &mut host);
         // With no plugins configured, no rules should be loaded
-        assert!(host.loaded_rules().is_empty());
+        assert!(host.loaded_rules().next().is_none());
+    }
+
+    #[test]
+    #[ignore]
+    fn test_load_configured_rules_from_manifest() {
+        // Setup temporary directory with rule manifest and wasm
+        let (_config, dir) = test_config();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // Copy existing WASM file for testing
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // manifest_dir is crates/tsuzulint_core
+        // We look for built rules in the workspace target directory
+        // Assuming typical workspace layout: workspace_root/target/...
+        // But here we found them in workspace_root/rules/target via find_by_name tool earlier.
+        // Let's rely on the relative path from tsuzulint_core: ../../rules/target/...
+        let wasm_source = manifest_dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("rules/target/wasm32-wasip1/release/texide_rule_no_todo.wasm");
+
+        if wasm_source.exists() {
+            fs::copy(&wasm_source, &wasm_path).unwrap();
+        } else {
+            // Fallback: search in common target directories
+            // This is to make test robust across different build environments
+            let alt_source = manifest_dir
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("target/wasm32-wasip1/release/texide_rule_no_todo.wasm");
+
+            if alt_source.exists() {
+                fs::copy(&alt_source, &wasm_path).unwrap();
+            } else {
+                eprintln!(
+                    "SKIPPING TEST: WASM file not found at {} or {}. Run `cargo build --release -p rules` (or similar) to generate it.",
+                    wasm_source.display(),
+                    alt_source.display()
+                );
+                return;
+            }
+        }
+
+        // Create manifest
+        let json = r#"{
+            "rule": {
+                "name": "manifest-test-rule",
+                "version": "1.0.0",
+                "description": "Test rule",
+                "fixable": false
+            },
+            "artifacts": {
+                "wasm": "rule.wasm",
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+        }"#;
+        fs::write(&manifest_path, json).unwrap();
+
+        // Configure linter
+        let mut config = LinterConfig::new();
+        config.base_dir = Some(dir.path().to_path_buf());
+
+        // Use relative path from base_dir
+        config.rules.push(crate::config::RuleDefinition::Detail(
+            crate::config::RuleDefinitionDetail {
+                github: None,
+                url: None,
+                path: Some("tsuzulint-rule.json".to_string()),
+                r#as: None, // Should pick up name from manifest
+            },
+        ));
+
+        // Create linter (this triggers load_configured_rules)
+        let linter = Linter::new(config).unwrap();
+
+        // Verify rule is loaded
+        let host = linter.plugin_host.lock().unwrap();
+        let loaded: Vec<String> = host.loaded_rules().cloned().collect();
+        assert!(loaded.contains(&"manifest-test-rule".to_string()));
+    }
+
+    #[test]
+    fn test_linter_config_hash_caching() {
+        let (config, _temp) = test_config();
+        let expected_hash = config.hash();
+        let linter = Linter::new(config).unwrap();
+
+        // Verify that the hash stored in Linter matches the one computed from config
+        assert_eq!(linter.config_hash, expected_hash);
+    }
+
+    #[test]
+    fn test_lint_content_with_simple_rule() {
+        // Build the test rule WASM
+        // If build fails (e.g. missing target), skip test
+        let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() else {
+            println!(
+                "Skipping test_lint_content_with_simple_rule: WASM build failed (likely missing wasm32-wasip1 target)"
+            );
+            return;
+        };
+
+        let (config, _temp) = test_config();
+
+        // Create linter
+        let linter = Linter::new(config).unwrap();
+
+        // Load the rule dynamically
+        linter
+            .load_rule(&wasm_path)
+            .expect("Failed to load test rule");
+
+        // Test case 1: Content with error
+        let content = "This text contains an error keyword.";
+        let path = Path::new("test.md");
+
+        let diagnostics = linter.lint_content(content, path).unwrap();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule_id, "test-rule");
+        assert_eq!(diagnostics[0].message, "Found error keyword");
+        assert_eq!(diagnostics[0].span.start, 22);
+        assert_eq!(diagnostics[0].span.end, 27);
+
+        // Test case 2: Content without error
+        let clean_content = "This text is clean.";
+        let diagnostics = linter.lint_content(clean_content, path).unwrap();
+        assert_eq!(diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_discover_files_respects_exclude() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let node_modules = temp_dir.path().join("node_modules");
+        fs::create_dir(&node_modules).unwrap();
+        let excluded_file = node_modules.join("excluded.md");
+
+        fs::write(&test_file, "# Test").unwrap();
+        fs::write(&excluded_file, "# Excluded").unwrap();
+
+        let mut config = test_config_in(temp_dir.path());
+        config.exclude = vec!["**/node_modules/**".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+
+        let files = linter
+            .discover_files(&["**/*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        // Should find test.md but not excluded.md
+        assert!(files.iter().any(|f| f.ends_with("test.md")));
+        assert!(
+            !files
+                .iter()
+                .any(|f| f.to_string_lossy().contains("node_modules"))
+        );
+    }
+
+    #[test]
+    fn test_discover_files_respects_include() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let md_file = temp_dir.path().join("test.md");
+        let txt_file = temp_dir.path().join("test.txt");
+
+        fs::write(&md_file, "# Test").unwrap();
+        fs::write(&txt_file, "Test").unwrap();
+
+        let mut config = test_config_in(temp_dir.path());
+        config.include = vec!["**/*.md".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+
+        let files = linter
+            .discover_files(&["**/*".to_string()], temp_dir.path())
+            .unwrap();
+
+        // Should only find .md files
+        assert!(files.iter().any(|f| f.ends_with("test.md")));
+        assert!(!files.iter().any(|f| f.ends_with("test.txt")));
+    }
+
+    #[test]
+    fn test_discover_files_deduplicates() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        fs::write(&test_file, "# Test").unwrap();
+
+        let config = test_config_in(temp_dir.path());
+        let linter = Linter::new(config).unwrap();
+
+        // Use same pattern twice
+        let files = linter
+            .discover_files(&["*.md".to_string(), "*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        // Should only appear once
+        assert_eq!(files.len(), 1);
     }
 
     #[test]

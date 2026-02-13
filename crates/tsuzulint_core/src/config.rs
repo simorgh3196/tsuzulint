@@ -119,6 +119,21 @@ impl RuleOption {
 }
 
 impl LinterConfig {
+    /// Supported configuration files in order of precedence.
+    pub const CONFIG_FILES: &'static [&'static str] = &[".tsuzulint.jsonc", ".tsuzulint.json"];
+
+    /// Attempts to find a configuration file in the given directory.
+    pub fn discover(base_dir: impl AsRef<Path>) -> Option<PathBuf> {
+        let base_dir = base_dir.as_ref();
+        for name in Self::CONFIG_FILES {
+            let path = base_dir.join(name);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        None
+    }
+
     /// Creates a new empty configuration.
     pub fn new() -> Self {
         Self {

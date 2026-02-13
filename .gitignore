@@ -37,4 +37,4 @@ TODO.md
 .tsuzulint-cache/
 
 .worktrees/
-
+crates/tsuzulint_core/tests/fixtures/simple_rule/target

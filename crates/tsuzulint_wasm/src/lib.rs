@@ -116,11 +116,7 @@ impl TextLinter {
     /// Returns the names of all loaded rules.
     #[wasm_bindgen(js_name = loadedRules)]
     pub fn loaded_rules(&self) -> Vec<String> {
-        self.host
-            .loaded_rules()
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        self.host.loaded_rules().map(|s| s.to_string()).collect()
     }
 
     /// Unloads a rule.
@@ -162,12 +158,20 @@ impl TextLinter {
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
 
         // Convert AST to JSON for plugin consumption
-        let ast_json = ast_to_json(&ast);
+        let ast_json = serde_json::to_string(&ast).map_err(|e| JsError::new(&e.to_string()))?;
+        let ast_raw = serde_json::value::RawValue::from_string(ast_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        // Pre-serialize source
+        let source_json =
+            serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
+        let source_raw = serde_json::value::RawValue::from_string(source_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Run all rules
         let diagnostics = self
             .host
-            .run_all_rules(&ast_json, content, None)
+            .run_all_rules(&ast_raw, &source_raw, None)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Convert diagnostics to JavaScript objects
@@ -198,12 +202,20 @@ impl TextLinter {
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
 
         // Convert AST to JSON for plugin consumption
-        let ast_json = ast_to_json(&ast);
+        let ast_json = serde_json::to_string(&ast).map_err(|e| JsError::new(&e.to_string()))?;
+        let ast_raw = serde_json::value::RawValue::from_string(ast_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        // Pre-serialize source
+        let source_json =
+            serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
+        let source_raw = serde_json::value::RawValue::from_string(source_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Run all rules
         let diagnostics = self
             .host
-            .run_all_rules(&ast_json, content, None)
+            .run_all_rules(&ast_raw, &source_raw, None)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         serde_json::to_string(&diagnostics).map_err(|e| JsError::new(&e.to_string()))
@@ -265,61 +277,6 @@ impl From<Diagnostic> for JsDiagnostic {
     }
 }
 
-/// Converts a TxtNode to a JSON value.
-fn ast_to_json(node: &tsuzulint_ast::TxtNode) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-
-    obj.insert(
-        "type".to_string(),
-        serde_json::Value::String(format!("{:?}", node.node_type)),
-    );
-
-    obj.insert(
-        "range".to_string(),
-        serde_json::json!([node.span.start, node.span.end]),
-    );
-
-    if let Some(value) = node.value {
-        obj.insert(
-            "value".to_string(),
-            serde_json::Value::String(value.to_string()),
-        );
-    }
-
-    if !node.children.is_empty() {
-        let children: Vec<serde_json::Value> = node.children.iter().map(ast_to_json).collect();
-        obj.insert("children".to_string(), serde_json::Value::Array(children));
-    }
-
-    // Add node data if present
-    if let Some(url) = node.data.url {
-        obj.insert(
-            "url".to_string(),
-            serde_json::Value::String(url.to_string()),
-        );
-    }
-    if let Some(title) = node.data.title {
-        obj.insert(
-            "title".to_string(),
-            serde_json::Value::String(title.to_string()),
-        );
-    }
-    if let Some(depth) = node.data.depth {
-        obj.insert("depth".to_string(), serde_json::Value::Number(depth.into()));
-    }
-    if let Some(ordered) = node.data.ordered {
-        obj.insert("ordered".to_string(), serde_json::Value::Bool(ordered));
-    }
-    if let Some(lang) = node.data.lang {
-        obj.insert(
-            "lang".to_string(),
-            serde_json::Value::String(lang.to_string()),
-        );
-    }
-
-    serde_json::Value::Object(obj)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +286,162 @@ mod tests {
     fn test_linter_new() {
         let linter = TextLinter::new();
         assert!(linter.loaded_rules().is_empty());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_linter_default() {
+        let linter = TextLinter::default();
+        assert!(linter.loaded_rules().is_empty());
+    }
+
+    #[test]
+    fn test_js_diagnostic_from_diagnostic() {
+        use tsuzulint_ast::{Location, Position, Span};
+        use tsuzulint_plugin::{Diagnostic, Severity};
+
+        let diag = Diagnostic {
+            rule_id: "test-rule".to_string(),
+            message: "Test message".to_string(),
+            span: Span { start: 0, end: 10 },
+            loc: Some(Location {
+                start: Position { line: 1, column: 0 },
+                end: Position {
+                    line: 1,
+                    column: 10,
+                },
+            }),
+            severity: Severity::Error,
+            fix: None,
+        };
+
+        let js_diag = JsDiagnostic::from(diag);
+        assert_eq!(js_diag.rule_id, "test-rule");
+        assert_eq!(js_diag.message, "Test message");
+        assert_eq!(js_diag.start, 0);
+        assert_eq!(js_diag.end, 10);
+        assert_eq!(js_diag.severity, "error");
+        assert_eq!(js_diag.start_line, Some(1));
+        assert_eq!(js_diag.start_column, Some(0));
+        assert_eq!(js_diag.end_line, Some(1));
+        assert_eq!(js_diag.end_column, Some(10));
+        assert!(js_diag.fix.is_none());
+    }
+
+    #[test]
+    fn test_js_diagnostic_with_fix() {
+        use tsuzulint_ast::Span;
+        use tsuzulint_plugin::{Diagnostic, Fix, Severity};
+
+        let diag = Diagnostic {
+            rule_id: "test-rule".to_string(),
+            message: "Test message".to_string(),
+            span: Span { start: 0, end: 10 },
+            loc: None,
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                span: Span { start: 0, end: 10 },
+                text: "fixed text".to_string(),
+            }),
+        };
+
+        let js_diag = JsDiagnostic::from(diag);
+        assert_eq!(js_diag.severity, "warning");
+        assert!(js_diag.fix.is_some());
+        let fix = js_diag.fix.unwrap();
+        assert_eq!(fix.start, 0);
+        assert_eq!(fix.end, 10);
+        assert_eq!(fix.text, "fixed text");
+    }
+
+    #[test]
+    fn test_js_diagnostic_severity_mapping() {
+        use tsuzulint_ast::Span;
+        use tsuzulint_plugin::{Diagnostic, Severity};
+
+        let test_cases = vec![
+            (Severity::Error, "error"),
+            (Severity::Warning, "warning"),
+            (Severity::Info, "info"),
+        ];
+
+        for (severity, expected) in test_cases {
+            let diag = Diagnostic {
+                rule_id: "test".to_string(),
+                message: "test".to_string(),
+                span: Span { start: 0, end: 1 },
+                loc: None,
+                severity,
+                fix: None,
+            };
+
+            let js_diag = JsDiagnostic::from(diag);
+            assert_eq!(js_diag.severity, expected);
+        }
+    }
+
+    #[test]
+    fn test_ast_to_json_document() {
+        use tsuzulint_ast::{NodeType, Span, TxtNode};
+
+        let doc = TxtNode::new_parent(NodeType::Document, Span::new(0, 10), &[]);
+
+        let json = serde_json::to_value(doc).unwrap();
+
+        assert_eq!(json["type"], "Document");
+        assert_eq!(json["range"][0], 0);
+        assert_eq!(json["range"][1], 10);
+        assert!(json["children"].is_array());
+        assert_eq!(json["children"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_ast_to_json_with_value() {
+        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+
+        let arena = AstArena::new();
+        let text_node = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello"));
+
+        let json = serde_json::to_value(text_node).unwrap();
+
+        assert!(json["value"].is_string());
+        assert_eq!(json["value"], "hello");
+    }
+
+    #[test]
+    fn test_ast_to_json_with_children() {
+        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+
+        let arena = AstArena::new();
+        let child1 = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "hello"));
+        let child2 = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(6, 11), "world"));
+        let children = arena.alloc_slice_copy(&[*child1, *child2]);
+        let parent = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 11), children);
+
+        let json = serde_json::to_value(parent).unwrap();
+
+        assert!(json["children"].is_array());
+        let children_arr = json["children"].as_array().unwrap();
+        assert_eq!(children_arr.len(), 2);
+    }
+
+    #[test]
+    fn test_ast_to_json_with_node_data() {
+        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+
+        let arena = AstArena::new();
+        let mut node = TxtNode::new_parent(NodeType::Header, Span::new(0, 10), &[]);
+        node.data.depth = Some(2);
+        node.data.url = Some(arena.alloc_str("https://example.com"));
+        node.data.title = Some(arena.alloc_str("Example"));
+        node.data.lang = Some(arena.alloc_str("rust"));
+        node.data.ordered = Some(true);
+
+        let json = serde_json::to_value(node).unwrap();
+
+        assert_eq!(json["depth"], 2);
+        assert_eq!(json["url"], "https://example.com");
+        assert_eq!(json["title"], "Example");
+        assert_eq!(json["lang"], "rust");
+        assert_eq!(json["ordered"], true);
     }
 }
