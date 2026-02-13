@@ -15,64 +15,82 @@
       "items": {
         "oneOf": [
           {
+            "type": "string",
+            "description": "Rule specification: 'owner/repo' or 'owner/repo@version'",
+            "pattern": "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(@.+)?$",
+            "examples": [
+              "simorgh3196/tsuzulint-rule-no-doubled-joshi",
+              "simorgh3196/tsuzulint-rule-sentence-length@1.2.0"
+            ]
+          },
+          {
+            "type": "object",
+            "description": "Rule with GitHub specification and optional alias",
+            "required": [
+              "github"
+            ],
+            "properties": {
+              "github": {
                 "type": "string",
-                "description": "Rule specification: 'owner/repo' or 'owner/repo@version'",
+                "description": "GitHub repository: 'owner/repo' or 'owner/repo@version'",
+                "pattern": "^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(@.+)?$",
                 "examples": [
-                  "simorgh3196/tsuzulint-rule-no-doubled-joshi",
-                  "simorgh3196/tsuzulint-rule-sentence-length@1.2.0"
+                  "alice/tsuzulint-rule-foo",
+                  "alice/tsuzulint-rule-foo@1.0.0"
                 ]
               },
-              {
-                "type": "object",
-                "description": "Rule with GitHub specification and optional alias",
-                "required": ["github"],
-                "properties": {
-                  "github": {
-                    "type": "string",
-                    "description": "GitHub repository: 'owner/repo' or 'owner/repo@version'",
-                    "examples": ["alice/tsuzulint-rule-foo", "alice/tsuzulint-rule-foo@1.0.0"]
-                  },
-                  "as": {
-                    "type": "string",
-                    "description": "Alias for this rule (used in options)",
-                    "pattern": "^[a-z][a-z0-9-]*$"
-                  }
-                },
-                "additionalProperties": false
+              "as": {
+                "type": "string",
+                "description": "Alias for this rule (used in options)",
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Rule with URL specification (alias required)",
+            "required": [
+              "url",
+              "as"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL to tsuzulint-rule.json manifest",
+                "examples": [
+                  "https://example.com/rules/my-rule/tsuzulint-rule.json"
+                ]
               },
-              {
-                "type": "object",
-                "description": "Rule with URL specification (alias required)",
-                "required": ["url", "as"],
-                "properties": {
-                  "url": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "URL to tsuzulint-rule.json manifest"
-                  },
-                  "as": {
-                    "type": "string",
-                    "description": "Alias for this rule (required for URL sources)",
-                    "pattern": "^[a-z][a-z0-9-]*$"
-                  }
-                },
-                "additionalProperties": false
+              "as": {
+                "type": "string",
+                "description": "Alias for this rule (required for URL sources)",
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Rule with local path to tsuzulint-rule.json manifest",
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Local path to tsuzulint-rule.json manifest file",
+                "examples": [
+                  "./rules/my-rule/tsuzulint-rule.json"
+                ]
               },
-              {
-                "type": "object",
-                "description": "Rule with local path specification (alias required)",
-                "required": ["path", "as"],
-                "properties": {
-                  "path": {
-                    "type": "string",
-                    "description": "Local path to tsuzulint-rule.json manifest"
-                  },
-                  "as": {
-                    "type": "string",
-                    "description": "Alias for this rule (required for path sources)",
-                    "pattern": "^[a-z][a-z0-9-]*$"
-                  }
-                },
+              "as": {
+                "type": "string",
+                "description": "Optional alias to override rule name from manifest",
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              }
+            },
             "additionalProperties": false
           }
         ]
@@ -89,7 +107,12 @@
           },
           {
             "type": "string",
-            "enum": ["error", "warning", "info", "off"],
+            "enum": [
+              "error",
+              "warning",
+              "info",
+              "off"
+            ],
             "description": "Set rule severity"
           },
           {
@@ -102,25 +125,38 @@
       "examples": [
         {
           "no-todo": true,
-          "sentence-length": { "max": 100 },
+          "sentence-length": {
+            "max": 100
+          },
           "no-doubled-joshi": "warning"
         }
       ]
     },
     "include": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Glob patterns for files to include",
       "examples": [
-        ["**/*.md", "docs/**/*.txt"]
+        [
+          "**/*.md",
+          "docs/**/*.txt"
+        ]
       ]
     },
     "exclude": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Glob patterns for files to exclude",
       "examples": [
-        ["node_modules/**", "dist/**", "*.min.js"]
+        [
+          "node_modules/**",
+          "dist/**",
+          "*.min.js"
+        ]
       ]
     },
     "cache": {
@@ -145,7 +181,12 @@
       "properties": {
         "format": {
           "type": "string",
-          "enum": ["pretty", "json", "sarif", "github"],
+          "enum": [
+            "pretty",
+            "json",
+            "sarif",
+            "github"
+          ],
           "default": "pretty",
           "description": "Output format"
         },
