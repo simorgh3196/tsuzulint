@@ -294,6 +294,22 @@ impl Linter {
         Ok(host)
     }
 
+    /// Resolves the manifest path, ensuring security constraints.
+    fn resolve_manifest_path(base_dir: Option<&Path>, path: &str) -> Option<PathBuf> {
+        let p = Path::new(path);
+        // Security check: Prevent absolute paths
+        if p.is_absolute() || p.has_root() {
+            warn!("Ignoring absolute rule path: {}", path);
+            return None;
+        }
+
+        Some(if let Some(base) = base_dir {
+            base.join(path)
+        } else {
+            PathBuf::from(path)
+        })
+    }
+
     /// Loads plugins and rules into the given PluginHost based on config.
     ///
     /// This is a shared helper used by both `new()` and `create_plugin_host()`.
@@ -328,54 +344,52 @@ impl Linter {
                     // Prioritize path, then github/url (not fully implemented yet)
                     if let Some(path) = &detail.path {
                         // detail.path points to tsuzulint-rule.json manifest
-                        let manifest_path = if let Some(base) = &config.base_dir {
-                            base.join(path)
-                        } else {
-                            PathBuf::from(path)
-                        };
+                        if let Some(manifest_path) =
+                            Self::resolve_manifest_path(config.base_dir.as_deref(), path)
+                        {
+                            match crate::rule_manifest::load_rule_manifest(&manifest_path) {
+                                Ok((manifest, wasm_path)) => {
+                                    let rule_name = detail
+                                        .r#as
+                                        .clone()
+                                        .unwrap_or_else(|| manifest.rule.name.clone());
+                                    debug!(
+                                        "Loading rule '{}' from manifest: {}",
+                                        rule_name,
+                                        manifest_path.display()
+                                    );
+                                    match host.load_rule(&wasm_path) {
+                                        Ok(loaded_manifest) => {
+                                            // The rule is loaded with the name defined in the WASM binary.
+                                            // We want to use the name from tsuzulint-rule.json (or the alias).
+                                            // Also we want to associate the manifest from JSON.
+                                            let internal_name = loaded_manifest.name.clone();
+                                            // Convert ExternalRuleManifest to tsuzulint_plugin::RuleManifest
+                                            let plugin_manifest = convert_manifest(&manifest);
 
-                        match crate::rule_manifest::load_rule_manifest(&manifest_path) {
-                            Ok((manifest, wasm_path)) => {
-                                let rule_name = detail
-                                    .r#as
-                                    .clone()
-                                    .unwrap_or_else(|| manifest.rule.name.clone());
-                                debug!(
-                                    "Loading rule '{}' from manifest: {}",
-                                    rule_name,
-                                    manifest_path.display()
-                                );
-                                match host.load_rule(&wasm_path) {
-                                    Ok(loaded_manifest) => {
-                                        // The rule is loaded with the name defined in the WASM binary.
-                                        // We want to use the name from tsuzulint-rule.json (or the alias).
-                                        // Also we want to associate the manifest from JSON.
-                                        let internal_name = loaded_manifest.name.clone();
-                                        // Convert ExternalRuleManifest to tsuzulint_plugin::RuleManifest
-                                        let plugin_manifest = convert_manifest(&manifest);
-
-                                        if let Err(e) = host.rename_rule(
-                                            &internal_name,
-                                            &rule_name,
-                                            Some(plugin_manifest),
-                                        ) {
-                                            warn!(
-                                                "Failed to register rule '{}' (loaded as '{}'): {}",
-                                                rule_name, internal_name, e
-                                            );
+                                            if let Err(e) = host.rename_rule(
+                                                &internal_name,
+                                                &rule_name,
+                                                Some(plugin_manifest),
+                                            ) {
+                                                warn!(
+                                                    "Failed to register rule '{}' (loaded as '{}'): {}",
+                                                    rule_name, internal_name, e
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!("Failed to load rule '{}': {}", rule_name, e);
                                         }
                                     }
-                                    Err(e) => {
-                                        warn!("Failed to load rule '{}': {}", rule_name, e);
-                                    }
                                 }
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "Failed to load rule manifest '{}': {}",
-                                    manifest_path.display(),
-                                    e
-                                );
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to load rule manifest '{}': {}",
+                                        manifest_path.display(),
+                                        e
+                                    );
+                                }
                             }
                         }
                     } else if let Some(github) = &detail.github {
@@ -1361,5 +1375,94 @@ mod tests {
         // Should default to text parser
         let result = linter.lint_content("Hello", &PathBuf::from("test.xyz"));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_resolve_manifest_path_relative() {
+        use std::path::Path;
+        let base = Path::new("/tmp/base");
+        let path = "rule.json";
+        // Call private static method via Linter type
+        let resolved = Linter::resolve_manifest_path(Some(base), path);
+        assert_eq!(resolved, Some(base.join(path)));
+    }
+
+    #[test]
+    fn test_resolve_manifest_path_absolute_rejected() {
+        use std::path::Path;
+        let base = Path::new("/tmp/base");
+
+        #[cfg(unix)]
+        let abs_path = "/etc/passwd";
+        #[cfg(windows)]
+        let abs_path = r"C:\Windows\System32\drivers\etc\hosts";
+        #[cfg(not(any(unix, windows)))]
+        let abs_path = "/absolute/path";
+
+        let resolved = Linter::resolve_manifest_path(Some(base), abs_path);
+        assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn test_load_rule_absolute_path_security() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        // Build existing rule WASM
+        let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() else {
+            println!("Skipping test: WASM build failed");
+            return;
+        };
+
+        let temp_dir = tempdir().unwrap();
+        let manifest_path = temp_dir.path().join("tsuzulint-rule.json");
+        let dest_wasm_path = temp_dir.path().join("rule.wasm");
+
+        // Copy WASM
+        fs::copy(&wasm_path, &dest_wasm_path).unwrap();
+
+        // Create manifest
+        let json = r#"{
+            "rule": {
+                "name": "abs-path-rule",
+                "version": "1.0.0",
+                "description": "Test rule",
+                "fixable": false
+            },
+            "artifacts": {
+                "wasm": "rule.wasm",
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+        }"#;
+        fs::write(&manifest_path, json).unwrap();
+
+        // Get absolute path to manifest
+        let abs_manifest_path = manifest_path.canonicalize().unwrap();
+        assert!(abs_manifest_path.is_absolute());
+
+        // Configure linter with absolute path
+        let mut config = LinterConfig::new();
+        config.base_dir = Some(temp_dir.path().to_path_buf());
+
+        config.rules.push(crate::config::RuleDefinition::Detail(
+            crate::config::RuleDefinitionDetail {
+                github: None,
+                url: None,
+                path: Some(abs_manifest_path.to_string_lossy().to_string()),
+                r#as: None,
+            },
+        ));
+
+        let linter = Linter::new(config).unwrap();
+        let host = linter.plugin_host.lock().unwrap();
+
+        // With security fix, this should be empty (rule skipped).
+        // Without fix, it would contain "abs-path-rule".
+        let loaded: Vec<String> = host.loaded_rules().cloned().collect();
+        assert!(
+            !loaded.contains(&"abs-path-rule".to_string()),
+            "Security risk: Absolute path rule was loaded! Loaded rules: {:?}",
+            loaded
+        );
     }
 }
