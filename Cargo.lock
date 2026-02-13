@@ -4033,7 +4033,6 @@ dependencies = [
  "tokio",
  "tower-lsp",
  "tracing",
- "tracing-subscriber",
  "tsuzulint_ast",
  "tsuzulint_core",
  "tsuzulint_parser",

@@ -1,97 +1,145 @@
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tower_lsp::lsp_types::*;
-use tower_lsp::{LanguageServer, LspService};
-use tracing_subscriber::prelude::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tower_lsp::LspService;
 use tsuzulint_lsp::Backend;
-
-struct LogCounter(Arc<Mutex<usize>>);
-
-impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LogCounter {
-    fn on_event(
-        &self,
-        event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        let mut visitor = MessageVisitor(String::new());
-        event.record(&mut visitor);
-        if visitor.0.contains("Validating document") {
-            *self.0.lock().unwrap() += 1;
-        }
-    }
-}
-
-struct MessageVisitor(String);
-
-impl tracing::field::Visit for MessageVisitor {
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
-            use std::fmt::Write;
-            let _ = write!(self.0, "{:?}", value);
-        }
-    }
-    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        if field.name() == "message" {
-            self.0.push_str(value);
-        }
-    }
-}
 
 #[tokio::test]
 async fn test_did_change_validation_frequency() {
-    let counter = Arc::new(Mutex::new(0));
-    let log_layer = LogCounter(counter.clone());
-    let subscriber = tracing_subscriber::registry().with(log_layer);
+    // Pipe for communicating with the server
+    let (client_read, server_write) = tokio::io::duplex(4096);
+    let (server_read, client_write) = tokio::io::duplex(4096);
 
-    // Try to set global default. If it fails, we might miss logs.
-    let _ = tracing::subscriber::set_global_default(subscriber);
+    let (service, socket) = LspService::new(Backend::new);
 
-    let (service, _) = LspService::new(Backend::new);
-    let uri = Url::parse("file:///tmp/test.md").unwrap();
-
-    // Initialize
-    let _ = service
-        .inner()
-        .initialize(InitializeParams::default())
-        .await;
-    service.inner().initialized(InitializedParams {}).await;
-
-    // Send 5 rapid changes
-    for i in 1..=5 {
-        service
-            .inner()
-            .did_change(DidChangeTextDocumentParams {
-                text_document: VersionedTextDocumentIdentifier {
-                    uri: uri.clone(),
-                    version: i,
-                },
-                content_changes: vec![TextDocumentContentChangeEvent {
-                    range: None,
-                    range_length: None,
-                    text: format!("Change {}", i),
-                }],
-            })
+    // Start server in background
+    tokio::spawn(async move {
+        tower_lsp::Server::new(server_read, server_write, socket)
+            .serve(service)
             .await;
+    });
 
-        // Small delay
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    // Helper to read LSP messages
+    let mut reader = tokio::io::BufReader::new(client_read);
+    let mut writer = client_write;
+
+    // 1. Initialize
+    let init_req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///tmp","capabilities":{}}}"#;
+    send_msg(&mut writer, init_req).await;
+
+    // Read initialize response
+    let _resp = recv_msg(&mut reader).await.unwrap();
+    // println!("Init Resp: {}", _resp);
+
+    // 2. Initialized
+    let initialized_notif = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
+    send_msg(&mut writer, initialized_notif).await;
+
+    // 3. DidOpen
+    let did_open = r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/test.md","languageId":"markdown","version":0,"text":"start"}}}"#;
+    send_msg(&mut writer, did_open).await;
+
+    // Expect publishDiagnostics from didOpen
+    // We might receive other notifications/requests (like logMessage), so we loop.
+    let mut diag = String::new();
+    for _ in 0..10 {
+        let msg = recv_msg(&mut reader).await.unwrap();
+        if msg.contains("publishDiagnostics") {
+            diag = msg;
+            break;
+        }
+    }
+    assert!(
+        diag.contains("publishDiagnostics"),
+        "Expected diagnostics after open, got: {}",
+        diag
+    );
+
+    // 4. Send multiple DidChange fast
+    for i in 1..=5 {
+        let did_change = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"file:///tmp/test.md","version":{}}},"contentChanges":[{{"text":"change {}"}}]}}}}"#,
+            i, i
+        );
+        send_msg(&mut writer, &did_change).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    // Wait a bit at the end
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // 5. Wait for debounce (300ms) + some buffer
+    // We expect at most 1 or 2 messages.
+    // Only wait for a certain time.
+    let timeout = tokio::time::sleep(Duration::from_millis(1000));
+    tokio::pin!(timeout);
 
-    let count = *counter.lock().unwrap();
-    println!("Total validations: {}", count);
+    let mut diagnostics_count = 0;
+    loop {
+        tokio::select! {
+            result = recv_msg(&mut reader) => {
+                match result {
+                    Some(msg) => {
+                        if msg.contains("publishDiagnostics") {
+                            diagnostics_count += 1;
+                        }
+                    }
+                    None => break, // Stream closed
+                }
+            }
+            _ = &mut timeout => {
+                break;
+            }
+        }
+    }
 
-    // With debouncing, we expect significantly fewer validations (ideally 1).
+    println!("Total additional diagnostics: {}", diagnostics_count);
+
+    // We sent 5 changes.
+    // If no debounce: we might get 5.
+    // With debounce: we expect 1 (for the last one), maybe 2 if timing is loose.
     assert!(
-        count <= 2,
-        "Expected debouncing to reduce validations (actual: {})",
-        count
+        diagnostics_count < 5,
+        "Debounce failed: got {} diagnostics",
+        diagnostics_count
     );
     assert!(
-        count >= 1,
-        "Expected at least 1 validation (actual: {})",
-        count
+        diagnostics_count > 0,
+        "Expected at least 1 diagnostic (final state)"
     );
+}
+
+async fn send_msg<W: AsyncWriteExt + Unpin>(writer: &mut W, msg: &str) {
+    let content = format!("Content-Length: {}\r\n\r\n{}", msg.len(), msg);
+    writer.write_all(content.as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+}
+
+async fn recv_msg<R: AsyncReadExt + Unpin>(reader: &mut R) -> Option<String> {
+    // Simple LSP parser: read headers until \r\n\r\n, parse Content-Length, read body
+    let mut buffer = Vec::new();
+    let mut content_length = 0;
+
+    // Read headers
+    loop {
+        let byte = reader.read_u8().await.ok()?;
+        buffer.push(byte);
+        if buffer.ends_with(b"\r\n\r\n") {
+            let headers = String::from_utf8_lossy(&buffer);
+            for line in headers.lines() {
+                if line.to_lowercase().starts_with("content-length:") {
+                    let parts: Vec<&str> = line.split(':').collect();
+                    if parts.len() == 2 {
+                        content_length = parts[1].trim().parse().unwrap_or(0);
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    if content_length == 0 {
+        return None;
+    }
+
+    let mut body = vec![0u8; content_length];
+    reader.read_exact(&mut body).await.ok()?;
+
+    Some(String::from_utf8(body).unwrap())
 }

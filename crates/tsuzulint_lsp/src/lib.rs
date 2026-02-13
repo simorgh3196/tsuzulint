@@ -22,7 +22,7 @@ struct DocumentData {
     version: i32,
 }
 
-pub struct BackendState {
+pub(crate) struct BackendState {
     /// Document contents cache.
     documents: RwLock<HashMap<Url, DocumentData>>,
     /// Linter instance (may be None if initialization failed).
@@ -32,6 +32,7 @@ pub struct BackendState {
 }
 
 /// The LSP backend for TsuzuLint.
+#[derive(Clone)]
 pub struct Backend {
     /// LSP client for sending notifications.
     client: Client,
@@ -397,7 +398,7 @@ impl LanguageServer for Backend {
         if let Some(change) = params.content_changes.into_iter().next() {
             let uri = params.text_document.uri.clone();
             let version = params.text_document.version;
-            let text = change.text.clone();
+            let text = change.text;
 
             // Update stored content
             {
@@ -418,15 +419,15 @@ impl LanguageServer for Backend {
             }
 
             // Debounce validation
-            let state = self.state.clone();
-            let client = self.client.clone();
+            // Clone self to move into the async block (Backend catches Arc<BackendState> internally)
+            let backend = self.clone();
 
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
                 // Check version
                 let should_validate = {
-                    let docs = match state.documents.read() {
+                    let docs = match backend.state.documents.read() {
                         Ok(g) => g,
                         Err(e) => {
                             error!("Documents lock poisoned: {}", e);
@@ -441,7 +442,6 @@ impl LanguageServer for Backend {
                 };
 
                 if should_validate {
-                    let backend = Backend { client, state };
                     backend.validate_document(&uri, &text, Some(version)).await;
                 }
             });
