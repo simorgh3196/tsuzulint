@@ -37,10 +37,9 @@ compile_error!("Either 'native' or 'browser' feature must be enabled.");
 
 /// Request sent to a rule's lint function.
 #[derive(Debug, Serialize)]
-struct LintRequest<'a> {
+struct LintRequest<'a, T: Serialize> {
     /// The node to lint (serialized).
-    #[serde(borrow)]
-    node: &'a serde_json::value::RawValue,
+    node: &'a T,
     /// Rule configuration.
     config: serde_json::Value,
     /// Source text.
@@ -227,17 +226,17 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `name` - Rule name
-    /// * `node` - The AST node (serialized as JSON)
+    /// * `node` - The AST node (serialized as JSON or a Serializable struct)
     /// * `source` - The source text (serialized as JSON string)
     /// * `file_path` - Optional file path
     ///
     /// # Returns
     ///
     /// Diagnostics reported by the rule.
-    pub fn run_rule(
+    pub fn run_rule<T: Serialize>(
         &mut self,
         name: &str,
-        node: &serde_json::value::RawValue,
+        node: &T,
         source: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
@@ -269,16 +268,16 @@ impl PluginHost {
     ///
     /// # Arguments
     ///
-    /// * `node` - The AST node (serialized as JSON)
+    /// * `node` - The AST node (serialized as JSON or a Serializable struct)
     /// * `source` - The source text (serialized as JSON string)
     /// * `file_path` - Optional file path
     ///
     /// # Returns
     ///
     /// All diagnostics from all rules.
-    pub fn run_all_rules(
+    pub fn run_all_rules<T: Serialize>(
         &mut self,
-        node: &serde_json::value::RawValue,
+        node: &T,
         source: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
