@@ -32,9 +32,19 @@ async fn test_did_change_validation_frequency() {
         }
     });
 
+    // Setup paths
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root_path = temp_dir.path();
+    let file_path = root_path.join("test.md");
+    let root_uri = tower_lsp::lsp_types::Url::from_file_path(root_path).unwrap();
+    let file_uri = tower_lsp::lsp_types::Url::from_file_path(file_path).unwrap();
+
     // 1. Initialize
-    let init_req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///tmp","capabilities":{}}}"#;
-    send_msg(&mut writer, init_req).await;
+    let init_req = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{}","capabilities":{{}}}}}}"#,
+        root_uri
+    );
+    send_msg(&mut writer, &init_req).await;
 
     // Read initialize response
     let _resp = rx.recv().await.unwrap();
@@ -45,13 +55,16 @@ async fn test_did_change_validation_frequency() {
     send_msg(&mut writer, initialized_notif).await;
 
     // 3. DidOpen
-    let did_open = r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/test.md","languageId":"markdown","version":0,"text":"start"}}}"#;
-    send_msg(&mut writer, did_open).await;
+    let did_open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":0,"text":"start"}}}}}}"#,
+        file_uri
+    );
+    send_msg(&mut writer, &did_open).await;
 
     // Expect publishDiagnostics from didOpen
-    // We expect it relatively quickly.
+    // We expect it relatively quickly, but allow more time for slow CI/Windows
     let mut got_diagnostics = false;
-    let timeout = tokio::time::sleep(Duration::from_secs(1));
+    let timeout = tokio::time::sleep(Duration::from_secs(5));
     tokio::pin!(timeout);
 
     loop {
@@ -76,8 +89,8 @@ async fn test_did_change_validation_frequency() {
     // Because we are reading in background, server won't block on writing.
     for i in 1..=5 {
         let did_change = format!(
-            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"file:///tmp/test.md","version":{}}},"contentChanges":[{{"text":"change {}"}}]}}}}"#,
-            i, i
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":{}}},"contentChanges":[{{"text":"change {}"}}]}}}}"#,
+            file_uri, i, i
         );
         send_msg(&mut writer, &did_change).await;
         // Small delay to simulate typing but still fast enough to trigger debounce
@@ -86,7 +99,8 @@ async fn test_did_change_validation_frequency() {
 
     // 5. Wait for debounce (300ms) + some buffer
     // We expect at most 1 or 2 messages.
-    let timeout = tokio::time::sleep(Duration::from_millis(1000));
+    // Allow generous timeout for CI
+    let timeout = tokio::time::sleep(Duration::from_secs(2));
     tokio::pin!(timeout);
 
     let mut diagnostics_count = 0;

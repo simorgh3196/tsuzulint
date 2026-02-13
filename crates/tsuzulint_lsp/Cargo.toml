@@ -17,3 +17,6 @@ tracing = { workspace = true }
 
 tower-lsp = "0.20"
 serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

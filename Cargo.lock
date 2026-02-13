@@ -4030,6 +4030,7 @@ name = "tsuzulint_lsp"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "tempfile",
  "tokio",
  "tower-lsp",
  "tracing",
