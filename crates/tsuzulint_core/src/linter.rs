@@ -508,9 +508,10 @@ impl Linter {
                     let ast_json = serde_json::to_string(&ast).map_err(|e| {
                         LinterError::Internal(format!("Failed to serialize AST: {}", e))
                     })?;
-                    let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
-                        LinterError::Internal(format!("Failed to create RawValue: {}", e))
-                    })?;
+                    let ast_raw =
+                        serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
+                            LinterError::Internal(format!("Failed to create RawValue: {}", e))
+                        })?;
 
                     for rule in global_rule_names {
                         let start = Instant::now();
@@ -545,38 +546,35 @@ impl Linter {
                                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                 }
                                 if self.config.timings {
-                                    *timings
-                                        .entry(rule.clone())
-                                        .or_insert(Duration::new(0, 0)) += start.elapsed();
+                                    *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
+                                        start.elapsed();
                                 }
-                            } else {
-                                if let Ok(node_json) = serde_json::to_string(node) {
-                                    if let Ok(node_raw) =
-                                        serde_json::value::RawValue::from_string(node_json)
-                                    {
-                                        for rule in &block_rule_names {
-                                            let start = Instant::now();
-                                            match host.run_rule(
-                                                rule,
-                                                &node_raw,
-                                                &source_raw,
-                                                path.to_str(),
-                                            ) {
-                                                Ok(diags) => block_diagnostics.extend(diags),
-                                                Err(e) => warn!("Rule '{}' failed: {}", rule, e),
-                                            }
-                                            if self.config.timings {
-                                                *timings
-                                                    .entry(rule.clone())
-                                                    .or_insert(Duration::new(0, 0)) += start.elapsed();
-                                            }
+                            } else if let Ok(node_json) = serde_json::to_string(node) {
+                                if let Ok(node_raw) =
+                                    serde_json::value::RawValue::from_string(node_json)
+                                {
+                                    for rule in &block_rule_names {
+                                        let start = Instant::now();
+                                        match host.run_rule(
+                                            rule,
+                                            &node_raw,
+                                            &source_raw,
+                                            path.to_str(),
+                                        ) {
+                                            Ok(diags) => block_diagnostics.extend(diags),
+                                            Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                         }
-                                    } else {
-                                        warn!("Failed to create RawValue for block node");
+                                        if self.config.timings {
+                                            *timings
+                                                .entry(rule.clone())
+                                                .or_insert(Duration::new(0, 0)) += start.elapsed();
+                                        }
                                     }
                                 } else {
-                                    warn!("Failed to serialize block node");
+                                    warn!("Failed to create RawValue for block node");
                                 }
+                            } else {
+                                warn!("Failed to serialize block node");
                             }
                         }
                         block_index += 1;
