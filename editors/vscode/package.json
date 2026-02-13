@@ -21,6 +21,7 @@
             "title": "TsuzuLint",
             "properties": {
                 "tsuzulint.executablePath": {
+                    "scope": "machine",
                     "type": "string",
                     "default": "tzlint",
                     "description": "Path to the tzlint executable. If not specified, look for 'tzlint' in PATH."
