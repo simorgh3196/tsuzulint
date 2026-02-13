@@ -4,7 +4,7 @@
 //! Provides real-time linting in editors.
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -17,21 +17,31 @@ use tsuzulint_core::{
 };
 use tsuzulint_parser::{MarkdownParser, Parser, PlainTextParser};
 
-/// The LSP backend for TsuzuLint.
-struct Backend {
-    /// LSP client for sending notifications.
-    client: Client,
+struct DocumentData {
+    text: String,
+    version: i32,
+}
+
+pub struct BackendState {
     /// Document contents cache.
-    documents: RwLock<HashMap<Url, String>>,
+    documents: RwLock<HashMap<Url, DocumentData>>,
     /// Linter instance (may be None if initialization failed).
     linter: RwLock<Option<Linter>>,
     /// Workspace root path.
     workspace_root: RwLock<Option<std::path::PathBuf>>,
 }
 
+/// The LSP backend for TsuzuLint.
+pub struct Backend {
+    /// LSP client for sending notifications.
+    client: Client,
+    /// Shared state
+    state: Arc<BackendState>,
+}
+
 impl Backend {
     /// Creates a new backend with the given client.
-    fn new(client: Client) -> Self {
+    pub fn new(client: Client) -> Self {
         // Initialize linter with default config
         // Real config will be loaded during `initialize` if available
         let config = LinterConfig::new();
@@ -50,9 +60,11 @@ impl Backend {
 
         Self {
             client,
-            documents: RwLock::new(HashMap::new()),
-            linter: RwLock::new(linter),
-            workspace_root: RwLock::new(None),
+            state: Arc::new(BackendState {
+                documents: RwLock::new(HashMap::new()),
+                linter: RwLock::new(linter),
+                workspace_root: RwLock::new(None),
+            }),
         }
     }
 
@@ -84,7 +96,7 @@ impl Backend {
     /// Lints text and returns TsuzuLint diagnostics.
     fn lint_text(&self, text: &str, path: &std::path::Path) -> Vec<TsuzuLintDiagnostic> {
         // Safely acquire read lock, handling potential poisoning
-        let linter_guard = match self.linter.read() {
+        let linter_guard = match self.state.linter.read() {
             Ok(guard) => guard,
             Err(poisoned) => {
                 error!("Linter lock poisoned: {}", poisoned);
@@ -237,7 +249,7 @@ impl Backend {
 
     /// Reloads configuration from the workspace root.
     fn reload_config(&self) {
-        let root_guard = match self.workspace_root.read() {
+        let root_guard = match self.state.workspace_root.read() {
             Ok(g) => g,
             Err(e) => {
                 error!("Workspace root lock poisoned: {}", e);
@@ -258,7 +270,7 @@ impl Backend {
             match LinterConfig::from_file(&config_path) {
                 Ok(config) => {
                     info!("Loaded configuration from workspace");
-                    match self.linter.write() {
+                    match self.state.linter.write() {
                         Ok(mut linter_guard) => match Linter::new(config) {
                             Ok(new_linter) => {
                                 *linter_guard = Some(new_linter);
@@ -288,7 +300,7 @@ impl LanguageServer for Backend {
         if let Some(path) = params.root_uri.and_then(|u| u.to_file_path().ok()) {
             // Store workspace root
             {
-                match self.workspace_root.write() {
+                match self.state.workspace_root.write() {
                     Ok(mut root) => {
                         *root = Some(path);
                     }
@@ -353,7 +365,7 @@ impl LanguageServer for Backend {
 
         // Store document content
         {
-            let mut docs = match self.documents.write() {
+            let mut docs = match self.state.documents.write() {
                 Ok(guard) => guard,
                 Err(e) => {
                     error!("Documents lock poisoned: {}", e);
@@ -362,7 +374,10 @@ impl LanguageServer for Backend {
             };
             docs.insert(
                 params.text_document.uri.clone(),
-                params.text_document.text.clone(),
+                DocumentData {
+                    text: params.text_document.text.clone(),
+                    version: params.text_document.version,
+                },
             );
         }
 
@@ -380,25 +395,56 @@ impl LanguageServer for Backend {
 
         // Get the full text (we use FULL sync)
         if let Some(change) = params.content_changes.into_iter().next() {
+            let uri = params.text_document.uri.clone();
+            let version = params.text_document.version;
+            let text = change.text.clone();
+
             // Update stored content
             {
-                let mut docs = match self.documents.write() {
+                let mut docs = match self.state.documents.write() {
                     Ok(guard) => guard,
                     Err(e) => {
                         error!("Documents lock poisoned: {}", e);
                         return;
                     }
                 };
-                docs.insert(params.text_document.uri.clone(), change.text.clone());
+                docs.insert(
+                    uri.clone(),
+                    DocumentData {
+                        text: text.clone(),
+                        version,
+                    },
+                );
             }
 
-            // Validate on change
-            self.validate_document(
-                &params.text_document.uri,
-                &change.text,
-                Some(params.text_document.version),
-            )
-            .await;
+            // Debounce validation
+            let state = self.state.clone();
+            let client = self.client.clone();
+
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+                // Check version
+                let should_validate = {
+                    let docs = match state.documents.read() {
+                        Ok(g) => g,
+                        Err(e) => {
+                            error!("Documents lock poisoned: {}", e);
+                            return;
+                        }
+                    };
+                    if let Some(doc) = docs.get(&uri) {
+                        doc.version == version
+                    } else {
+                        false
+                    }
+                };
+
+                if should_validate {
+                    let backend = Backend { client, state };
+                    backend.validate_document(&uri, &text, Some(version)).await;
+                }
+            });
         }
     }
 
@@ -433,7 +479,7 @@ impl LanguageServer for Backend {
 
         // Remove from cache
         {
-            let mut docs = match self.documents.write() {
+            let mut docs = match self.state.documents.write() {
                 Ok(guard) => guard,
                 Err(e) => {
                     error!("Documents lock poisoned: {}", e);
@@ -455,7 +501,7 @@ impl LanguageServer for Backend {
         // Get document content
         let uri = &params.text_document.uri;
         let text = {
-            let docs = match self.documents.read() {
+            let docs = match self.state.documents.read() {
                 Ok(guard) => guard,
                 Err(e) => {
                     error!("Documents lock poisoned: {}", e);
@@ -463,7 +509,7 @@ impl LanguageServer for Backend {
                 }
             };
             match docs.get(uri) {
-                Some(text) => text.clone(),
+                Some(data) => data.text.clone(),
                 None => return Ok(None),
             }
         };
@@ -580,7 +626,7 @@ impl LanguageServer for Backend {
 
         let uri = &params.text_document.uri;
         let text = {
-            let docs = match self.documents.read() {
+            let docs = match self.state.documents.read() {
                 Ok(guard) => guard,
                 Err(e) => {
                     error!("Documents lock poisoned: {}", e);
@@ -588,7 +634,7 @@ impl LanguageServer for Backend {
                 }
             };
             match docs.get(uri) {
-                Some(text) => text.clone(),
+                Some(data) => data.text.clone(),
                 None => return Ok(None),
             }
         };
