@@ -13,6 +13,10 @@ impl PluginResolver {
     /// 2. `$HOME/.tsuzulint/plugins/<name>.wasm`
     pub fn resolve(name: &str, project_root: Option<&Path>) -> Option<PathBuf> {
         // Validate plugin name to prevent path traversal
+        // Reject names with trailing separators (e.g. "foo/") which Path::components() would silently strip
+        if name.ends_with('/') || name.ends_with('\\') {
+            return None;
+        }
         let path = Path::new(name);
         let mut components = path.components();
         match (components.next(), components.next()) {
@@ -80,20 +84,7 @@ mod tests {
         assert_eq!(PluginResolver::resolve("dir/plugin", None), None);
         assert_eq!(PluginResolver::resolve(".", None), None);
         assert_eq!(PluginResolver::resolve("..", None), None);
-    }
-}
-
-#[cfg(test)]
-mod additional_tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_resolve_trailing_separator() {
-        let dir = tempdir().unwrap();
-        let project_root = dir.path();
-
-        // Should return None, even if it passes validation
-        assert_eq!(PluginResolver::resolve("foo/", Some(project_root)), None);
+        // Trailing separator should be rejected as invalid name
+        assert_eq!(PluginResolver::resolve("foo/", None), None);
     }
 }
