@@ -12,7 +12,7 @@ async fn test_did_change_validation_frequency() {
     let (service, socket) = LspService::new(Backend::new);
 
     // Start server in background
-    tokio::spawn(async move {
+    let server_handle = tokio::spawn(async move {
         tower_lsp::Server::new(server_read, server_write, socket)
             .serve(service)
             .await;
@@ -128,7 +128,7 @@ async fn test_did_change_validation_frequency() {
     // If no debounce: we might get 5.
     // With debounce: we expect 1 (for the last one), maybe 2 if timing is loose.
     assert!(
-        diagnostics_count < 5,
+        diagnostics_count <= 2,
         "Debounce failed: got {} diagnostics",
         diagnostics_count
     );
@@ -136,6 +136,10 @@ async fn test_did_change_validation_frequency() {
         diagnostics_count > 0,
         "Expected at least 1 diagnostic (final state)"
     );
+
+    // Ensure server didn't crash
+    drop(writer); // Close connection to let server exit
+    let _ = tokio::time::timeout(Duration::from_secs(1), server_handle).await;
 }
 
 async fn send_msg<W: AsyncWriteExt + Unpin>(writer: &mut W, msg: &str) {
@@ -159,7 +163,9 @@ async fn recv_msg<R: AsyncReadExt + Unpin>(reader: &mut R) -> Option<String> {
                 if line.to_lowercase().starts_with("content-length:") {
                     let parts: Vec<&str> = line.split(':').collect();
                     if parts.len() == 2 {
-                        content_length = parts[1].trim().parse().unwrap_or(0);
+                        content_length = parts[1].trim().parse().unwrap_or_else(|e| {
+                            panic!("Failed to parse Content-Length: {e}, header: {line}")
+                        });
                     }
                 }
             }

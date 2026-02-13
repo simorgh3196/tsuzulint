@@ -15,7 +15,7 @@ tsuzulint_ast = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
-tower-lsp = "0.20"
+tower-lsp = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
