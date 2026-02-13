@@ -18,9 +18,10 @@ use crate::{PluginError, RuleManifest};
 /// Default memory limit for WASM instances (128 MB).
 const DEFAULT_MEMORY_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
-/// Default fuel limit for WASM execution (100 million instructions).
-/// This prevents infinite loops or excessive CPU usage.
-const DEFAULT_FUEL_LIMIT: u64 = 100_000_000;
+/// Default fuel limit for WASM execution (instructions).
+/// 1 billion instructions should be enough for any reasonable rule,
+/// but will stop infinite loops.
+const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
 
 /// Host state for wasmi store.
 struct HostState {
@@ -153,7 +154,7 @@ impl RuleExecutor for WasmiExecutor {
         // Configure resource limits
         store.limiter(|state| &mut state.limits);
 
-        // Add fuel limit to prevent infinite loops
+        // Set initial fuel for instantiation and loading
         store
             .set_fuel(DEFAULT_FUEL_LIMIT)
             .map_err(|e| PluginError::load(format!("Failed to set fuel: {}", e)))?;
@@ -283,10 +284,10 @@ impl RuleExecutor for WasmiExecutor {
             .get_mut(rule_name)
             .ok_or_else(|| PluginError::not_found(rule_name))?;
 
-        // Reset fuel limit for this execution
+        // Reset fuel before execution
         rule.store
             .set_fuel(DEFAULT_FUEL_LIMIT)
-            .map_err(|e| PluginError::call(format!("Failed to reset fuel: {}", e)))?;
+            .map_err(|e| PluginError::call(format!("Failed to set fuel: {}", e)))?;
 
         // Write input to WASM memory
         let (input_ptr, input_len) =
@@ -559,5 +560,51 @@ mod tests {
         let err_msg = result.unwrap_err().to_string();
         // The error message from wasmi when fuel is exhausted
         assert!(err_msg.contains("Trap") || err_msg.contains("fuel"));
+    }
+
+    #[test]
+    fn test_executor_infinite_loop() {
+        let mut executor = WasmiExecutor::new();
+
+        // Infinite loop rule
+        let json =
+            r#"{"name":"infinite-loop","version":"1.0.0","description":"Infinite loop rule"}"#;
+        let len = json.len();
+        let wasm = wat_to_wasm(&format!(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "get_manifest") (result i32 i32)
+                    (i32.const 0) ;; ptr
+                    (i32.const {}) ;; len
+                )
+                (func (export "lint") (param i32 i32) (result i32 i32)
+                    (loop
+                        (br 0)
+                    )
+                    (i32.const 0) (i32.const 0) ;; unreachable but needed for type check
+                )
+                (func (export "alloc") (param i32) (result i32)
+                    (i32.const 128)
+                )
+                ;; Write manifest to memory at offset 0
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        ));
+
+        executor.load(&wasm).expect("Failed to load rule");
+
+        let result = executor.call_lint("infinite-loop", "{}");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // Wasmi error for out of fuel usually contains "fuel"
+        assert!(
+            err_msg.contains("fuel") || err_msg.contains("exhausted"),
+            "Error message was: {}",
+            err_msg
+        );
     }
 }

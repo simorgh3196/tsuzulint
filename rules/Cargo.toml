@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/simorgh3196/tsuzulint"
-rust-version = "1.93"
+rust-version = "1.92"
 
 [workspace.dependencies]
 # Extism PDK for WASM rule development
