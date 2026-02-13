@@ -443,4 +443,79 @@ mod tests {
 
         let _ = filter_overlapping_fixes(fixes);
     }
+
+    #[test]
+    fn apply_fixes_to_file_success() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary file with content
+        let mut file = NamedTempFile::new().expect("Failed to create temp file");
+        write!(file, "Hello World").expect("Failed to write to temp file");
+
+        // Close the file handle but keep the path valid for the test duration
+        // This is important for Windows where open file handles prevent other access
+        let path = file.into_temp_path();
+
+        // Create diagnostic with fix: replace "World" [6..11] with "Rust"
+        let diagnostics = vec![make_diagnostic_with_fix(6, 11, "Rust")];
+
+        // Apply fixes
+        let result = apply_fixes_to_file(&path, &diagnostics).expect("apply_fixes_to_file failed");
+
+        // Verify result
+        assert!(result.modified);
+        assert_eq!(result.fixes_applied, 1);
+        assert_eq!(result.fixed_content, "Hello Rust");
+
+        // Verify file content on disk changed
+        let content = fs::read_to_string(&path).expect("Failed to read file back");
+        assert_eq!(content, "Hello Rust");
+    }
+
+    #[test]
+    fn apply_fixes_to_file_no_changes() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut file = NamedTempFile::new().expect("Failed to create temp file");
+        write!(file, "Hello World").expect("Failed to write to temp file");
+
+        // Close the file handle but keep the path valid
+        let path = file.into_temp_path();
+
+        // No diagnostics
+        let diagnostics: Vec<Diagnostic> = vec![];
+
+        let result = apply_fixes_to_file(&path, &diagnostics).expect("apply_fixes_to_file failed");
+
+        // Verify result
+        assert!(!result.modified);
+        assert_eq!(result.fixes_applied, 0);
+        assert_eq!(result.fixed_content, "Hello World");
+
+        // Verify file content on disk unchanged
+        let content = fs::read_to_string(&path).expect("Failed to read file back");
+        assert_eq!(content, "Hello World");
+    }
+
+    #[test]
+    fn apply_fixes_to_file_read_error() {
+        // Create a temporary directory to ensure the non-existent file path is isolated
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let path = dir.path().join("non_existent_file.txt");
+
+        let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
+
+        // This should fail to read the file
+        let result = apply_fixes_to_file(&path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(msg.contains("Failed to read"));
+            }
+            Ok(_) => panic!("Expected LinterError::File, got Ok"),
+            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
+        }
+    }
 }
