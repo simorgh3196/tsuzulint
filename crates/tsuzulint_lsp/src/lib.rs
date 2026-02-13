@@ -156,7 +156,7 @@ impl Backend {
                 line += 1;
                 col = 0;
             } else {
-                col += 1;
+                col += ch.len_utf16() as u32;
             }
 
             current_offset += ch.len_utf8();
@@ -641,76 +641,86 @@ mod tests {
     use tower_lsp::lsp_types::Position;
 
     #[test]
-    fn test_offset_to_position() {
-        // Case 1: Simple ASCII
+    fn test_offset_to_position_basic_ascii() {
         let text = "Hello World";
-        // 'H' -> offset 0 -> line 0, col 0
         assert_eq!(
             Backend::offset_to_position(0, text),
             Some(Position::new(0, 0))
         );
-        // ' ' -> offset 5 -> line 0, col 5
         assert_eq!(
             Backend::offset_to_position(5, text),
             Some(Position::new(0, 5))
         );
-        // 'd' -> offset 10 -> line 0, col 10
         assert_eq!(
             Backend::offset_to_position(10, text),
             Some(Position::new(0, 10))
         );
-        // End of string -> offset 11 -> line 0, col 11
         assert_eq!(
             Backend::offset_to_position(11, text),
             Some(Position::new(0, 11))
         );
-        // Out of bounds -> offset 12 -> None
         assert_eq!(Backend::offset_to_position(12, text), None);
+    }
 
-        // Case 2: Multi-line
+    #[test]
+    fn test_offset_to_position_multiline() {
         let text = "Line 1\nLine 2\nLine 3";
-        // 'L' (line 2) -> offset "Line 1\n".len() = 7 -> line 1, col 0
         assert_eq!(
             Backend::offset_to_position(7, text),
             Some(Position::new(1, 0))
         );
-        // End of last line
-        // "Line 1\n" (7) + "Line 2\n" (7) + "Line 3" (6) = 20
         assert_eq!(
             Backend::offset_to_position(20, text),
             Some(Position::new(2, 6))
         );
+    }
 
-        // Case 3: Unicode
-        // 'あ' is 3 bytes.
+    #[test]
+    fn test_offset_to_position_unicode_multibyte() {
+        // 'あ' is 3 bytes in UTF-8, 1 code unit in UTF-16
         let text = "あいう";
-        // 'あ' -> 0 -> 0, 0
         assert_eq!(
             Backend::offset_to_position(0, text),
             Some(Position::new(0, 0))
         );
-        // 'い' -> 3 -> 0, 1
         assert_eq!(
             Backend::offset_to_position(3, text),
             Some(Position::new(0, 1))
         );
-        // 'う' -> 6 -> 0, 2
         assert_eq!(
             Backend::offset_to_position(6, text),
             Some(Position::new(0, 2))
         );
-        // End -> 9 -> 0, 3
         assert_eq!(
             Backend::offset_to_position(9, text),
             Some(Position::new(0, 3))
         );
+    }
 
-        // Case 4: Empty string
-        let text = "";
+    #[test]
+    fn test_offset_to_position_supplementary_plane_chars() {
+        // '🎉' is 4 bytes in UTF-8, 2 code units in UTF-16
+        let text = "a🎉b";
         assert_eq!(
             Backend::offset_to_position(0, text),
             Some(Position::new(0, 0))
+        ); // 'a'
+        assert_eq!(
+            Backend::offset_to_position(1, text),
+            Some(Position::new(0, 1))
+        ); // '🎉'
+        assert_eq!(
+            Backend::offset_to_position(5, text),
+            Some(Position::new(0, 3))
+        ); // 'b'
+    }
+
+    #[test]
+    fn test_offset_to_position_empty_string() {
+        assert_eq!(
+            Backend::offset_to_position(0, ""),
+            Some(Position::new(0, 0))
         );
-        assert_eq!(Backend::offset_to_position(1, text), None);
+        assert_eq!(Backend::offset_to_position(1, ""), None);
     }
 }
