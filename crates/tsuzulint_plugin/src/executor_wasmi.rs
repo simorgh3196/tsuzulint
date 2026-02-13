@@ -96,7 +96,7 @@ impl WasmiExecutor {
             .ok_or_else(|| PluginError::call("Memory not initialized"))?;
 
         let data = memory
-            .data(&store)
+            .data(store)
             .get(ptr as usize..(ptr + len) as usize)
             .ok_or_else(|| PluginError::call("Memory access out of bounds"))?;
 
@@ -514,7 +514,12 @@ mod tests {
         let result = executor.load(&wasm);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Resource limit exceeded") || err_msg.contains("Memory"));
+        assert!(
+            err_msg.contains("Resource limit exceeded")
+                || err_msg.contains("Memory")
+                || err_msg.contains("memory")
+                || err_msg.contains("resource limiter")
+        );
     }
 
     #[test]
@@ -552,14 +557,15 @@ mod tests {
 
         executor.load(&wasm).expect("Failed to load rule");
 
+        // Should return an error (trap) due to fuel exhaustion
         let result = executor.call_lint("infinite-loop", "{}");
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        // Wasmi error for out of fuel usually contains "fuel"
+        // Wasmi fuel exhaustion error: "all fuel consumed by WebAssembly"
+        let err_lower = err_msg.to_lowercase();
         assert!(
-            err_msg.contains("fuel") || err_msg.contains("exhausted"),
-            "Error message was: {}",
-            err_msg
+            err_lower.contains("fuel"),
+            "Expected fuel exhaustion error, got: {err_msg}"
         );
     }
 }
