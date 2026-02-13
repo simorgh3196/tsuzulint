@@ -616,4 +616,124 @@ mod tests {
         assert_eq!(ast.span.start, 0);
         assert_eq!(ast.span.end, 5);
     }
+
+    #[test]
+    fn test_parse_whitespace_only() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "   \n  \n  ";
+
+        let ast = parser.parse(&arena, source).unwrap();
+        assert_eq!(ast.node_type, NodeType::Document);
+        // Whitespace-only should result in empty or minimal children
+    }
+
+    #[test]
+    fn test_parse_mixed_content() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = r#"# Title
+
+This is a paragraph with **bold** and *italic*.
+
+- List item 1
+- List item 2
+
+```rust
+fn main() {}
+```
+
+> A blockquote
+
+---
+"#;
+
+        let ast = parser.parse(&arena, source).unwrap();
+        assert_eq!(ast.node_type, NodeType::Document);
+        // Should have multiple top-level children
+        assert!(ast.children.len() >= 5);
+    }
+
+    #[test]
+    fn test_parse_very_long_line() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let long_text = "A".repeat(10000);
+        let source = format!("# {}", long_text);
+
+        let ast = parser.parse(&arena, &source).unwrap();
+        assert_eq!(ast.node_type, NodeType::Document);
+        assert!(!ast.children.is_empty());
+    }
+
+    #[test]
+    fn test_parse_unicode_content() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "# 日本語のタイトル\n\n本文です。";
+
+        let ast = parser.parse(&arena, source).unwrap();
+        assert_eq!(ast.node_type, NodeType::Document);
+        assert!(!ast.children.is_empty());
+    }
+
+    #[test]
+    fn test_parse_nested_lists() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = r#"- Item 1
+  - Nested 1
+  - Nested 2
+- Item 2"#;
+
+        let ast = parser.parse(&arena, source).unwrap();
+        assert_eq!(ast.node_type, NodeType::Document);
+        assert!(!ast.children.is_empty());
+    }
+
+    #[test]
+    fn test_parse_definition_references() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = r#"[link][ref]
+
+[ref]: https://example.com "Title""#;
+
+        let ast = parser.parse(&arena, source).unwrap();
+        assert_eq!(ast.node_type, NodeType::Document);
+        // Should parse both the reference and definition
+        assert!(!ast.children.is_empty());
+    }
+
+    #[test]
+    fn test_parse_autolink() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = "<https://example.com>";
+
+        let ast = parser.parse(&arena, source).unwrap();
+        assert_eq!(ast.node_type, NodeType::Document);
+    }
+
+    #[test]
+    fn test_parse_task_list() {
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let source = r#"- [ ] Unchecked
+- [x] Checked"#;
+
+        let ast = parser.parse(&arena, source).unwrap();
+        assert_eq!(ast.node_type, NodeType::Document);
+        // GFM task lists should be parsed
+        assert!(!ast.children.is_empty());
+    }
+
+    #[test]
+    fn test_extensions_case_insensitive() {
+        let parser = MarkdownParser::new();
+        assert!(parser.can_parse("MD"));
+        assert!(parser.can_parse("Md"));
+        assert!(parser.can_parse("mD"));
+        assert!(parser.can_parse("MARKDOWN"));
+    }
 }

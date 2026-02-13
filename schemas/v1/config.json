@@ -160,7 +160,10 @@
       ]
     },
     "cache": {
-      "type": "object",
+      "type": [
+        "boolean",
+        "object"
+      ],
       "description": "Cache settings",
       "properties": {
         "enabled": {

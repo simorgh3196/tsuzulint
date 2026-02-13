@@ -150,6 +150,36 @@ impl Linter {
         let mut files = Vec::new();
 
         for pattern in patterns {
+            // Check if the pattern is a direct file path first
+            let path = Path::new(pattern);
+            if path.exists() && path.is_file() {
+                // Canonicalize to get absolute path for consistent checking
+                if let Ok(abs_path) = path.canonicalize() {
+                    // Check exclude patterns
+                    if self
+                        .exclude_globs
+                        .as_ref()
+                        .is_some_and(|excludes| excludes.is_match(&abs_path))
+                    {
+                        continue;
+                    }
+
+                    // Check include patterns (if specified)
+                    // For direct file arguments, we might want to be more lenient,
+                    // but for strictness we check includes too (unless includes are empty/not set)
+                    if self
+                        .include_globs
+                        .as_ref()
+                        .is_some_and(|includes| !includes.is_match(&abs_path))
+                    {
+                        continue;
+                    }
+
+                    files.push(abs_path);
+                    continue;
+                }
+            }
+
             let glob = Glob::new(pattern).map_err(|e| {
                 LinterError::config(format!("Invalid pattern '{}': {}", pattern, e))
             })?;
@@ -1164,5 +1194,177 @@ mod tests {
 
         // Should only appear once
         assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_discover_files_invalid_glob() {
+        use std::path::Path;
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let result = linter.discover_files(&["[invalid-glob".to_string()], Path::new("."));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_rule_versions_from_host_empty() {
+        let host = PluginHost::new();
+        let versions = Linter::get_rule_versions_from_host(&host);
+        assert!(versions.is_empty());
+    }
+
+    #[test]
+    fn test_extract_blocks_empty_document() {
+        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+
+        let (config, _temp) = test_config();
+        let _linter = Linter::new(config).unwrap();
+
+        let _arena = AstArena::new();
+        let doc = TxtNode::new_parent(NodeType::Document, Span::new(0, 0), &[]);
+
+        let blocks = _linter.extract_blocks(&doc, "");
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn test_extract_blocks_with_content() {
+        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let arena = AstArena::new();
+        let text = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "Hello"));
+        let para = arena.alloc(TxtNode::new_parent(
+            NodeType::Paragraph,
+            Span::new(0, 5),
+            arena.alloc_slice_copy(&[*text]),
+        ));
+        let doc = TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 5),
+            arena.alloc_slice_copy(&[*para]),
+        );
+
+        let blocks = linter.extract_blocks(&doc, "Hello");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].span.start, 0);
+        assert_eq!(blocks[0].span.end, 5);
+    }
+
+    #[test]
+    fn test_extract_blocks_handles_out_of_bounds_gracefully() {
+        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let arena = AstArena::new();
+        // Create a node with span beyond content length
+        let text = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 100), ""));
+        let para = arena.alloc(TxtNode::new_parent(
+            NodeType::Paragraph,
+            Span::new(0, 100),
+            arena.alloc_slice_copy(&[*text]),
+        ));
+        let doc = TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 100),
+            arena.alloc_slice_copy(&[*para]),
+        );
+
+        // Should not panic, just skip invalid blocks
+        let blocks = linter.extract_blocks(&doc, "short");
+        // The out-of-bounds block should be skipped (warning logged)
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn test_ast_to_json_structure() {
+        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+
+        let (config, _temp) = test_config();
+        let _linter = Linter::new(config).unwrap();
+
+        let arena = AstArena::new();
+        let text = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "Hello"));
+        let children = arena.alloc_slice_copy(&[*text]);
+        let para = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 5), children);
+
+        let json = serde_json::to_value(para).unwrap();
+
+        assert_eq!(json["type"], "Paragraph");
+        assert!(json["range"].is_array());
+        assert_eq!(json["range"][0], 0);
+        assert_eq!(json["range"][1], 5);
+        assert!(json["children"].is_array());
+        assert_eq!(json["children"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_select_parser_case_insensitive() {
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let parser_md = linter.select_parser("MD");
+        assert_eq!(parser_md.name(), "markdown");
+
+        let parser_txt = linter.select_parser("TXT");
+        assert_eq!(parser_txt.name(), "text");
+    }
+
+    #[test]
+    fn test_linter_with_multiple_patterns() {
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let patterns = vec!["*.md".to_string(), "*.txt".to_string()];
+        let result = linter.lint_patterns(&patterns);
+
+        // Should succeed even if no files match
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_rule_names_by_isolation_empty() {
+        use tsuzulint_plugin::IsolationLevel;
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+        let host = PluginHost::new();
+
+        let global_rules = linter.get_rule_names_by_isolation(&host, IsolationLevel::Global);
+        assert!(global_rules.is_empty());
+
+        let block_rules = linter.get_rule_names_by_isolation(&host, IsolationLevel::Block);
+        assert!(block_rules.is_empty());
+    }
+
+    #[test]
+    fn test_lint_content_with_empty_string() {
+        use std::path::PathBuf;
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let result = linter.lint_content("", &PathBuf::from("test.md"));
+        assert!(result.is_ok());
+
+        let diagnostics = result.unwrap();
+        // Should handle empty content without errors
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_lint_content_with_unknown_extension() {
+        use std::path::PathBuf;
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        // Should default to text parser
+        let result = linter.lint_content("Hello", &PathBuf::from("test.xyz"));
+        assert!(result.is_ok());
     }
 }
