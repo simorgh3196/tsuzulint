@@ -26,10 +26,6 @@ pub struct LinterConfig {
     #[serde(default)]
     pub options: HashMap<String, RuleOption>,
 
-    /// Plugin names to load (for backward compatibility or simpler plugin lists).
-    #[serde(default)]
-    pub plugins: Vec<String>,
-
     /// File patterns to include.
     #[serde(default)]
     pub include: Vec<String>,
@@ -139,7 +135,6 @@ impl LinterConfig {
         Self {
             rules: Vec::new(),
             options: HashMap::new(),
-            plugins: Vec::new(),
             include: Vec::new(),
             exclude: Vec::new(),
             cache: true,
@@ -324,7 +319,6 @@ mod tests {
         let config = LinterConfig::default();
         assert!(config.rules.is_empty());
         assert!(config.options.is_empty());
-        assert!(config.plugins.is_empty());
         assert!(config.include.is_empty());
         assert!(config.exclude.is_empty());
         assert!(config.cache);

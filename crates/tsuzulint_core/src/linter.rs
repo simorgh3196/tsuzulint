@@ -281,11 +281,6 @@ impl Linter {
             }
         };
 
-        // Load legacy plugins list
-        for plugin_name in &config.plugins {
-            load_plugin(plugin_name, host);
-        }
-
         // Load rules from new rules array
         for rule_def in &config.rules {
             use crate::config::RuleDefinition;
