@@ -135,12 +135,18 @@ impl Linter {
     ///
     /// Returns a tuple of (successful results, failed files with errors).
     pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
-        let files = self.discover_files(patterns)?;
+        let files = self.discover_files(patterns, Path::new("."))?;
         self.lint_files(&files)
     }
 
     /// Discovers files matching the given patterns.
-    fn discover_files(&self, patterns: &[String]) -> Result<Vec<PathBuf>, LinterError> {
+    ///
+    /// Walks the `base_dir` directory tree and returns files matching the patterns.
+    fn discover_files(
+        &self,
+        patterns: &[String],
+        base_dir: &Path,
+    ) -> Result<Vec<PathBuf>, LinterError> {
         let mut files = Vec::new();
 
         for pattern in patterns {
@@ -149,7 +155,7 @@ impl Linter {
             })?;
             let matcher = glob.compile_matcher();
 
-            for entry in WalkDir::new(".").into_iter().filter_map(|e| e.ok()) {
+            for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_file() && matcher.is_match(path) {
                     // Check exclude patterns
@@ -776,6 +782,17 @@ mod tests {
         (config, temp_dir)
     }
 
+    /// Creates a test config that uses a subdirectory of `base` for cache.
+    /// This avoids creating a separate TempDir for cache when the test
+    /// already has its own TempDir for file layout.
+    fn test_config_in(base: &Path) -> LinterConfig {
+        let cache_dir = base.join(".cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        let mut config = LinterConfig::new();
+        config.cache_dir = cache_dir.to_string_lossy().to_string();
+        config
+    }
+
     #[test]
     fn test_linter_new() {
         let (config, _temp) = test_config();
@@ -1084,18 +1101,14 @@ mod tests {
         fs::write(&test_file, "# Test").unwrap();
         fs::write(&excluded_file, "# Excluded").unwrap();
 
-        let (mut config, _temp) = test_config();
+        let mut config = test_config_in(temp_dir.path());
         config.exclude = vec!["**/node_modules/**".to_string()];
 
         let linter = Linter::new(config).unwrap();
 
-        // Change to temp dir for discovery
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
-
-        let files = linter.discover_files(&["**/*.md".to_string()]).unwrap();
-
-        std::env::set_current_dir(original_dir).unwrap();
+        let files = linter
+            .discover_files(&["**/*.md".to_string()], temp_dir.path())
+            .unwrap();
 
         // Should find test.md but not excluded.md
         assert!(files.iter().any(|f| f.ends_with("test.md")));
@@ -1118,17 +1131,14 @@ mod tests {
         fs::write(&md_file, "# Test").unwrap();
         fs::write(&txt_file, "Test").unwrap();
 
-        let (mut config, _temp) = test_config();
+        let mut config = test_config_in(temp_dir.path());
         config.include = vec!["**/*.md".to_string()];
 
         let linter = Linter::new(config).unwrap();
 
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
-
-        let files = linter.discover_files(&["**/*".to_string()]).unwrap();
-
-        std::env::set_current_dir(original_dir).unwrap();
+        let files = linter
+            .discover_files(&["**/*".to_string()], temp_dir.path())
+            .unwrap();
 
         // Should only find .md files
         assert!(files.iter().any(|f| f.ends_with("test.md")));
@@ -1144,18 +1154,13 @@ mod tests {
         let test_file = temp_dir.path().join("test.md");
         fs::write(&test_file, "# Test").unwrap();
 
-        let (config, _temp) = test_config();
+        let config = test_config_in(temp_dir.path());
         let linter = Linter::new(config).unwrap();
-
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
 
         // Use same pattern twice
         let files = linter
-            .discover_files(&["*.md".to_string(), "*.md".to_string()])
+            .discover_files(&["*.md".to_string(), "*.md".to_string()], temp_dir.path())
             .unwrap();
-
-        std::env::set_current_dir(original_dir).unwrap();
 
         // Should only appear once
         assert_eq!(files.len(), 1);
