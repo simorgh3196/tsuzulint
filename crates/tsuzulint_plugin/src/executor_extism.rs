@@ -271,13 +271,14 @@ mod tests {
         println!("Memory limit error: {}", err_msg);
 
         assert!(
-            err_msg.contains("memory") ||
-            err_msg.contains("Memory") ||
-            err_msg.contains("resource") ||
-            err_msg.contains("limit") ||
-            err_msg.contains("oom") ||
-            err_msg.contains("Failed to create plugin"),
-            "Unexpected error message: {}", err_msg
+            err_msg.contains("memory")
+                || err_msg.contains("Memory")
+                || err_msg.contains("resource")
+                || err_msg.contains("limit")
+                || err_msg.contains("oom")
+                || err_msg.contains("Failed to create plugin"),
+            "Unexpected error message: {}",
+            err_msg
         );
     }
 
@@ -300,7 +301,7 @@ mod tests {
                     (i32.const 0)
                 )
             )
-            "#
+            "#,
         );
 
         // Should return an error due to timeout during load (get_manifest execution)
