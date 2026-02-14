@@ -1379,7 +1379,13 @@ mod tests {
     fn test_lint_file_success() {
         use std::fs;
 
-        let (config, temp_dir) = test_config();
+        let (mut config, temp_dir) = test_config();
+
+        // Enable the rule in config so lint_file runs it (if loaded)
+        config
+            .rules
+            .push(crate::config::RuleDefinition::Simple("test-rule".to_string()));
+
         let linter = Linter::new(config).unwrap();
 
         let mut rule_loaded = false;
@@ -1412,13 +1418,20 @@ mod tests {
         if rule_loaded {
             // Check diagnostics
             // The simple rule triggers on "error"
-            assert_eq!(lint_result.diagnostics.len(), 1, "Should find 1 diagnostic");
+            assert_eq!(
+                lint_result.diagnostics.len(),
+                1,
+                "Should find 1 diagnostic"
+            );
             let diag = &lint_result.diagnostics[0];
             assert_eq!(diag.rule_id, "test-rule");
             assert_eq!(diag.message, "Found error keyword");
         } else {
             // Without rules, no diagnostics
-            assert!(lint_result.diagnostics.is_empty(), "No rules loaded, should be clean");
+            assert!(
+                lint_result.diagnostics.is_empty(),
+                "No rules loaded, should be clean"
+            );
         }
 
         // Test with clean file
@@ -1426,6 +1439,9 @@ mod tests {
         fs::write(&clean_path, "This file is clean.").unwrap();
 
         let clean_result = linter.lint_file(&clean_path).unwrap();
-        assert!(clean_result.diagnostics.is_empty(), "Clean file should have no diagnostics");
+        assert!(
+            clean_result.diagnostics.is_empty(),
+            "Clean file should have no diagnostics"
+        );
     }
 }
