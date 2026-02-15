@@ -34,6 +34,7 @@ tsuzulint_manifest = { path = "crates/tsuzulint_manifest" }
 
 # WASM Runtime - Extism uses wasmtime internally (native)
 extism = "1.7"
+extism-manifest = "1.7"
 
 # WASM Runtime - Pure Rust interpreter (browser/wasm32 compatible)
 wasmi = "1.0"
