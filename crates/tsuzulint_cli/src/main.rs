@@ -835,42 +835,32 @@ fn update_config_with_plugin(
     }
 
     // Handle root property additions
-    let mut root_props_to_add = Vec::new();
+    let mut root_props_to_add: Vec<String> = Vec::new();
     if needs_add_rule_prop {
-        root_props_to_add.push(("rules", format!("\"rules\": [\n    {}\n  ]", rule_def_str)));
+        root_props_to_add.push(format!("\"rules\": [\n    {}\n  ]", rule_def_str));
     }
     if needs_add_option_prop {
-        root_props_to_add.push((
-            "options",
-            format!("\"options\": {{\n    {}\n  }}", options_str),
-        ));
+        root_props_to_add.push(format!("\"options\": {{\n    {}\n  }}", options_str));
     }
 
     if !root_props_to_add.is_empty() {
         let root_end = root_obj.range.end - 1;
         let has_existing = !root_obj.properties.is_empty();
+        let count = root_props_to_add.len();
 
-        for (i, (_, text)) in root_props_to_add.into_iter().enumerate() {
+        // Lower order is inserted later (descending sort), so it appears first in the file.
+        for (i, text) in root_props_to_add.into_iter().enumerate() {
             let need_comma = has_existing || i > 0;
             let prefix = if need_comma { ",\n  " } else { "\n  " };
+
+            // Ensure the last inserted property has a trailing newline if it's the last one
+            // to avoid ending with `}}` on the same line if the file ends abruptly.
+            let is_last = i + 1 == count;
+            let suffix = if is_last { "\n" } else { "" };
+
             edits.push(ConfigEdit {
                 pos: root_end,
-                text: format!("{}{}", prefix, text),
-                // Higher order applied first if sorting desc by order?
-                // Wait. Apply order.
-                // Sort by pos desc. Equal pos -> sort by order desc.
-                // Edit A (order 1), Edit B (order 0).
-                // Process A (1) first. `OLD_A`.
-                // Process B (0). `OLD_B_A`.
-                // So lower order ends up first in file.
-                // I want `rules` then `options` in file.
-                // So `rules` needs LOWER order than `options`.
-                // I add them in loop i=0 (rules), i=1 (options).
-                // order = i.
-                // rules (0), options (1).
-                // Process options (1). `OLD_Opt`.
-                // Process rules (0). `OLD_Rul_Opt`.
-                // Correct.
+                text: format!("{}{}{}", prefix, text, suffix),
                 order: i,
             });
         }
@@ -880,7 +870,7 @@ fn update_config_with_plugin(
     edits.sort_by(|a, b| b.pos.cmp(&a.pos).then(b.order.cmp(&a.order)));
 
     // Apply edits
-    let mut new_content = content.clone();
+    let mut new_content = content;
     for edit in edits {
         new_content.insert_str(edit.pos, &edit.text);
     }
@@ -1094,15 +1084,12 @@ mod tests {
         assert!(alias.is_none());
     }
 
-    #[test]
-    fn test_update_config_with_plugin() {
-        use std::io::Write;
-        use tsuzulint_registry::manifest::{
-            Artifacts, ExternalRuleManifest, IsolationLevel, RuleMetadata,
-        };
+    use tsuzulint_registry::manifest::{
+        Artifacts, ExternalRuleManifest, IsolationLevel, RuleMetadata,
+    };
 
-        // Helper to create a dummy manifest
-        let manifest = ExternalRuleManifest {
+    fn create_dummy_manifest() -> ExternalRuleManifest {
+        ExternalRuleManifest {
             rule: RuleMetadata {
                 name: "test-rule".to_string(),
                 version: "1.0.0".to_string(),
@@ -1122,137 +1109,157 @@ mod tests {
             permissions: None,
             tsuzulint: None,
             options: Some(serde_json::json!({ "foo": "bar" })),
-        };
+        }
+    }
 
-        let spec = PluginSpec {
+    fn create_dummy_spec() -> PluginSpec {
+        PluginSpec {
             source: PluginSource::GitHub {
                 owner: "owner".to_string(),
                 repo: "repo".to_string(),
                 version: None,
             },
             alias: None,
-        };
+        }
+    }
+
+    #[test]
+    fn test_update_config_empty_object_adds_rules_and_options() {
+        use std::io::Write;
+        let manifest = create_dummy_manifest();
+        let spec = create_dummy_spec();
         let alias = "test-alias";
 
-        // Case 1: Empty config (just object)
-        {
-            let mut temp_file = tempfile::NamedTempFile::new().unwrap();
-            write!(temp_file, "{{}}").unwrap();
-            let path = temp_file.path().to_path_buf();
-            // keep temp_file around so it's not deleted
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(temp_file, "{{}}").unwrap();
+        let path = temp_file.path().to_path_buf();
 
-            update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
+        update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-            let content = std::fs::read_to_string(&path).unwrap();
-            let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
-            // Verify content contains rules and options
-            let rules = json["rules"].as_array().expect("rules should be an array");
-            assert!(rules.iter().any(|r| {
-                if let Some(s) = r.as_str() {
-                    s == "owner/repo@1.0.0"
-                } else {
-                    false
-                }
-            }));
+        // Verify content contains rules and options
+        let rules = json["rules"].as_array().expect("rules should be an array");
+        assert!(rules.iter().any(|r| {
+            if let Some(s) = r.as_str() {
+                s == "owner/repo@1.0.0"
+            } else {
+                false
+            }
+        }));
 
-            let options = json["options"]
-                .as_object()
-                .expect("options should be an object");
-            assert_eq!(options["test-alias"]["foo"], "bar");
-        }
+        let options = json["options"]
+            .as_object()
+            .expect("options should be an object");
+        assert_eq!(options["test-alias"]["foo"], "bar");
+    }
 
-        // Case 2: Existing rules, no options
-        {
-            let mut temp_file = tempfile::NamedTempFile::new().unwrap();
-            write!(
-                temp_file,
-                r#"{{
+    #[test]
+    fn test_update_config_existing_rules_appends_rule_and_adds_options() {
+        use std::io::Write;
+        let manifest = create_dummy_manifest();
+        let spec = create_dummy_spec();
+        let alias = "test-alias";
+
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            r#"{{
   "rules": [
     "existing/rule"
   ]
 }}"#
-            )
-            .unwrap();
-            let path = temp_file.path().to_path_buf();
+        )
+        .unwrap();
+        let path = temp_file.path().to_path_buf();
 
-            update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
+        update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-            let content = std::fs::read_to_string(&path).unwrap();
-            let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
-            let rules = json["rules"].as_array().expect("rules should be an array");
-            assert!(rules.contains(&serde_json::Value::String("existing/rule".to_string())));
-            assert!(rules.iter().any(|r| {
-                if let Some(s) = r.as_str() {
-                    s == "owner/repo@1.0.0"
-                } else {
-                    false
-                }
-            }));
+        let rules = json["rules"].as_array().expect("rules should be an array");
+        assert!(rules.contains(&serde_json::Value::String("existing/rule".to_string())));
+        assert!(rules.iter().any(|r| {
+            if let Some(s) = r.as_str() {
+                s == "owner/repo@1.0.0"
+            } else {
+                false
+            }
+        }));
 
-            assert!(json["options"].as_object().is_some());
-        }
+        assert!(json["options"].as_object().is_some());
+    }
 
-        // Case 3: Existing options, no rules
-        {
-            let mut temp_file = tempfile::NamedTempFile::new().unwrap();
-            write!(
-                temp_file,
-                r#"{{
+    #[test]
+    fn test_update_config_existing_options_adds_rules_and_preserves_options() {
+        use std::io::Write;
+        let manifest = create_dummy_manifest();
+        let spec = create_dummy_spec();
+        let alias = "test-alias";
+
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            r#"{{
   "options": {{
     "existing": true
   }}
 }}"#
-            )
-            .unwrap();
-            let path = temp_file.path().to_path_buf();
+        )
+        .unwrap();
+        let path = temp_file.path().to_path_buf();
 
-            update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
+        update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-            let content = std::fs::read_to_string(&path).unwrap();
-            let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
-            assert_eq!(json["options"]["existing"], true);
-            assert!(json["rules"].as_array().is_some());
-            let rules = json["rules"].as_array().unwrap();
-            assert!(rules.iter().any(|r| {
-                if let Some(s) = r.as_str() {
-                    s == "owner/repo@1.0.0"
-                } else {
-                    false
-                }
-            }));
-            assert_eq!(json["options"]["test-alias"]["foo"], "bar");
-        }
+        assert_eq!(json["options"]["existing"], true);
+        assert!(json["rules"].as_array().is_some());
+        let rules = json["rules"].as_array().unwrap();
+        assert!(rules.iter().any(|r| {
+            if let Some(s) = r.as_str() {
+                s == "owner/repo@1.0.0"
+            } else {
+                false
+            }
+        }));
+        assert_eq!(json["options"]["test-alias"]["foo"], "bar");
+    }
 
-        // Case 4: Existing both
-        {
-            let mut temp_file = tempfile::NamedTempFile::new().unwrap();
-            write!(
-                temp_file,
-                r#"{{
+    #[test]
+    fn test_update_config_existing_both_appends_rule_and_option() {
+        use std::io::Write;
+        let manifest = create_dummy_manifest();
+        let spec = create_dummy_spec();
+        let alias = "test-alias";
+
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            r#"{{
   "rules": [],
   "options": {{}}
 }}"#
-            )
-            .unwrap();
-            let path = temp_file.path().to_path_buf();
+        )
+        .unwrap();
+        let path = temp_file.path().to_path_buf();
 
-            update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
+        update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-            let content = std::fs::read_to_string(&path).unwrap();
-            let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
-            let rules = json["rules"].as_array().unwrap();
-            assert!(rules.iter().any(|r| {
-                if let Some(s) = r.as_str() {
-                    s == "owner/repo@1.0.0"
-                } else {
-                    false
-                }
-            }));
-            assert_eq!(json["options"]["test-alias"]["foo"], "bar");
-        }
+        let rules = json["rules"].as_array().unwrap();
+        assert!(rules.iter().any(|r| {
+            if let Some(s) = r.as_str() {
+                s == "owner/repo@1.0.0"
+            } else {
+                false
+            }
+        }));
+        assert_eq!(json["options"]["test-alias"]["foo"], "bar");
     }
 }
