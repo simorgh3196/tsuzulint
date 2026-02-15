@@ -1,0 +1,16 @@
+[package]
+name = "tsuzulint_text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Text analysis components for TsuzuLint"
+
+[dependencies]
+# Morphological analysis
+lindera = { version = "2.2.0", features = ["embed-ipadic"] }
+
+# Utilities
+thiserror = { workspace = true }
+serde = { workspace = true }
