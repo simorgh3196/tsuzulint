@@ -240,8 +240,29 @@ impl PluginHost {
         source: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        let config = self
-            .configs
+        Self::run_rule_with_parts(
+            &mut self.executor,
+            &self.configs,
+            &self.aliases,
+            name,
+            node,
+            source,
+            file_path,
+        )
+    }
+
+    /// Internal helper to run a rule with split borrows.
+    #[allow(clippy::too_many_arguments)]
+    fn run_rule_with_parts<T: Serialize>(
+        executor: &mut Executor,
+        configs: &HashMap<String, serde_json::Value>,
+        aliases: &HashMap<String, String>,
+        name: &str,
+        node: &T,
+        source: &serde_json::value::RawValue,
+        file_path: Option<&str>,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        let config = configs
             .get(name)
             .cloned()
             .unwrap_or(serde_json::Value::Null);
@@ -253,10 +274,10 @@ impl PluginHost {
             file_path,
         };
 
-        let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+        let real_name = aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
 
         let request_json = serde_json::to_string(&request)?;
-        let response_json = self.executor.call_lint(real_name, &request_json)?;
+        let response_json = executor.call_lint(real_name, &request_json)?;
 
         let response: LintResponse = serde_json::from_str(&response_json)
             .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
@@ -281,13 +302,21 @@ impl PluginHost {
         source: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        // Run against all rules visible in manifests (including aliases)
-        // Collect names first to avoid borrow check issues
-        let rule_names: Vec<String> = self.manifests.keys().cloned().collect();
         let mut all_diagnostics = Vec::new();
 
-        for name in &rule_names {
-            match self.run_rule(name, node, source, file_path) {
+        // Iterate over manifest keys directly without collecting into a Vec.
+        // We can do this because run_rule_with_parts takes split borrows,
+        // so `self.manifests` (immutable) is not conflicted with `self.executor` (mutable).
+        for name in self.manifests.keys() {
+            match Self::run_rule_with_parts(
+                &mut self.executor,
+                &self.configs,
+                &self.aliases,
+                name,
+                node,
+                source,
+                file_path,
+            ) {
                 Ok(diagnostics) => {
                     all_diagnostics.extend(diagnostics);
                 }
