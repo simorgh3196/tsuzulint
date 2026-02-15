@@ -303,11 +303,53 @@ impl Linter {
             return None;
         }
 
-        Some(if let Some(base) = base_dir {
-            base.join(path)
+        // Security check: Prevent directory traversal via ".."
+        if p.components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            warn!("Ignoring rule path containing '..': {}", path);
+            return None;
+        }
+
+        if let Some(base) = base_dir {
+            let joined = base.join(path);
+            // Security check: Ensure path resolves within base directory
+            // This prevents symlink traversal attacks
+            match (joined.canonicalize(), base.canonicalize()) {
+                (Ok(canon_path), Ok(canon_base)) => {
+                    if canon_path.starts_with(&canon_base) {
+                        Some(canon_path)
+                    } else {
+                        warn!(
+                            "Ignoring rule path that resolves outside base directory: {}",
+                            path
+                        );
+                        None
+                    }
+                }
+                (Err(e), _) => {
+                    // File might not exist, or permission error.
+                    // If we can't canonicalize, we can't verify security fully, but we also can't load it.
+                    // So returning the joined path and letting loader fail is one option,
+                    // but returning None is safer if we want to enforce existence/security here.
+                    // Given this is a security check, we should probably fail safe.
+                    // However, standard loader behavior expects "File not found" error.
+                    // Let's log warning and return None to match "Ignoring..." behavior.
+                    debug!(
+                        "Failed to canonicalize rule path '{}': {}",
+                        joined.display(),
+                        e
+                    );
+                    None
+                }
+                (_, Err(e)) => {
+                    warn!("Failed to canonicalize base directory: {}", e);
+                    None
+                }
+            }
         } else {
-            PathBuf::from(path)
-        })
+            Some(PathBuf::from(path))
+        }
     }
 
     /// Loads plugins and rules into the given PluginHost based on config.
@@ -1379,12 +1421,60 @@ mod tests {
 
     #[test]
     fn test_resolve_manifest_path_relative() {
-        use std::path::Path;
-        let base = Path::new("/tmp/base");
+        use tempfile::tempdir;
+        let temp_dir = tempdir().unwrap();
+        let base = temp_dir.path();
         let path = "rule.json";
+        // Ensure file exists for canonicalization check
+        std::fs::write(base.join(path), "").unwrap();
+
         // Call private static method via Linter type
         let resolved = Linter::resolve_manifest_path(Some(base), path);
-        assert_eq!(resolved, Some(base.join(path)));
+        // Canonicalization resolves symlinks and absolute path, so we compare canonicalized
+        assert_eq!(resolved, Some(base.join(path).canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn test_resolve_manifest_path_traversal_rejected() {
+        use std::path::Path;
+        let base = Path::new("/tmp/base");
+        let path = "../../etc/passwd";
+        // This is rejected by lexical check before canonicalization
+        let resolved = Linter::resolve_manifest_path(Some(base), path);
+        assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn test_resolve_manifest_path_outside_base_rejected() {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().unwrap();
+        let base = temp_dir.path().join("base");
+        std::fs::create_dir(&base).unwrap();
+
+        // Create a file outside base
+        let outside_file = temp_dir.path().join("outside.json");
+        std::fs::write(&outside_file, "").unwrap();
+
+        // Create a symlink inside base pointing to outside
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link_path = base.join("link.json");
+            symlink(&outside_file, &link_path).unwrap();
+
+            // This should be rejected because it resolves outside base
+            // pass relative path to link
+            let resolved = Linter::resolve_manifest_path(Some(&base), "link.json");
+            assert_eq!(resolved, None);
+        }
+    }
+
+    #[test]
+    fn test_resolve_manifest_path_no_base_dir() {
+        use std::path::PathBuf;
+        // With no base dir, it should return relative path as-is (lexical check still applies)
+        let resolved = Linter::resolve_manifest_path(None, "rule.json");
+        assert_eq!(resolved, Some(PathBuf::from("rule.json")));
     }
 
     #[test]
