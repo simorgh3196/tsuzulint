@@ -44,16 +44,20 @@ mod native_tests {
         // Assert that it FAILS with OOM or resource limit error
         match result {
             Err(tsuzulint_plugin::PluginError::CallError(msg))
-                if msg.to_lowercase().contains("oom") || msg.to_lowercase().contains("memory") => {
+                if msg.to_lowercase().contains("oom") || msg.to_lowercase().contains("memory") =>
+            {
                 // Success! The limit worked.
             }
-             Err(tsuzulint_plugin::PluginError::LoadError(msg))
-                if msg.to_lowercase().contains("limit") || msg.to_lowercase().contains("memory") => {
-                 // Success! The limit worked at load time.
-             }
-            Ok(_) => panic!("Expected OOM error, but load succeeded! Memory limits are not enforced."),
+            Err(tsuzulint_plugin::PluginError::LoadError(msg))
+                if msg.to_lowercase().contains("limit")
+                    || msg.to_lowercase().contains("memory") =>
+            {
+                // Success! The limit worked at load time.
+            }
+            Ok(_) => {
+                panic!("Expected OOM error, but load succeeded! Memory limits are not enforced.")
+            }
             Err(e) => panic!("Expected OOM error, but got unexpected error: {:?}", e),
         }
     }
-
 }
