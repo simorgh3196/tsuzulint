@@ -7,8 +7,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use extism::{Manifest, Plugin, Wasm};
-// We need MemoryOptions from extism-manifest to configure memory limits
-use extism_manifest::MemoryOptions;
 use tracing::{debug, info};
 
 use crate::executor::{LoadResult, RuleExecutor};
@@ -54,7 +52,7 @@ impl ExtismExecutor {
         manifest.timeout_ms = Some(DEFAULT_TIMEOUT_MS);
 
         // Set memory limits to prevent DoS via memory exhaustion
-        manifest.memory = MemoryOptions {
+        manifest.memory = extism_manifest::MemoryOptions {
             max_pages: Some(DEFAULT_MEMORY_MAX_PAGES),
             max_http_response_bytes: None,
             max_var_bytes: None,
@@ -183,8 +181,8 @@ mod tests {
     use super::*;
 
     /// Helper to compile WAT to WASM bytes
-    fn wat_to_wasm(wat: &str) -> Vec<u8> {
-        wat::parse_str(wat).expect("Invalid WAT")
+    fn wat_to_wasm(wat_source: &str) -> Vec<u8> {
+        wat::parse_str(wat_source).expect("Invalid WAT")
     }
 
     /// Helper to create a basic valid rule in WAT (Extism ABI)
@@ -275,8 +273,7 @@ mod tests {
                 || err_msg.contains("Memory")
                 || err_msg.contains("resource")
                 || err_msg.contains("limit")
-                || err_msg.contains("oom")
-                || err_msg.contains("Failed to create plugin"),
+                || err_msg.contains("oom"),
             "Unexpected error message: {}",
             err_msg
         );
@@ -314,7 +311,8 @@ mod tests {
         let err_lower = err_msg.to_lowercase();
         assert!(
             err_lower.contains("timeout") || err_lower.contains("deadline"),
-            "Expected timeout error, got: {err_msg}"
+            "Expected timeout error, got: {}",
+            err_msg
         );
     }
 }
