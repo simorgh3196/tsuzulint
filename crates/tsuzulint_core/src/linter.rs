@@ -644,7 +644,12 @@ impl Linter {
 
     /// Extracts blocks from AST for caching.
     fn extract_blocks(&self, ast: &TxtNode, content: &str) -> Vec<BlockCacheEntry> {
-        let mut blocks = Vec::new();
+        let capacity = if ast.node_type == NodeType::Document {
+            ast.children.len()
+        } else {
+            0
+        };
+        let mut blocks = Vec::with_capacity(capacity);
 
         // Helper to traverse and collect blocks
         self.visit_blocks(ast, &mut |node| {
@@ -656,9 +661,16 @@ impl Linter {
 
             // Safety check for bounds
             if start <= content_bytes.len() && end <= content_bytes.len() && start <= end {
-                let bytes = &content_bytes[start..end];
-                let block_content = String::from_utf8_lossy(bytes);
-                let hash = CacheManager::hash_content(&block_content);
+                // Optimize: try to get slice directly to avoid O(N) UTF-8 validation
+                // content.get() checks char boundaries in O(1)
+                let hash = if let Some(slice) = content.get(start..end) {
+                    CacheManager::hash_content(slice)
+                } else {
+                    // Fallback for non-char-boundary spans (should be rare)
+                    let bytes = &content_bytes[start..end];
+                    let block_content = String::from_utf8_lossy(bytes);
+                    CacheManager::hash_content(&block_content)
+                };
 
                 blocks.push(BlockCacheEntry {
                     hash,
