@@ -492,22 +492,36 @@ impl Linter {
             // because they depend on the full context.
             let global_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Global);
             if !global_rule_names.is_empty() {
-                // Serialize AST once for global rules
-                let ast_json = serde_json::to_string(&ast).map_err(|e| {
-                    LinterError::Internal(format!("Failed to serialize AST: {}", e))
-                })?;
-                let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
-                    LinterError::Internal(format!("Failed to create RawValue: {}", e))
-                })?;
-
-                for rule in global_rule_names {
+                if global_rule_names.len() == 1 {
+                    // Optimized path for single rule: avoid RawValue
+                    let rule = &global_rule_names[0];
                     let start = Instant::now();
-                    match host.run_rule(&rule, &ast_raw, &source_raw, path.to_str()) {
+                    match host.run_rule(rule, &ast, &source_raw, path.to_str()) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
                     if self.config.timings {
-                        timings.insert(rule, start.elapsed());
+                        timings.insert(rule.clone(), start.elapsed());
+                    }
+                } else {
+                    // Standard path: Serialize AST once for all global rules
+                    let ast_json = serde_json::to_string(&ast).map_err(|e| {
+                        LinterError::Internal(format!("Failed to serialize AST: {}", e))
+                    })?;
+                    let ast_raw =
+                        serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
+                            LinterError::Internal(format!("Failed to create RawValue: {}", e))
+                        })?;
+
+                    for rule in global_rule_names {
+                        let start = Instant::now();
+                        match host.run_rule(&rule, &ast_raw, &source_raw, path.to_str()) {
+                            Ok(diags) => global_diagnostics.extend(diags),
+                            Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                        }
+                        if self.config.timings {
+                            timings.insert(rule, start.elapsed());
+                        }
                     }
                 }
             }
@@ -515,6 +529,7 @@ impl Linter {
             // B. Run Block Rules on CHANGED/NEW blocks
             let block_rule_names = self.get_rule_names_by_isolation(host, IsolationLevel::Block);
             if !block_rule_names.is_empty() {
+                let single_block_rule = block_rule_names.len() == 1;
                 // Collect AST nodes for changed blocks
                 // We map `matched_mask` back to actual AST nodes by traversing.
                 let mut block_index = 0;
@@ -522,7 +537,19 @@ impl Linter {
                     if block_index < matched_mask.len() {
                         if !matched_mask[block_index] {
                             // This block changed. Run block rules on it.
-                            if let Ok(node_json) = serde_json::to_string(node) {
+                            if single_block_rule {
+                                // Optimized path for single rule
+                                let rule = &block_rule_names[0];
+                                let start = Instant::now();
+                                match host.run_rule(rule, node, &source_raw, path.to_str()) {
+                                    Ok(diags) => block_diagnostics.extend(diags),
+                                    Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                                }
+                                if self.config.timings {
+                                    *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
+                                        start.elapsed();
+                                }
+                            } else if let Ok(node_json) = serde_json::to_string(node) {
                                 if let Ok(node_raw) =
                                     serde_json::value::RawValue::from_string(node_json)
                                 {
