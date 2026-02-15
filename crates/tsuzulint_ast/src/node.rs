@@ -2,7 +2,7 @@
 //!
 //! The core AST node type used throughout TsuzuLint.
 
-use serde::{Serialize, ser::SerializeStruct};
+use serde::Serialize;
 
 use crate::{NodeType, Span};
 
@@ -57,27 +57,34 @@ pub struct TxtNode<'a> {
 }
 
 /// Additional data specific to certain node types.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct NodeData<'a> {
     /// URL for Link/Image nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<&'a str>,
 
     /// Title for Link/Image nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<&'a str>,
 
     /// Depth for Header nodes (1-6).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub depth: Option<u8>,
 
     /// Whether list is ordered.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ordered: Option<bool>,
 
     /// Language for CodeBlock nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lang: Option<&'a str>,
 
     /// Identifier for reference nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<&'a str>,
 
     /// Label for reference nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<&'a str>,
 }
 
@@ -86,53 +93,33 @@ impl<'a> Serialize for TxtNode<'a> {
     where
         S: serde::Serializer,
     {
-        // Estimate field count: type + range = 2, children? value? data fields?
-        let mut state = serializer.serialize_struct("TxtNode", 5)?;
-
-        // 1. Type
-        // Serialize as string (Display implementation of NodeType matches PascalCase)
-        state.serialize_field("type", &self.node_type)?;
-
-        // 2. Range
-        // TextLint uses [start, end] array for range
-        state.serialize_field("range", &[self.span.start, self.span.end])?;
-
-        // 3. Children
-        // Include children if present OR if it's a parent type (even if empty)
-        // This matches tsuzulint_wasm behavior
-        if self.node_type.is_parent() || !self.children.is_empty() {
-            state.serialize_field("children", &self.children)?;
+        #[derive(Serialize)]
+        struct TxtNodeProxy<'a> {
+            #[serde(rename = "type")]
+            node_type: NodeType,
+            range: [u32; 2],
+            #[serde(skip_serializing_if = "Option::is_none")]
+            children: Option<&'a [TxtNode<'a>]>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            value: Option<&'a str>,
+            #[serde(flatten)]
+            data: NodeData<'a>,
         }
 
-        // 4. Value
-        if let Some(val) = self.value {
-            state.serialize_field("value", val)?;
-        }
+        let children = if self.node_type.is_parent() || !self.children.is_empty() {
+            Some(self.children)
+        } else {
+            None
+        };
 
-        // 5. Data fields (Flattened)
-        if let Some(url) = self.data.url {
-            state.serialize_field("url", url)?;
-        }
-        if let Some(title) = self.data.title {
-            state.serialize_field("title", title)?;
-        }
-        if let Some(depth) = self.data.depth {
-            state.serialize_field("depth", &depth)?;
-        }
-        if let Some(ordered) = self.data.ordered {
-            state.serialize_field("ordered", &ordered)?;
-        }
-        if let Some(lang) = self.data.lang {
-            state.serialize_field("lang", lang)?;
-        }
-        if let Some(identifier) = self.data.identifier {
-            state.serialize_field("identifier", identifier)?;
-        }
-        if let Some(label) = self.data.label {
-            state.serialize_field("label", label)?;
-        }
-
-        state.end()
+        let proxy = TxtNodeProxy {
+            node_type: self.node_type,
+            range: [self.span.start, self.span.end],
+            children,
+            value: self.value,
+            data: self.data,
+        };
+        proxy.serialize(serializer)
     }
 }
 
