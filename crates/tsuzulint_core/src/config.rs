@@ -419,6 +419,49 @@ mod tests {
     }
 
     #[test]
+    fn test_config_from_file_not_found() {
+        let result = LinterConfig::from_file("non_existent_file_xyz.json");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to read config")
+        );
+    }
+
+    #[test]
+    fn test_config_from_file_invalid_json() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("invalid.json");
+        fs::write(&config_path, "{ invalid json }").unwrap();
+
+        let result = LinterConfig::from_file(&config_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid JSONC"));
+    }
+
+    #[test]
+    fn test_config_from_file_jsonc_support() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.jsonc");
+        let content = r#"{
+            // Comment
+            "cache": false
+        }"#;
+        fs::write(&config_path, content).unwrap();
+
+        let config = LinterConfig::from_file(&config_path).unwrap();
+        assert!(!config.cache);
+    }
+
+    #[test]
     fn test_enabled_rules_excludes_disabled() {
         let json = r#"{
             "options": {

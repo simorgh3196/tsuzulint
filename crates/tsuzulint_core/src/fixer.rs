@@ -52,12 +52,8 @@ pub fn apply_fixes_to_content(content: &str, diagnostics: &[Diagnostic]) -> Fixe
         return FixerResult::unchanged(content.to_string());
     }
 
-    // Sort by span.start in descending order (apply from end to beginning)
-    let mut sorted_fixes: Vec<&Fix> = fixes;
-    sorted_fixes.sort_by(|a, b| b.span.start.cmp(&a.span.start));
-
-    // Check for overlapping spans
-    let sorted_fixes = filter_overlapping_fixes(sorted_fixes);
+    // Filter and sort fixes
+    let sorted_fixes = filter_overlapping_fixes(fixes);
 
     // Apply fixes
     let mut result = content.to_string();
@@ -92,23 +88,15 @@ pub fn apply_fixes_to_content(content: &str, diagnostics: &[Diagnostic]) -> Fixe
 
 /// Filters out overlapping fixes, keeping the one that starts later.
 ///
-/// **Note:** This function expects `fixes` to be sorted by `start` position in descending order.
-/// If they are not sorted, the filtering logic will be incorrect.
-pub(crate) fn filter_overlapping_fixes(fixes: Vec<&Fix>) -> Vec<&Fix> {
+/// This function sorts the fixes by start position in descending order
+/// before filtering to ensure consistent results.
+pub(crate) fn filter_overlapping_fixes(mut fixes: Vec<&Fix>) -> Vec<&Fix> {
     if fixes.len() <= 1 {
         return fixes;
     }
 
-    // Verify sorted assumption in debug builds
-    #[cfg(debug_assertions)]
-    {
-        for window in fixes.windows(2) {
-            debug_assert!(
-                window[0].span.start >= window[1].span.start,
-                "Fixes must be sorted by start descending for filter_overlapping_fixes"
-            );
-        }
-    }
+    // Sort by span.start in descending order (apply from end to beginning)
+    fixes.sort_by(|a, b| b.span.start.cmp(&a.span.start));
 
     let mut result: Vec<&Fix> = Vec::with_capacity(fixes.len());
 
@@ -432,16 +420,19 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "Fixes must be sorted")]
-    fn filter_overlapping_fixes_panic_unsorted() {
+    fn filter_overlapping_fixes_unsorted() {
         let f1 = Fix::new(Span::new(0, 5), "f1");
         let f2 = Fix::new(Span::new(10, 15), "f2");
 
         // Unsorted (0 then 10)
         let fixes = vec![&f1, &f2];
 
-        let _ = filter_overlapping_fixes(fixes);
+        let result = filter_overlapping_fixes(fixes);
+
+        // Should be sorted to f2 (10), f1 (0) and kept
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].text, "f2");
+        assert_eq!(result[1].text, "f1");
     }
 
     #[test]
