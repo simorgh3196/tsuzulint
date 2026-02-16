@@ -15,7 +15,7 @@ pub struct CacheManager {
     /// Directory where cache files are stored.
     cache_dir: PathBuf,
     /// In-memory cache entries.
-    entries: HashMap<PathBuf, CacheEntry>,
+    entries: HashMap<String, CacheEntry>,
     /// Whether cache is enabled.
     enabled: bool,
 }
@@ -59,7 +59,8 @@ impl CacheManager {
         if !self.enabled {
             return None;
         }
-        self.entries.get(path)
+        let key = path.to_string_lossy().to_string();
+        self.entries.get(&key)
     }
 
     /// Checks if a file's cache is valid.
@@ -81,7 +82,8 @@ impl CacheManager {
             return false;
         }
 
-        match self.entries.get(path) {
+        let key = path.to_string_lossy().to_string();
+        match self.entries.get(&key) {
             Some(entry) => entry.is_valid(content_hash, config_hash, rule_versions),
             None => false,
         }
@@ -118,7 +120,8 @@ impl CacheManager {
             return (reused_diagnostics, matched_mask);
         }
 
-        let cached_entry = match self.entries.get(path) {
+        let key = path.to_string_lossy().to_string();
+        let cached_entry = match self.entries.get(&key) {
             Some(entry) => entry,
             None => return (reused_diagnostics, matched_mask),
         };
@@ -219,13 +222,15 @@ impl CacheManager {
     /// Stores a cache entry for a file.
     pub fn set(&mut self, path: PathBuf, entry: CacheEntry) {
         if self.enabled {
-            self.entries.insert(path, entry);
+            let key = path.to_string_lossy().to_string();
+            self.entries.insert(key, entry);
         }
     }
 
     /// Removes a cache entry.
     pub fn remove(&mut self, path: &Path) {
-        self.entries.remove(path);
+        let key = path.to_string_lossy().to_string();
+        self.entries.remove(&key);
     }
 
     /// Clears all cache entries.
@@ -239,16 +244,17 @@ impl CacheManager {
             return Ok(());
         }
 
-        let cache_file = self.cache_dir.join("cache.json");
+        let cache_file = self.cache_dir.join("cache.rkyv");
 
         if !cache_file.exists() {
             debug!("No cache file found at {}", cache_file.display());
             return Ok(());
         }
 
-        let content = fs::read_to_string(&cache_file)?;
-        let entries: HashMap<PathBuf, CacheEntry> =
-            serde_json::from_str(&content).map_err(|e| CacheError::corrupted(e.to_string()))?;
+        let content = fs::read(&cache_file)?;
+        let entries: HashMap<String, CacheEntry> =
+            rkyv::from_bytes::<_, rkyv::rancor::Error>(&content)
+                .map_err(|e| CacheError::corrupted(e.to_string()))?;
 
         info!("Loaded {} cache entries", entries.len());
         self.entries = entries;
@@ -265,11 +271,11 @@ impl CacheManager {
         // Ensure cache directory exists
         fs::create_dir_all(&self.cache_dir)?;
 
-        let cache_file = self.cache_dir.join("cache.json");
-        let content = serde_json::to_string_pretty(&self.entries)
+        let cache_file = self.cache_dir.join("cache.rkyv");
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&self.entries)
             .map_err(|e| CacheError::Serialization(e.to_string()))?;
 
-        fs::write(&cache_file, content)?;
+        fs::write(&cache_file, bytes)?;
 
         info!(
             "Saved {} cache entries to {}",
