@@ -131,6 +131,18 @@ impl Linter {
         Ok(())
     }
 
+    /// Lints a single file using the shared PluginHost.
+    ///
+    /// For sequential processing or when using the linter's shared PluginHost.
+    #[allow(dead_code)]
+    fn lint_file(&self, path: &Path) -> Result<LintResult, LinterError> {
+        let mut host = self
+            .plugin_host
+            .lock()
+            .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
+        self.lint_file_internal(path, &mut host)
+    }
+
     /// Lints files matching the given patterns.
     ///
     /// Returns a tuple of (successful results, failed files with errors).
@@ -1456,6 +1468,76 @@ mod tests {
         // Should default to text parser
         let result = linter.lint_content("Hello", &PathBuf::from("test.xyz"));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_lint_file_success() {
+        use std::fs;
+
+        let (mut config, temp_dir) = test_config();
+
+        // Enable the rule in config so lint_file runs it (if loaded)
+        config.rules.push(crate::config::RuleDefinition::Simple(
+            "test-rule".to_string(),
+        ));
+        config.options.insert(
+            "test-rule".to_string(),
+            crate::config::RuleOption::Enabled(true),
+        );
+
+        let linter = Linter::new(config).unwrap();
+
+        let mut rule_loaded = false;
+
+        // Build the test rule WASM if available
+        if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
+            // Load the rule dynamically
+            linter
+                .load_rule(&wasm_path)
+                .expect("Failed to load test rule");
+            rule_loaded = true;
+        } else {
+            println!("WASM build failed, running test without rules");
+        }
+
+        // Create a temporary file with content that triggers the rule (if loaded)
+        let file_path = temp_dir.path().join("test_lint_file.md");
+        let content = "This file contains an error keyword.";
+        fs::write(&file_path, content).unwrap();
+
+        // Test lint_file success case
+        let result = linter.lint_file(&file_path);
+
+        assert!(result.is_ok(), "lint_file should return Ok");
+        let lint_result = result.unwrap();
+
+        // Check path
+        assert_eq!(lint_result.path, file_path);
+
+        if rule_loaded {
+            // Check diagnostics
+            // The simple rule triggers on "error"
+            assert_eq!(lint_result.diagnostics.len(), 1, "Should find 1 diagnostic");
+            let diag = &lint_result.diagnostics[0];
+            assert_eq!(diag.rule_id, "test-rule");
+            assert_eq!(diag.message, "Found error keyword");
+        } else {
+            // Without rules, no diagnostics
+            assert!(
+                lint_result.diagnostics.is_empty(),
+                "No rules loaded, should be clean"
+            );
+        }
+
+        // Test with clean file
+        let clean_path = temp_dir.path().join("clean.md");
+        fs::write(&clean_path, "This file is clean.").unwrap();
+
+        let clean_result = linter.lint_file(&clean_path).unwrap();
+        assert!(
+            clean_result.diagnostics.is_empty(),
+            "Clean file should have no diagnostics"
+        );
     }
 
     #[test]

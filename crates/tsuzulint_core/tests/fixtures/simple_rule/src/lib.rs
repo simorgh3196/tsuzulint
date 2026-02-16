@@ -8,8 +8,8 @@ const VERSION: &str = "1.0.0";
 pub fn get_manifest() -> FnResult<String> {
     let manifest = RuleManifest::new(RULE_ID, VERSION)
         .with_description("A simple test rule")
-        .with_fixable(false)
-        .with_node_types(vec!["Str".to_string()]);
+        .with_fixable(false);
+    // Removed with_node_types to allow running on any node (e.g. Document root for global)
     Ok(serde_json::to_string(&manifest)?)
 }
 
