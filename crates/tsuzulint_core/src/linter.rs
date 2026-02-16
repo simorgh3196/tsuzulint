@@ -498,11 +498,8 @@ impl Linter {
         value: &T,
         label: &str,
     ) -> Result<Box<serde_json::value::RawValue>, LinterError> {
-        let json = serde_json::to_string(value)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize {}: {}", label, e)))?;
-        serde_json::value::RawValue::from_string(json).map_err(|e| {
-            LinterError::Internal(format!("Failed to create RawValue for {}: {}", label, e))
-        })
+        serde_json::value::to_raw_value(value)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize {}: {}", label, e)))
     }
 
     /// Internal implementation for linting a single file.
@@ -709,8 +706,8 @@ impl Linter {
             global_keys.insert((
                 d.span.start,
                 d.span.end,
-                d.message.clone(),
-                d.rule_id.clone(),
+                d.message.as_str(),
+                d.rule_id.as_str(),
             ));
         }
 
@@ -729,36 +726,10 @@ impl Linter {
         // Update cache
         // We need to associate diagnostics with blocks for NEXT time.
         // We ensure we ONLY store diagnostics that belong to the block and are NOT global.
-
-        let new_blocks: Vec<BlockCacheEntry> = current_blocks
-            .into_iter()
-            .map(|mut block| {
-                // Filter diagnostics that fall within this block's span
-                let block_diags: Vec<_> = final_diagnostics
-                    .iter()
-                    .filter(|d| {
-                        // Check strict inclusion
-                        let in_block =
-                            d.span.start >= block.span.start && d.span.end <= block.span.end;
-                        if !in_block {
-                            return false;
-                        }
-
-                        // Check if it's a global diagnostic
-                        let key = (
-                            d.span.start,
-                            d.span.end,
-                            d.message.clone(),
-                            d.rule_id.clone(),
-                        );
-                        !global_keys.contains(&key)
-                    })
-                    .cloned()
-                    .collect();
-                block.diagnostics = block_diags;
-                block
-            })
-            .collect();
+        // Use optimized distribution algorithm: O(B+D) + sort O(B log B + D log D)
+        // instead of O(B*D). See [Self::distribute_diagnostics] docstring for details.
+        let new_blocks =
+            Self::distribute_diagnostics(current_blocks, &final_diagnostics, &global_keys);
 
         {
             let mut cache = self
@@ -871,6 +842,84 @@ impl Linter {
         collector.ranges
     }
 
+    /// Distributes diagnostics to blocks efficiently using a sorted cursor approach.
+    ///
+    /// This optimization reduces complexity from O(Blocks * Diagnostics) to O(Blocks + Diagnostics)
+    /// (plus sorting cost O(B log B + D log D)), which is significant for large files with many blocks.
+    fn distribute_diagnostics<'a>(
+        mut blocks: Vec<BlockCacheEntry>,
+        diagnostics: &[tsuzulint_plugin::Diagnostic],
+        global_keys: &HashSet<(u32, u32, &'a str, &'a str)>,
+    ) -> Vec<BlockCacheEntry> {
+        // Ensure blocks are sorted by start position for the sweep-line algorithm to work correctly
+        blocks.sort_by_key(|b| b.span.start);
+
+        // 1. Filter out global diagnostics and create a list of references we can sort
+        // We use references to avoid cloning diagnostics during the sort/scan phase
+        let mut local_diagnostics: Vec<&tsuzulint_plugin::Diagnostic> = diagnostics
+            .iter()
+            .filter(|d| {
+                let key = (
+                    d.span.start,
+                    d.span.end,
+                    d.message.as_str(),
+                    d.rule_id.as_str(),
+                );
+                !global_keys.contains(&key)
+            })
+            .collect();
+
+        // 2. Sort diagnostics by start position
+        // This allows us to scan through them linearly as we iterate through blocks
+        local_diagnostics.sort_by_key(|d| d.span.start);
+
+        let mut diag_idx = 0;
+
+        blocks
+            .into_iter()
+            .map(|mut block| {
+                // Advance cursor past diagnostics that start strictly before this block
+                // Since blocks are sorted by start position (from AST traversal),
+                // and we've processed previous blocks, any diagnostic starting before
+                // the current block's start is either:
+                // a) Already assigned to a previous block
+                // b) Not contained in any block (e.g. spans across blocks or starts before first block)
+                // In either case, we can safely skip it for the current block.
+                while diag_idx < local_diagnostics.len()
+                    && local_diagnostics[diag_idx].span.start < block.span.start
+                {
+                    diag_idx += 1;
+                }
+
+                let mut block_diags = Vec::new();
+                let mut temp_idx = diag_idx;
+
+                // Scan forward from cursor looking for contained diagnostics
+                while temp_idx < local_diagnostics.len() {
+                    let diag = local_diagnostics[temp_idx];
+
+                    // Optimization: if diagnostic starts after block ends, it can't be in this block.
+                    // And since diagnostics are sorted, no subsequent diagnostic can be either.
+                    if diag.span.start >= block.span.end {
+                        break;
+                    }
+
+                    // Check strict inclusion:
+                    // start >= block.start is guaranteed by the cursor logic.
+                    // We only need to check end <= block.end.
+                    if diag.span.end <= block.span.end {
+                        block_diags.push(diag.clone());
+                    }
+
+                    temp_idx += 1;
+                }
+
+                block.diagnostics = block_diags;
+                block
+            })
+            .collect()
+    }
+
     /// Gets rule names filtered by isolation level.
     fn get_rule_names_by_isolation(
         &self,
@@ -913,38 +962,21 @@ impl Linter {
 
         // Convert AST to JSON for plugin system
         // Serialize to string + RawValue to avoid serialization overhead in rules
-        let ast_json = serde_json::to_string(&ast)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize AST: {}", e)))?;
-        let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
-            LinterError::Internal(format!("Failed to create RawValue for AST: {}", e))
-        })?;
+        let ast_raw = Self::to_raw_value(&ast, "AST")?;
+        let source_raw = Self::to_raw_value(&content, "content")?;
 
-        // Pre-serialize source
-        let source_json = serde_json::to_string(&content)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize content: {}", e)))?;
-        let source_raw = serde_json::value::RawValue::from_string(source_json).map_err(|e| {
-            LinterError::Internal(format!("Failed to create RawValue for content: {}", e))
-        })?;
+        // Extract ignore ranges (CodeBlock and Code)
+        let ignore_ranges = self.extract_ignore_ranges(&ast);
 
         // Tokenize content
         let tokens = self
             .tokenizer
             .tokenize(content)
             .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
-        let sentences = SentenceSplitter::split(content, &[]);
+        let sentences = SentenceSplitter::split(content, &ignore_ranges);
 
-        let tokens_json = serde_json::to_string(&tokens)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize tokens: {}", e)))?;
-        let tokens_raw = serde_json::value::RawValue::from_string(tokens_json).map_err(|e| {
-            LinterError::Internal(format!("Failed to create RawValue for tokens: {}", e))
-        })?;
-
-        let sentences_json = serde_json::to_string(&sentences)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize sentences: {}", e)))?;
-        let sentences_raw =
-            serde_json::value::RawValue::from_string(sentences_json).map_err(|e| {
-                LinterError::Internal(format!("Failed to create RawValue for sentences: {}", e))
-            })?;
+        let tokens_raw = Self::to_raw_value(&tokens, "tokens")?;
+        let sentences_raw = Self::to_raw_value(&sentences, "sentences")?;
 
         // Run rules
         let diagnostics = {
@@ -1894,5 +1926,125 @@ mod tests {
 
         let inline_text = &content[inline.clone()];
         assert_eq!(inline_text, "`code.`", "Second range should be inline code");
+    }
+
+    #[test]
+    fn test_distribute_diagnostics() {
+        use tsuzulint_ast::Span;
+        use tsuzulint_plugin::Diagnostic;
+
+        let global_keys = HashSet::new();
+
+        // Create 2 disjoint blocks
+        let block1 = BlockCacheEntry {
+            hash: "b1".to_string(),
+            span: Span::new(10, 20),
+            diagnostics: vec![],
+        };
+        let block2 = BlockCacheEntry {
+            hash: "b2".to_string(),
+            span: Span::new(30, 40),
+            diagnostics: vec![],
+        };
+        let blocks = vec![block1, block2];
+
+        // Create diagnostics
+        let diag1 = Diagnostic {
+            rule_id: "rule1".to_string(),
+            message: "msg1".to_string(),
+            span: Span::new(12, 15), // Inside b1
+            severity: tsuzulint_plugin::Severity::Error,
+            fix: None,
+            loc: None,
+        };
+        let diag2 = Diagnostic {
+            rule_id: "rule2".to_string(),
+            message: "msg2".to_string(),
+            span: Span::new(32, 35), // Inside b2
+            severity: tsuzulint_plugin::Severity::Error,
+            fix: None,
+            loc: None,
+        };
+        let diag_outside = Diagnostic {
+            rule_id: "rule3".to_string(),
+            message: "msg3".to_string(),
+            span: Span::new(0, 5), // Before blocks
+            severity: tsuzulint_plugin::Severity::Error,
+            fix: None,
+            loc: None,
+        };
+        let diag_overlap = Diagnostic {
+            rule_id: "rule4".to_string(),
+            message: "msg4".to_string(),
+            span: Span::new(15, 25), // Overlaps b1 (15-20) but ends outside
+            severity: tsuzulint_plugin::Severity::Error,
+            fix: None,
+            loc: None,
+        };
+
+        // Note: Diagnostics can be unsorted initially
+        let diagnostics = vec![diag2.clone(), diag1.clone(), diag_outside, diag_overlap];
+
+        let result = Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys);
+
+        assert_eq!(result.len(), 2);
+
+        // Block 1 should contain diag1
+        assert_eq!(result[0].diagnostics.len(), 1);
+        assert_eq!(result[0].diagnostics[0].rule_id, "rule1");
+
+        // Block 2 should contain diag2
+        assert_eq!(result[1].diagnostics.len(), 1);
+        assert_eq!(result[1].diagnostics[0].rule_id, "rule2");
+
+        // Case 2: Filter global diagnostics
+        let mut global_keys_filtered = HashSet::new();
+        // Mark diag1 as global
+        global_keys_filtered.insert((
+            diag1.span.start,
+            diag1.span.end,
+            diag1.message.as_str(),
+            diag1.rule_id.as_str(),
+        ));
+
+        let result_filtered =
+            Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys_filtered);
+
+        // Block 1 should NOT contain diag1 anymore (filtered out)
+        assert!(result_filtered[0].diagnostics.is_empty());
+
+        // Block 2 should still contain diag2
+        assert_eq!(result_filtered[1].diagnostics.len(), 1);
+        assert_eq!(result_filtered[1].diagnostics[0].rule_id, "rule2");
+
+        // Case 3: Boundary condition – diagnostic at exact block boundary (half-open interval)
+        let block_boundary = BlockCacheEntry {
+            hash: "bb".to_string(),
+            span: Span::new(10, 20),
+            diagnostics: vec![],
+        };
+        let diag_at_end = Diagnostic {
+            rule_id: "rule_boundary".to_string(),
+            message: "at_end".to_string(),
+            span: Span::new(20, 25), // starts exactly at block.end
+            severity: tsuzulint_plugin::Severity::Error,
+            fix: None,
+            loc: None,
+        };
+        let diag_zero_at_end = Diagnostic {
+            rule_id: "rule_zero".to_string(),
+            message: "zero_at_end".to_string(),
+            span: Span::new(20, 20), // zero-length at block.end
+            severity: tsuzulint_plugin::Severity::Error,
+            fix: None,
+            loc: None,
+        };
+        let result_boundary = Linter::distribute_diagnostics(
+            vec![block_boundary],
+            &[diag_at_end, diag_zero_at_end],
+            &HashSet::new(),
+        );
+        // Neither diagnostic should be assigned (half-open: block.end is exclusive)
+        assert!(result_boundary[0].diagnostics.is_empty());
     }
 }
