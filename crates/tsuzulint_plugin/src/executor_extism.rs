@@ -52,7 +52,15 @@ impl RuleExecutor for ExtismExecutor {
 
         // Create the plugin manifest from bytes
         let wasm = Wasm::data(wasm_bytes.to_vec());
-        let manifest = Manifest::new([wasm]);
+        let mut manifest = Manifest::new([wasm]);
+
+        // Configure resource limits (Defense in Depth)
+        // 128 MB memory limit (2048 pages * 64KB)
+        manifest.memory.max_pages = Some(2048);
+        // 5000ms execution timeout
+        manifest.timeout_ms = Some(5000);
+        // Deny all network access
+        manifest.allowed_hosts = Some(vec![]);
 
         // Create the plugin with WASI support
         let mut plugin = Plugin::new(&manifest, [], true)
@@ -91,7 +99,15 @@ impl RuleExecutor for ExtismExecutor {
 
         // Create the plugin manifest from file
         let wasm = Wasm::file(path);
-        let manifest = Manifest::new([wasm]);
+        let mut manifest = Manifest::new([wasm]);
+
+        // Configure resource limits (Defense in Depth)
+        // 128 MB memory limit (2048 pages * 64KB)
+        manifest.memory.max_pages = Some(2048);
+        // 5000ms execution timeout
+        manifest.timeout_ms = Some(5000);
+        // Deny all network access
+        manifest.allowed_hosts = Some(vec![]);
 
         // Create the plugin with WASI support
         let mut plugin = Plugin::new(&manifest, [], true)
