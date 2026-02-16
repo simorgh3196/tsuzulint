@@ -1,8 +1,9 @@
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", feature = "test-utils"))]
 mod native_tests {
     use tsuzulint_plugin::{PluginHost, test_utils::wat_to_wasm};
 
     #[test]
+    #[cfg(feature = "test-utils")]
     fn test_plugin_host_memory_limit_breach() {
         let mut host = PluginHost::new();
 

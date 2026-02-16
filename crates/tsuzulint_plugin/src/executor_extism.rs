@@ -50,7 +50,7 @@ impl ExtismExecutor {
     }
 
     /// Sets the timeout for WASM execution.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "test-utils"))]
     pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = timeout_ms;
         self
@@ -167,6 +167,7 @@ impl RuleExecutor for ExtismExecutor {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "test-utils")]
     use crate::test_utils::wat_to_wasm;
 
     use super::*;
@@ -185,6 +186,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-utils")]
     fn test_executor_memory_limit() {
         let mut executor = ExtismExecutor::new();
 
@@ -220,6 +222,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "test-utils")]
     fn test_executor_infinite_loop() {
         // Use a short timeout for testing (200ms instead of 5s)
         let mut executor = ExtismExecutor::new().with_timeout(200);
