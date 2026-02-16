@@ -33,6 +33,7 @@ TODO.md
 .opencode/
 .windsurf/
 .firecrawl/
+.jules/
 
 # Cache directories
 .tsuzulint-cache/
