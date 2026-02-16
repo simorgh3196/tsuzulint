@@ -4573,7 +4573,7 @@ name = "tsuzulint_text"
 version = "0.1.0"
 dependencies = [
  "lindera",
- "serde",
+ "miette",
  "thiserror 2.0.18",
 ]
 

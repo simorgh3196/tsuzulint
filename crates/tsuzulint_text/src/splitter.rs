@@ -27,10 +27,9 @@ impl SentenceSplitter {
         sorted_ignore.sort_by_key(|r| r.start);
 
         while let Some((idx, c)) = chars.next() {
-            // Check if current char is inside an ignored range
-            let is_ignored = sorted_ignore
-                .iter()
-                .any(|range| idx >= range.start && idx < range.end);
+            // Check if current char is inside an ignored range (binary search on sorted ranges)
+            let pos = sorted_ignore.partition_point(|r| r.end <= idx);
+            let is_ignored = pos < sorted_ignore.len() && sorted_ignore[pos].start <= idx;
 
             if is_ignored {
                 continue;
@@ -40,25 +39,29 @@ impl SentenceSplitter {
             // - Split on `。`, `!`, `?`
             // - Split on double newline `\n\n` (paragraph break)
             // - Handle "." only if followed by space? (For English mixed in) - Keep simple for now.
-            let is_sentence_end = match c {
-                '。' | '！' | '？' | '!' | '?' | '.' => true,
+            // Note: Single punctuation marks are treated as valid sentences to respect user intent.
+            let (is_sentence_end, extra_len) = match c {
+                '。' | '！' | '？' | '!' | '?' | '.' => (true, 0),
                 '\n' => {
                     // Check for double newline
                     if let Some((_, next_c)) = chars.peek() {
-                        *next_c == '\n'
+                        if *next_c == '\n' {
+                            // Consume the second newline to include it in the current separator
+                            chars.next();
+                            (true, 1)
+                        } else {
+                            (false, 0)
+                        }
                     } else {
-                        false
+                        (false, 0)
                     }
                 }
-                _ => false,
+                _ => (false, 0),
             };
 
             if is_sentence_end {
                 // Include the punctuation in the sentence
-                let end = idx + c.len_utf8();
-
-                // If it was a double newline, we might want to exclude the second newline from this sentence
-                // But for simplicity, let's just use the current position.
+                let end = idx + c.len_utf8() + extra_len;
 
                 let sentence_text = text[start..end].to_string();
                 // Avoid empty sentences (e.g., consecutive punctuation)
@@ -178,7 +181,7 @@ mod tests {
         assert_eq!(sentences.len(), 3);
         assert_eq!(sentences[0].text, "Line1.");
         assert_eq!(sentences[1].text, "\nLine2."); // newline is part of this sentence start
-        assert_eq!(sentences[2].text, "\nParagraph2.");
+        assert_eq!(sentences[2].text, "Paragraph2.");
     }
 
     #[test]
@@ -188,5 +191,17 @@ mod tests {
         let sentences = SentenceSplitter::split(text, &[ignore_range]);
         assert_eq!(sentences.len(), 1);
         assert_eq!(sentences[0].text, "A. B.");
+    }
+
+    #[test]
+    fn test_split_double_newline_behavior() {
+        let text = "A\n\nB";
+        let sentences = SentenceSplitter::split(text, &[]);
+        // Current behavior (before fix): "A\n", "\nB" (or "A\n" and "B" if \n is trimmed?)
+        // Desired behavior: "A\n\n", "B"
+
+        assert_eq!(sentences.len(), 2);
+        assert_eq!(sentences[0].text, "A\n\n");
+        assert_eq!(sentences[1].text, "B");
     }
 }

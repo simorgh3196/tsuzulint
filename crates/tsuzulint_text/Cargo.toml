@@ -13,4 +13,5 @@ lindera = { version = "2.2.0", features = ["embed-ipadic"] }
 
 # Utilities
 thiserror = { workspace = true }
-serde = { workspace = true }
+
+miette = { workspace = true, features = ["fancy"] }

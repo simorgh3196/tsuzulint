@@ -5,7 +5,7 @@ use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::tokenizer::Tokenizer as LinderaTokenizer;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic)]
 pub enum TextError {
     #[error("Tokenizer error: {0}")]
     Tokenizer(String),
@@ -27,6 +27,12 @@ pub struct Token {
 /// Tokenizer for Japanese text using Lindera.
 pub struct Tokenizer {
     inner: LinderaTokenizer,
+}
+
+impl std::fmt::Debug for Tokenizer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tokenizer").finish_non_exhaustive()
+    }
 }
 
 impl Tokenizer {
@@ -57,33 +63,21 @@ impl Tokenizer {
 
         for mut lindera_token in lindera_tokens {
             let surface = lindera_token.surface.as_ref().to_string();
-            let details: Vec<String> = lindera_token
-                .details()
+            let details = lindera_token.details();
+
+            let pos: Vec<String> = details
                 .iter()
+                .take(4)
+                .filter(|s| **s != "*")
                 .map(|s| s.to_string())
                 .collect();
 
-            let pos: Vec<String> = if !details.is_empty() {
-                details
-                    .iter()
-                    .take(4)
-                    .filter(|s| **s != "*")
-                    .map(|s| s.to_string())
-                    .collect()
-            } else {
-                Vec::new()
-            };
-
-            let detail: Vec<String> = if details.len() > 4 {
-                details
-                    .iter()
-                    .skip(4)
-                    .filter(|s| **s != "*")
-                    .map(|s| s.to_string())
-                    .collect()
-            } else {
-                Vec::new()
-            };
+            let detail: Vec<String> = details
+                .iter()
+                .skip(4)
+                .filter(|s| **s != "*")
+                .map(|s| s.to_string())
+                .collect();
 
             let span = lindera_token.byte_start..lindera_token.byte_end;
 
