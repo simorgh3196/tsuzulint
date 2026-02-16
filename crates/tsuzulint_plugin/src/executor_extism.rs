@@ -36,6 +36,8 @@ struct LoadedRule {
 pub struct ExtismExecutor {
     /// Loaded rules by name.
     rules: HashMap<String, LoadedRule>,
+    /// Timeout for WASM execution in milliseconds.
+    timeout_ms: u64,
 }
 
 impl ExtismExecutor {
@@ -43,13 +45,21 @@ impl ExtismExecutor {
     pub fn new() -> Self {
         Self {
             rules: HashMap::new(),
+            timeout_ms: DEFAULT_TIMEOUT_MS,
         }
     }
 
+    /// Sets the timeout for WASM execution.
+    #[cfg(test)]
+    pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = timeout_ms;
+        self
+    }
+
     /// Configures the manifest with security limits.
-    fn configure_manifest(mut manifest: Manifest) -> Manifest {
+    fn configure_manifest(&self, mut manifest: Manifest) -> Manifest {
         // Set execution timeout to prevent infinite loops
-        manifest.timeout_ms = Some(DEFAULT_TIMEOUT_MS);
+        manifest.timeout_ms = Some(self.timeout_ms);
 
         // Set memory limits to prevent DoS via memory exhaustion
         manifest.memory = extism_manifest::MemoryOptions {
@@ -63,22 +73,10 @@ impl ExtismExecutor {
 
         manifest
     }
-}
 
-impl Default for ExtismExecutor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl RuleExecutor for ExtismExecutor {
-    fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
-        info!("Loading WASM rule ({} bytes)", wasm_bytes.len());
-
-        // Create the plugin manifest from bytes
-        let wasm = Wasm::data(wasm_bytes.to_vec());
-        let manifest = Manifest::new([wasm]);
-        let manifest = Self::configure_manifest(manifest);
+    /// Loads a plugin from a raw manifest.
+    fn load_from_manifest(&mut self, manifest: Manifest) -> Result<LoadResult, PluginError> {
+        let manifest = self.configure_manifest(manifest);
 
         // Create the plugin with WASI support
         let mut plugin = Plugin::new(&manifest, [], true)
@@ -111,6 +109,24 @@ impl RuleExecutor for ExtismExecutor {
             manifest: rule_manifest,
         })
     }
+}
+
+impl Default for ExtismExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RuleExecutor for ExtismExecutor {
+    fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
+        info!("Loading WASM rule ({} bytes)", wasm_bytes.len());
+
+        // Create the plugin manifest from bytes
+        let wasm = Wasm::data(wasm_bytes.to_vec());
+        let manifest = Manifest::new([wasm]);
+
+        self.load_from_manifest(manifest)
+    }
 
     fn load_file(&mut self, path: &Path) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
@@ -118,38 +134,8 @@ impl RuleExecutor for ExtismExecutor {
         // Create the plugin manifest from file
         let wasm = Wasm::file(path);
         let manifest = Manifest::new([wasm]);
-        let manifest = Self::configure_manifest(manifest);
 
-        // Create the plugin with WASI support
-        let mut plugin = Plugin::new(&manifest, [], true)
-            .map_err(|e| PluginError::load(format!("Failed to create plugin: {}", e)))?;
-
-        // Get the rule manifest
-        let manifest_json: String = plugin
-            .call("get_manifest", "")
-            .map_err(|e| PluginError::call(format!("Failed to get manifest: {}", e)))?;
-
-        let rule_manifest: RuleManifest = serde_json::from_str(&manifest_json)
-            .map_err(|e| PluginError::invalid_manifest(e.to_string()))?;
-
-        debug!(
-            "Loaded rule: {} v{}",
-            rule_manifest.name, rule_manifest.version
-        );
-
-        let name = rule_manifest.name.clone();
-        self.rules.insert(
-            name.clone(),
-            LoadedRule {
-                plugin,
-                manifest: rule_manifest.clone(),
-            },
-        );
-
-        Ok(LoadResult {
-            name,
-            manifest: rule_manifest,
-        })
+        self.load_from_manifest(manifest)
     }
 
     fn call_lint(&mut self, rule_name: &str, input_json: &str) -> Result<String, PluginError> {
@@ -188,36 +174,6 @@ mod tests {
         wat::parse_str(wat_source).expect("Invalid WAT")
     }
 
-    /// Helper to create a basic valid rule in WAT (Extism ABI)
-    #[allow(dead_code)]
-    fn valid_rule_wat() -> String {
-        let json = r#"{"name":"test-rule","version":"1.0.0","description":"Test rule"}"#;
-        let len = json.len();
-        format!(
-            r#"
-            (module
-                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
-                (memory (export "memory") 1)
-
-                (func (export "get_manifest") (result i32)
-                    (call $output_set (i64.const 0) (i64.const {}))
-                    (i32.const 0)
-                )
-
-                (func (export "lint") (result i32)
-                    (call $output_set (i64.const 100) (i64.const 2))
-                    (i32.const 0)
-                )
-
-                (data (i32.const 0) "{}")
-                (data (i32.const 100) "[]")
-            )
-            "#,
-            len,
-            json.replace("\"", "\\\"")
-        )
-    }
-
     #[test]
     fn test_executor_new() {
         let executor = ExtismExecutor::new();
@@ -230,22 +186,6 @@ mod tests {
         let result = executor.call_lint("nonexistent", "{}");
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
-
-    // Commented out due to ABI mismatch with Extism runtime in manual WAT
-    // #[test]
-    // fn test_executor_load_valid_rule() {
-    //     let mut executor = ExtismExecutor::new();
-    //     let wasm = wat_to_wasm(&valid_rule_wat());
-
-    //     let result = executor.load(&wasm);
-    //     if let Err(e) = &result {
-    //         println!("Load failed: {}", e);
-    //     }
-    //     assert!(result.is_ok());
-
-    //     let loaded = result.unwrap();
-    //     assert_eq!(loaded.name, "test-rule");
-    // }
 
     #[test]
     fn test_executor_memory_limit() {
@@ -271,12 +211,12 @@ mod tests {
         // Debug output to see actual error
         println!("Memory limit error: {}", err_msg);
 
+        // Check for specific error related to memory limit
+        // The error message depends on the runtime but should contain "memory", "limit" or "oom"
         assert!(
-            err_msg.contains("memory")
-                || err_msg.contains("Memory")
-                || err_msg.contains("resource")
-                || err_msg.contains("limit")
-                || err_msg.contains("oom"),
+            err_msg.to_lowercase().contains("memory")
+                || err_msg.to_lowercase().contains("limit")
+                || err_msg.to_lowercase().contains("oom"),
             "Unexpected error message: {}",
             err_msg
         );
@@ -284,7 +224,8 @@ mod tests {
 
     #[test]
     fn test_executor_infinite_loop() {
-        let mut executor = ExtismExecutor::new();
+        // Use a short timeout for testing (200ms instead of 5s)
+        let mut executor = ExtismExecutor::new().with_timeout(200);
 
         // Infinite loop rule (Extism ABI)
         // We put the loop in get_manifest so load() fails with timeout
