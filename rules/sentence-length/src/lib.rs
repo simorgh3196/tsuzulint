@@ -83,7 +83,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?);
+        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
     }
 
     // Parse configuration
@@ -111,7 +111,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
         }
     }
 
-    Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?)
+    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
 }
 
 #[cfg(test)]
@@ -133,7 +133,7 @@ mod tests {
             "file_path": null
         });
 
-        let output = lint_impl(rmp_serde::to_vec(&request).unwrap()).unwrap();
+        let output = lint_impl(rmp_serde::to_vec_named(&request).unwrap()).unwrap();
         let response: LintResponse = rmp_serde::from_slice(&output).unwrap();
 
         // "Short sentence." is 15 chars (fine)

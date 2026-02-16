@@ -226,7 +226,7 @@ impl PluginHost {
     ///
     /// * `name` - Rule name
     /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
-    /// * `source` - The source text (serialized as Msgpack string)
+    /// * `source` - The source text (serialized as JSON string)
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -294,7 +294,7 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
-    /// * `source` - The source text (serialized as Msgpack string)
+    /// * `source` - The source text (serialized as JSON string)
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -391,5 +391,49 @@ mod tests {
         let mut host = PluginHost::new();
         let result = host.configure_rule("nonexistent", serde_json::json!({}));
         assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    fn test_serialization_compat_with_pdk() {
+        // This test simulates the serialization of LintRequest in the host
+        // and deserialization in the PDK (using a mock struct that matches PDK).
+
+        use serde::Deserialize;
+
+        // Mock of the PDK's LintRequest struct
+        #[derive(Debug, Clone, Deserialize)]
+        struct PdkLintRequest {
+            pub node: serde_json::Value,
+            pub config: serde_json::Value,
+            pub source: String,
+            pub file_path: Option<String>,
+            #[serde(default)]
+            pub helpers: Option<serde_json::Value>,
+        }
+
+        let node_data = serde_json::json!({"type": "Doc", "children": []});
+        let config = serde_json::json!({"option": "value"});
+        let source = "test content".to_string();
+        let file_path = Some("test.md");
+
+        // Host side
+        let host_request = LintRequest {
+            node: &node_data,
+            config: config.clone(),
+            source: source.clone(),
+            file_path: file_path,
+        };
+
+        // Serialize using rmp_serde (as done in host)
+        let bytes = rmp_serde::to_vec_named(&host_request).expect("Serialization failed");
+
+        // Guest side (deserialize using rmp_serde)
+        let guest_request: PdkLintRequest = rmp_serde::from_slice(&bytes).expect("Deserialization failed");
+
+        // Verify content
+        assert_eq!(guest_request.source, source);
+        assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
+        assert_eq!(guest_request.config, config);
+        assert_eq!(guest_request.node, node_data);
     }
 }

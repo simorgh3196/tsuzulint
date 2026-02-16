@@ -204,7 +204,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?);
+        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
     }
 
     // Parse configuration
@@ -222,7 +222,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
         diagnostics = check_doubled_particles(&particle_matches, &config, text);
     }
 
-    Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?)
+    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
 }
 
 #[cfg(test)]

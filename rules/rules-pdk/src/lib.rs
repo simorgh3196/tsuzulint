@@ -983,7 +983,7 @@ mod tests {
         let response = LintResponse {
             diagnostics: vec![Diagnostic::new("test", "msg", Span::new(0, 1))],
         };
-        let bytes = rmp_serde::to_vec(&response).unwrap();
+        let bytes = rmp_serde::to_vec_named(&response).unwrap();
         let decoded: LintResponse = rmp_serde::from_slice(&bytes).unwrap();
         assert_eq!(decoded.diagnostics.len(), 1);
         assert_eq!(decoded.diagnostics[0].rule_id, "test");

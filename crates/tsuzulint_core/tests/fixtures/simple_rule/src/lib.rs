@@ -29,5 +29,5 @@ pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
         }
     }
 
-    Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?)
+    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
 }
