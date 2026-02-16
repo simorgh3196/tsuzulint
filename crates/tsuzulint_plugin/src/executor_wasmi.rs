@@ -607,7 +607,7 @@ mod tests {
                 )
                 (data (i32.const 0) "{}")
                 ;; Invalid UTF-8 sequence at offset 100
-                (data (i32.const 100) "\xff\xfe")
+                (data (i32.const 100) "\ff\fe")
             )
             "#,
             len,

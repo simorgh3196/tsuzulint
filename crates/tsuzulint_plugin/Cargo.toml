@@ -21,7 +21,7 @@ tracing = { workspace = true }
 
 # Native environment (high performance with JIT)
 extism = { workspace = true, optional = true }
-extism-manifest = { version = "1.13.0", optional = true }
+extism-manifest = { workspace = true, optional = true }
 
 # Browser/WASM environment (pure Rust interpreter)
 wasmi = { workspace = true, optional = true }

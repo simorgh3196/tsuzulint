@@ -58,6 +58,9 @@ impl ExtismExecutor {
             max_var_bytes: None,
         };
 
+        // Deny all network access
+        manifest.allowed_hosts = Some(vec![]);
+
         manifest
     }
 }
