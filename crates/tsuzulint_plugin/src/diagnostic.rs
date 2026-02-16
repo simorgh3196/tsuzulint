@@ -5,7 +5,10 @@ use tsuzulint_ast::{Location, Span};
 
 /// Severity level for diagnostics.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 // #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -20,7 +23,10 @@ pub enum Severity {
 
 /// A diagnostic message from a lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 // #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 pub struct Diagnostic {
     /// The rule that generated this diagnostic.
@@ -79,7 +85,10 @@ impl Diagnostic {
 
 /// An auto-fix for a diagnostic.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 // #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 pub struct Fix {
     /// The byte span to replace.
