@@ -71,28 +71,9 @@ impl CacheEntry {
         config_hash: &str,
         rule_versions: &HashMap<String, String>,
     ) -> bool {
-        // Check content hash
-        if self.content_hash != content_hash {
-            return false;
-        }
-
-        // Check config hash
-        if self.config_hash != config_hash {
-            return false;
-        }
-
-        // Check rule versions
-        if self.rule_versions.len() != rule_versions.len() {
-            return false;
-        }
-
-        for (name, version) in &self.rule_versions {
-            if rule_versions.get(name) != Some(version) {
-                return false;
-            }
-        }
-
-        true
+        self.content_hash == content_hash
+            && self.config_hash == config_hash
+            && self.rule_versions == *rule_versions
     }
 }
 

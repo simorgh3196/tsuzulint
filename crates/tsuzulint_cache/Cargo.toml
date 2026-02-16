@@ -7,6 +7,11 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Caching layer for TsuzuLint"
 
+[features]
+default = ["native"]
+native = ["tsuzulint_plugin/native"]
+browser = ["tsuzulint_plugin/browser"]
+
 [dependencies]
 tsuzulint_plugin = { workspace = true }
 tsuzulint_ast = { workspace = true }
