@@ -17,6 +17,11 @@ impl SentenceSplitter {
     ///
     /// The `ignore_ranges` argument specifies byte ranges that should be treated as opaque blocks.
     /// No sentence boundary will be created inside these ranges.
+    ///
+    /// Note on newlines:
+    /// - `\n\n` (double newline) is treated as a paragraph break and splits sentences.
+    /// - Single `\n` is NOT treated as a sentence boundary and is retained as part of the text
+    ///   to preserve the exact span and content.
     pub fn split(text: &str, ignore_ranges: &[Range<usize>]) -> Vec<Sentence> {
         let mut sentences = Vec::new();
         let mut start = 0;
@@ -41,7 +46,20 @@ impl SentenceSplitter {
             // - Handle "." only if followed by space? (For English mixed in) - Keep simple for now.
             // Note: Single punctuation marks are treated as valid sentences to respect user intent.
             let (is_sentence_end, extra_len) = match c {
-                '。' | '！' | '？' | '!' | '?' | '.' => (true, 0),
+                '。' | '！' | '？' | '!' | '?' => (true, 0),
+                '.' => {
+                    // Start simple heuristic: only split on '.' if followed by whitespace or end of text.
+                    // This prevents splitting on "3.14", "example.com", "ver.1.0" etc.
+                    if let Some((_, next_c)) = chars.peek() {
+                        if next_c.is_whitespace() {
+                            (true, 0)
+                        } else {
+                            (false, 0)
+                        }
+                    } else {
+                        (true, 0) // End of text
+                    }
+                }
                 '\n' => {
                     // Check for double newline
                     if let Some((_, next_c)) = chars.peek() {
@@ -190,5 +208,38 @@ mod tests {
         assert_eq!(sentences.len(), 2);
         assert_eq!(sentences[0].text, "A\n\n");
         assert_eq!(sentences[1].text, "B");
+    }
+
+    #[test]
+    fn test_split_english_mixed() {
+        let text = "This is ver.1.0. Please visit example.com.";
+        let sentences = SentenceSplitter::split(text, &[]);
+        // Should split at first "ver.1.0. " (because of trailing space) and last "."
+        // "ver.1.0" -> '.' followed by '0' -> no split
+        // "1.0." -> '.' followed by space -> split
+        // "example.com." -> '.' followed by EOF -> split
+
+        assert_eq!(sentences.len(), 2);
+        assert_eq!(sentences[0].text, "This is ver.1.0.");
+        assert_eq!(sentences[1].text, " Please visit example.com.");
+    }
+
+    #[test]
+    fn test_split_english_abbreviations() {
+        let text = "e.g. example vs. sample";
+        let sentences = SentenceSplitter::split(text, &[]);
+        // "e.g. " -> split
+        // "example vs. " -> split
+        // "sample" -> remainder
+
+        // Current heuristic splits on "e.g. " twice?
+        // "e." -> followed by 'g' -> no split
+        // "g. " -> followed by space -> split "e.g. "
+        // "vs. " -> followed by space -> split "example vs. "
+
+        assert_eq!(sentences.len(), 3);
+        assert_eq!(sentences[0].text, "e.g.");
+        assert_eq!(sentences[1].text, " example vs.");
+        assert_eq!(sentences[2].text, " sample");
     }
 }
