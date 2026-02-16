@@ -138,18 +138,18 @@ impl RuleExecutor for ExtismExecutor {
         self.load_from_manifest(manifest)
     }
 
-    fn call_lint(&mut self, rule_name: &str, input_json: &str) -> Result<String, PluginError> {
+    fn call_lint(&mut self, rule_name: &str, input_bytes: &[u8]) -> Result<Vec<u8>, PluginError> {
         let rule = self
             .rules
             .get_mut(rule_name)
             .ok_or_else(|| PluginError::not_found(rule_name))?;
 
-        let response_json: String = rule
+        let response_bytes = rule
             .plugin
-            .call("lint", input_json)
+            .call::<&[u8], &[u8]>("lint", input_bytes)
             .map_err(|e| PluginError::call(format!("Rule '{}' failed: {}", rule_name, e)))?;
 
-        Ok(response_json)
+        Ok(response_bytes.to_vec())
     }
 
     fn unload(&mut self, rule_name: &str) -> bool {
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn test_executor_call_not_found() {
         let mut executor = ExtismExecutor::new();
-        let result = executor.call_lint("nonexistent", "{}");
+        let result = executor.call_lint("nonexistent", &[]);
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 

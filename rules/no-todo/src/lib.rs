@@ -79,17 +79,17 @@ pub fn get_manifest() -> FnResult<String> {
 
 /// Lints a node for TODO patterns.
 #[plugin_fn]
-pub fn lint(input: String) -> FnResult<String> {
+pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
     lint_impl(input)
 }
 
-fn lint_impl(input: String) -> FnResult<String> {
-    let request: LintRequest = serde_json::from_str(&input)?;
+fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
+    let request: LintRequest = rmp_serde::from_slice(&input)?;
     let mut diagnostics = Vec::new();
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(serde_json::to_string(&LintResponse { diagnostics })?);
+        return Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?);
     }
 
     // Parse configuration
@@ -125,7 +125,7 @@ fn lint_impl(input: String) -> FnResult<String> {
         }
     }
 
-    Ok(serde_json::to_string(&LintResponse { diagnostics })?)
+    Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?)
 }
 
 #[cfg(test)]
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
-    fn create_request(text: &str, config: serde_json::Value) -> String {
+    fn create_request(text: &str, config: serde_json::Value) -> Vec<u8> {
         let node = serde_json::json!({
             "type": "Str",
             "range": [0, text.len()]
@@ -144,11 +144,11 @@ mod tests {
             "source": text,
             "file_path": null
         });
-        serde_json::to_string(&request).unwrap()
+        rmp_serde::to_vec(&request).unwrap()
     }
 
-    fn parse_response(json: &str) -> LintResponse {
-        serde_json::from_str(json).unwrap()
+    fn parse_response(bytes: &[u8]) -> LintResponse {
+        rmp_serde::from_slice(bytes).unwrap()
     }
 
     #[test]

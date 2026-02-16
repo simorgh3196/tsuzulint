@@ -43,8 +43,7 @@ struct LintRequest<'a, T: Serialize> {
     /// Rule configuration.
     config: serde_json::Value,
     /// Source text.
-    #[serde(borrow)]
-    source: &'a serde_json::value::RawValue,
+    source: String,
     /// File path (if available).
     file_path: Option<&'a str>,
 }
@@ -267,19 +266,24 @@ impl PluginHost {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
+        let source_str: String = serde_json::from_str(source.get())
+            .map_err(|e| PluginError::call(format!("Invalid source JSON: {}", e)))?;
+
         let request = LintRequest {
             node,
             config,
-            source,
+            source: source_str,
             file_path,
         };
 
         let real_name = aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
 
-        let request_json = serde_json::to_string(&request)?;
-        let response_json = executor.call_lint(real_name, &request_json)?;
+        let request_bytes = rmp_serde::to_vec(&request)
+            .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
 
-        let response: LintResponse = serde_json::from_str(&response_json)
+        let response_bytes = executor.call_lint(real_name, &request_bytes)?;
+
+        let response: LintResponse = rmp_serde::from_slice(&response_bytes)
             .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
 
         Ok(response.diagnostics)

@@ -53,12 +53,12 @@ pub trait RuleExecutor {
     /// # Arguments
     ///
     /// * `rule_name` - Name of the rule to call
-    /// * `input_json` - JSON-serialized LintRequest
+    /// * `input_json` - Msgpack-serialized LintRequest
     ///
     /// # Returns
     ///
-    /// JSON-serialized LintResponse on success.
-    fn call_lint(&mut self, rule_name: &str, input_json: &str) -> Result<String, PluginError>;
+    /// Msgpack-serialized LintResponse on success.
+    fn call_lint(&mut self, rule_name: &str, input_bytes: &[u8]) -> Result<Vec<u8>, PluginError>;
 
     /// Unloads a rule.
     ///

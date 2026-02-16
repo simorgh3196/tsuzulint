@@ -4539,6 +4539,7 @@ dependencies = [
  "extism-manifest",
  "insta",
  "pretty_assertions",
+ "rmp-serde",
  "rstest",
  "serde",
  "serde_json",

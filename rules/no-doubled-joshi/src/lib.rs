@@ -194,17 +194,17 @@ pub fn get_manifest() -> FnResult<String> {
 
 /// Lints a node for doubled particles.
 #[plugin_fn]
-pub fn lint(input: String) -> FnResult<String> {
+pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
     lint_impl(input)
 }
 
-fn lint_impl(input: String) -> FnResult<String> {
-    let request: LintRequest = serde_json::from_str(&input)?;
+fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
+    let request: LintRequest = rmp_serde::from_slice(&input)?;
     let mut diagnostics = Vec::new();
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(serde_json::to_string(&LintResponse { diagnostics })?);
+        return Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?);
     }
 
     // Parse configuration
@@ -222,7 +222,7 @@ fn lint_impl(input: String) -> FnResult<String> {
         diagnostics = check_doubled_particles(&particle_matches, &config, text);
     }
 
-    Ok(serde_json::to_string(&LintResponse { diagnostics })?)
+    Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?)
 }
 
 #[cfg(test)]

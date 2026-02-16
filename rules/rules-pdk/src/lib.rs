@@ -27,15 +27,12 @@ pub struct LintRequest {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LintHelpers {
     /// The text content of the current node (pre-extracted).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
 
     /// Line and column location information.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<LintLocation>,
 
     /// Context about surrounding nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<LintContext>,
 
     /// Flags indicating the node's position in the document structure.
@@ -72,15 +69,12 @@ impl Position {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LintContext {
     /// Type of the previous sibling node.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_node_type: Option<String>,
 
     /// Type of the next sibling node.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub next_node_type: Option<String>,
 
     /// Type of the parent node.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_node_type: Option<String>,
 
     /// Nesting depth in the AST (0 = root).
@@ -140,7 +134,6 @@ pub struct Diagnostic {
     #[serde(default)]
     pub severity: Severity,
     /// Optional fix for this diagnostic.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fix: Option<Fix>,
 }
 
@@ -262,7 +255,6 @@ pub struct RuleManifest {
     /// Rule version (semver).
     pub version: String,
     /// Human-readable description.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Whether this rule can provide auto-fixes.
     #[serde(default)]
@@ -985,3 +977,14 @@ mod tests {
         assert_eq!(matches[1].matched_text, "Straße");
     }
 }
+
+    #[test]
+    fn lint_response_msgpack_serialization() {
+        let response = LintResponse {
+            diagnostics: vec![Diagnostic::new("test", "msg", Span::new(0, 1))],
+        };
+        let bytes = rmp_serde::to_vec(&response).unwrap();
+        let decoded: LintResponse = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.diagnostics.len(), 1);
+        assert_eq!(decoded.diagnostics[0].rule_id, "test");
+    }

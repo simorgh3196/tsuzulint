@@ -73,17 +73,17 @@ pub fn get_manifest() -> FnResult<String> {
 
 /// Lints a node for sentence length.
 #[plugin_fn]
-pub fn lint(input: String) -> FnResult<String> {
+pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
     lint_impl(input)
 }
 
-fn lint_impl(input: String) -> FnResult<String> {
-    let request: LintRequest = serde_json::from_str(&input)?;
+fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
+    let request: LintRequest = rmp_serde::from_slice(&input)?;
     let mut diagnostics = Vec::new();
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(serde_json::to_string(&LintResponse { diagnostics })?);
+        return Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?);
     }
 
     // Parse configuration
@@ -111,7 +111,7 @@ fn lint_impl(input: String) -> FnResult<String> {
         }
     }
 
-    Ok(serde_json::to_string(&LintResponse { diagnostics })?)
+    Ok(rmp_serde::to_vec(&LintResponse { diagnostics })?)
 }
 
 #[cfg(test)]
@@ -133,8 +133,8 @@ mod tests {
             "file_path": null
         });
 
-        let output = lint_impl(request.to_string()).unwrap();
-        let response: LintResponse = serde_json::from_str(&output).unwrap();
+        let output = lint_impl(rmp_serde::to_vec(&request).unwrap()).unwrap();
+        let response: LintResponse = rmp_serde::from_slice(&output).unwrap();
 
         // "Short sentence." is 15 chars (fine)
         // "Very long sentence..." is > 20 chars (warning)
@@ -162,7 +162,7 @@ mod tests {
         // Logic for skipping code is likely in `tsuzulint_core` or handled by `extract_node_text` / node types?
         // Let's check `lint_impl` again.
 
-        // 80: fn lint_impl(input: String) -> FnResult<String> {
+        // 80: fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
         // ...
         // 85:     if !is_node_type(&request.node, "Str") {
         // ...
