@@ -131,7 +131,7 @@ impl SentenceSplitter {
         let next_char = text[idx..].chars().next();
 
         match prev_char {
-            Some('。') | Some('！') | Some('？') | Some('!') | Some('?') => {
+            Some('。' | '！' | '？' | '!' | '?') => {
                 // 3. Heuristic: `。` always splits. (Assuming UAX found a boundary here)
                 if prev_char == Some('。') {
                     return true;
@@ -141,76 +141,58 @@ impl SentenceSplitter {
                 // UAX #29 usually DOES split "すごい！！本当に！？" (No space).
                 // We want to suppress this if there is NO space.
                 if let Some(nc) = next_char {
-                    if nc.is_whitespace() {
-                        // Check for single newline suppression
-                        if nc == '\n' {
-                            // Check for double newline
-                            // If `\n` is followed by another `\n`, it's a paragraph break -> Keep split.
-                            // If `\n` is followed by text -> Suppress split (treat as continuation).
-                            // If `\n` is followed by text -> Suppress split (treat as continuation).
-                            let after_newline = text[idx + 1..].chars().next();
-                            return after_newline == Some('\n');
-                        }
-                        return true; // Space, etc.
-                    } else {
+                    if !nc.is_whitespace() {
                         // Not whitespace (e.g. "本" in "！！本当に") -> Suppress split.
                         return false;
                     }
-                } else {
-                    return true; // EOF -> Split.
+                    // Check for single newline suppression
+                    if nc == '\n' {
+                        // Check for double newline
+                        // If `\n` is followed by another `\n`, it's a paragraph break -> Keep split.
+                        // If `\n` is followed by text -> Suppress split (treat as continuation).
+                        let after_newline = text[idx + 1..].chars().next();
+                        return after_newline == Some('\n');
+                    }
+                    return true; // Other whitespace (space, etc.) -> Split.
                 }
+                true // EOF -> Split.
             }
             // 5. Heuristic: Single newline check for other cases
             // If UAX split on a newline (e.g. after a period + newline), check double newline.
             Some('\n') => {
                 // If the PREVIOUS char was `\n`, it's a double newline (paragraph).
-                // We need to look further back.
+                // We check if the text *up to* the split point ends with `\n\n`.
                 if text[..idx].ends_with("\n\n") {
-                    return true;
-                }
-
-                if next_char == Some('\n') {
                     return true;
                 }
 
                 // If the split happened AT a newline char (meaning the segment ENDED with \n),
                 // and it's not a double newline sequence, we typically merge.
 
-                // Simplified Newline Logic for our overrides:
-                // If UAX split on `\n` (meaning the segment *ends* with `\n`), we need to decide if it's a hard split or soft wrap.
-
-                // Case 1: Double Newline (`\n\n`) -> Paragraph break -> ALWAYS Split.
-                // We check if the text *up to* the split point ends with `\n\n`.
-                if text[..idx].ends_with("\n\n") {
-                    return true;
-                }
-
-                // Case 2: Partial Double Newline?
-                // If segment ends with `\n` and NEXT char is `\n`, UAX puts boundary *between* them?
+                // Case 1: If segment ends with `\n` and NEXT char is `\n`, UAX puts boundary *between* them?
                 // If we split at `\n` and the NEXT char is `\n`, it means we are in the middle of `\n\n`.
                 // In that case, we should probably NOT split yet, but wait for the second `\n`.
-                // So if next is `\n`, we SUPPRESS the split here.
                 if next_char == Some('\n') {
                     return false;
                 }
 
-                // Case 3: Single Newline (`\n`) -> Soft wrap -> SUPPRESS split.
+                // Case 2: Single Newline (`\n`) -> Soft wrap -> SUPPRESS split.
                 // Unless it's EOF or something.
-                if text[..idx].ends_with('\n') && !text[..idx].ends_with("\n\n") {
+                if text[..idx].ends_with('\n') {
                     return false;
                 }
 
                 // If none of the above (e.g. `\n\n` ending), we allow split.
-                return true;
+                true
             }
-            _ => {}
+            _ => {
+                // Default: If UAX says split, and no override triggered, we split.
+                // Exception: Check for basic period handling.
+                // UAX handles "Mr. Smith" correctly usually.
+                // "ver.1.0" -> UAX handles.
+                true
+            }
         }
-
-        // Default: If UAX says split, and no override triggered, we split.
-        // Exception: Check for basic period handling.
-        // UAX handles "Mr. Smith" correctly usually.
-        // "ver.1.0" -> UAX handles.
-        true
     }
 }
 
