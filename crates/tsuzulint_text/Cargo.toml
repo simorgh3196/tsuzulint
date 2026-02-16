@@ -15,4 +15,4 @@ lindera = { version = "2.2.0", features = ["embed-ipadic"] }
 thiserror = { workspace = true }
 
 miette = { workspace = true, features = ["fancy"] }
-unicode-segmentation = "1.12.0"
+unicode-segmentation = { workspace = true }
