@@ -32,6 +32,7 @@ TODO.md
 .kiro/
 .opencode/
 .windsurf/
+.firecrawl/
 
 # Cache directories
 .tsuzulint-cache/

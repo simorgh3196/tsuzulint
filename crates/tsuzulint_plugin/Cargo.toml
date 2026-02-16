@@ -9,8 +9,9 @@ description = "WASM plugin system for TsuzuLint"
 
 [features]
 default = ["native"]
-native = ["extism"]
+native = ["extism", "extism-manifest"]
 browser = ["wasmi"]
+test-utils = ["wat"]
 
 [dependencies]
 tsuzulint_ast = { workspace = true }
@@ -18,9 +19,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+wat = { version = "1.245.1", optional = true }
 
 # Native environment (high performance with JIT)
 extism = { workspace = true, optional = true }
+extism-manifest = { workspace = true, optional = true }
 
 # Browser/WASM environment (pure Rust interpreter)
 wasmi = { workspace = true, optional = true }
@@ -29,4 +32,3 @@ wasmi = { workspace = true, optional = true }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 insta = { workspace = true }
-wat = "1.245.1"

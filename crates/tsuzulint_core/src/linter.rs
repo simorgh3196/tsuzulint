@@ -1480,6 +1480,10 @@ mod tests {
         config.rules.push(crate::config::RuleDefinition::Simple(
             "test-rule".to_string(),
         ));
+        config.options.insert(
+            "test-rule".to_string(),
+            crate::config::RuleOption::Enabled(true),
+        );
 
         let linter = Linter::new(config).unwrap();
 
