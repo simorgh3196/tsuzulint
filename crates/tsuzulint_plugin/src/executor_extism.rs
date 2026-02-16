@@ -3,7 +3,7 @@
 //! This module provides high-performance WASM execution using Extism,
 //! which internally uses wasmtime for JIT compilation.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use extism::{Manifest, Plugin, Wasm};
@@ -70,6 +70,12 @@ impl ExtismExecutor {
 
         // Deny all network access
         manifest.allowed_hosts = Some(vec![]);
+
+        // Deny all file system access
+        manifest.allowed_paths = Some(BTreeMap::new());
+
+        // Clear configuration to prevent environment leakage
+        manifest.config = BTreeMap::new();
 
         manifest
     }
