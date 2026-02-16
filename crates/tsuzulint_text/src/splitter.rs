@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn test_split_ignore_code() {
         let text = "これは `code.` です。";
-        // Mock ignore range for `code.` (from index 4 to 11)
+        // Mock ignore range for `code.` (from index 10 to 17)
         // "これは " (10 bytes) ` (1 byte) "code." (5 bytes) ` (1 byte) " です。"
         // indices:
         // 0: こ
@@ -159,23 +159,10 @@ mod tests {
     #[test]
     fn test_split_newlines() {
         let text = "Line1.\nLine2.\n\nParagraph2.";
-        // \n is NOT a split char, but \n\n IS.
-        // But '.' IS a split char.
-        // "Line1." -> split at '.' -> "Line1."
-        // "\nLine2." -> split at '.' -> "\nLine2."
-        // "\n\nParagraph2." -> split at '.' -> "\n\nParagraph2."
-        // Wait, \n\n logic:
-        // At \n, lookahead \n. If true, it is sentence end.
-        // Let's trace:
-        // text: "A\n\nB"
-        // 'A' -> next
-        // '\n' -> peek '\n' -> is_sentence_end=true. end=idx+1 (start of second \n).
-        // sentence="A\n". start points to second \n.
-        // next loop: char is '\n'. peek 'B'. is_sentence_end=false.
-        // 'B' -> next.
-        // End of loop. Remaining: "\nB".
-        // So "A\n\nB" -> "A\n", "\nB" ?
-        // This splits paragraph.
+        // Test that:
+        // - `.` splits sentences.
+        // - `\n\n` (double newline) splits sentences (paragraph break).
+        // - Single `\n` does NOT split sentences.
 
         let sentences = SentenceSplitter::split(text, &[]);
         assert_eq!(sentences.len(), 3);
