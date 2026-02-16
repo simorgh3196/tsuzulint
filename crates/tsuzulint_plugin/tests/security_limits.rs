@@ -1,11 +1,6 @@
 #[cfg(feature = "native")]
 mod native_tests {
-    use tsuzulint_plugin::PluginHost;
-
-    /// Helper to compile WAT to WASM bytes
-    fn wat_to_wasm(wat: &str) -> Vec<u8> {
-        wat::parse_str(wat).expect("Invalid WAT")
-    }
+    use tsuzulint_plugin::{PluginHost, test_utils::wat_to_wasm};
 
     #[test]
     fn test_plugin_host_memory_limit_breach() {

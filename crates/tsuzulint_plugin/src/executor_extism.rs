@@ -64,8 +64,8 @@ impl ExtismExecutor {
         // Set memory limits to prevent DoS via memory exhaustion
         manifest.memory = extism_manifest::MemoryOptions {
             max_pages: Some(DEFAULT_MEMORY_MAX_PAGES),
-            max_http_response_bytes: None,
-            max_var_bytes: None,
+            max_http_response_bytes: Some(0), // Deny HTTP response buffering
+            max_var_bytes: Some(1024 * 1024), // Limit variable storage to 1MB
         };
 
         // Deny all network access
@@ -167,12 +167,9 @@ impl RuleExecutor for ExtismExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::test_utils::wat_to_wasm;
 
-    /// Helper to compile WAT to WASM bytes
-    fn wat_to_wasm(wat_source: &str) -> Vec<u8> {
-        wat::parse_str(wat_source).expect("Invalid WAT")
-    }
+    use super::*;
 
     #[test]
     fn test_executor_new() {
