@@ -44,6 +44,9 @@ mod executor_extism;
 #[cfg(all(feature = "browser", not(feature = "native")))]
 mod executor_wasmi;
 
+#[cfg(feature = "test-utils")]
+pub mod test_utils;
+
 pub use diagnostic::{Diagnostic, Fix, Severity};
 pub use error::PluginError;
 pub use executor::{LoadResult, RuleExecutor};

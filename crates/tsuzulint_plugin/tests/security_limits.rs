@@ -1,13 +1,9 @@
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", feature = "test-utils"))]
 mod native_tests {
-    use tsuzulint_plugin::PluginHost;
-
-    /// Helper to compile WAT to WASM bytes
-    fn wat_to_wasm(wat: &str) -> Vec<u8> {
-        wat::parse_str(wat).expect("Invalid WAT")
-    }
+    use tsuzulint_plugin::{PluginHost, test_utils::wat_to_wasm};
 
     #[test]
+    #[cfg(feature = "test-utils")]
     fn test_plugin_host_memory_limit_breach() {
         let mut host = PluginHost::new();
 

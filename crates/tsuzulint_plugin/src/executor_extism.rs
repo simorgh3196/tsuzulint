@@ -12,6 +12,13 @@ use tracing::{debug, info};
 use crate::executor::{LoadResult, RuleExecutor};
 use crate::{PluginError, RuleManifest};
 
+/// Default memory limit for WASM instances (128 MB = 2048 pages).
+/// Each WASM page is 64KB.
+const DEFAULT_MEMORY_MAX_PAGES: u32 = 2048;
+
+/// Default timeout for WASM execution (5000 ms).
+const DEFAULT_TIMEOUT_MS: u64 = 5000;
+
 /// A loaded rule using Extism.
 struct LoadedRule {
     /// The Extism plugin instance.
@@ -29,6 +36,8 @@ struct LoadedRule {
 pub struct ExtismExecutor {
     /// Loaded rules by name.
     rules: HashMap<String, LoadedRule>,
+    /// Timeout for WASM execution in milliseconds.
+    timeout_ms: u64,
 }
 
 impl ExtismExecutor {
@@ -36,31 +45,38 @@ impl ExtismExecutor {
     pub fn new() -> Self {
         Self {
             rules: HashMap::new(),
+            timeout_ms: DEFAULT_TIMEOUT_MS,
         }
     }
-}
 
-impl Default for ExtismExecutor {
-    fn default() -> Self {
-        Self::new()
+    /// Sets the timeout for WASM execution.
+    #[cfg(all(test, feature = "test-utils"))]
+    pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = timeout_ms;
+        self
     }
-}
 
-impl RuleExecutor for ExtismExecutor {
-    fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
-        info!("Loading WASM rule ({} bytes)", wasm_bytes.len());
+    /// Configures the manifest with security limits.
+    fn configure_manifest(&self, mut manifest: Manifest) -> Manifest {
+        // Set execution timeout to prevent infinite loops
+        manifest.timeout_ms = Some(self.timeout_ms);
 
-        // Create the plugin manifest from bytes
-        let wasm = Wasm::data(wasm_bytes.to_vec());
-        let mut manifest = Manifest::new([wasm]);
+        // Set memory limits to prevent DoS via memory exhaustion
+        manifest.memory = extism_manifest::MemoryOptions {
+            max_pages: Some(DEFAULT_MEMORY_MAX_PAGES),
+            max_http_response_bytes: Some(0), // Deny HTTP response buffering
+            max_var_bytes: Some(1024 * 1024), // Limit variable storage to 1MB
+        };
 
-        // Configure resource limits (Defense in Depth)
-        // 128 MB memory limit (2048 pages * 64KB)
-        manifest.memory.max_pages = Some(2048);
-        // 5000ms execution timeout
-        manifest.timeout_ms = Some(5000);
         // Deny all network access
         manifest.allowed_hosts = Some(vec![]);
+
+        manifest
+    }
+
+    /// Loads a plugin from a raw manifest.
+    fn load_from_manifest(&mut self, manifest: Manifest) -> Result<LoadResult, PluginError> {
+        let manifest = self.configure_manifest(manifest);
 
         // Create the plugin with WASI support
         let mut plugin = Plugin::new(&manifest, [], true)
@@ -93,52 +109,33 @@ impl RuleExecutor for ExtismExecutor {
             manifest: rule_manifest,
         })
     }
+}
+
+impl Default for ExtismExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RuleExecutor for ExtismExecutor {
+    fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
+        info!("Loading WASM rule ({} bytes)", wasm_bytes.len());
+
+        // Create the plugin manifest from bytes
+        let wasm = Wasm::data(wasm_bytes.to_vec());
+        let manifest = Manifest::new([wasm]);
+
+        self.load_from_manifest(manifest)
+    }
 
     fn load_file(&mut self, path: &Path) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
 
         // Create the plugin manifest from file
         let wasm = Wasm::file(path);
-        let mut manifest = Manifest::new([wasm]);
+        let manifest = Manifest::new([wasm]);
 
-        // Configure resource limits (Defense in Depth)
-        // 128 MB memory limit (2048 pages * 64KB)
-        manifest.memory.max_pages = Some(2048);
-        // 5000ms execution timeout
-        manifest.timeout_ms = Some(5000);
-        // Deny all network access
-        manifest.allowed_hosts = Some(vec![]);
-
-        // Create the plugin with WASI support
-        let mut plugin = Plugin::new(&manifest, [], true)
-            .map_err(|e| PluginError::load(format!("Failed to create plugin: {}", e)))?;
-
-        // Get the rule manifest
-        let manifest_json: String = plugin
-            .call("get_manifest", "")
-            .map_err(|e| PluginError::call(format!("Failed to get manifest: {}", e)))?;
-
-        let rule_manifest: RuleManifest = serde_json::from_str(&manifest_json)
-            .map_err(|e| PluginError::invalid_manifest(e.to_string()))?;
-
-        debug!(
-            "Loaded rule: {} v{}",
-            rule_manifest.name, rule_manifest.version
-        );
-
-        let name = rule_manifest.name.clone();
-        self.rules.insert(
-            name.clone(),
-            LoadedRule {
-                plugin,
-                manifest: rule_manifest.clone(),
-            },
-        );
-
-        Ok(LoadResult {
-            name,
-            manifest: rule_manifest,
-        })
+        self.load_from_manifest(manifest)
     }
 
     fn call_lint(&mut self, rule_name: &str, input_json: &str) -> Result<String, PluginError> {
@@ -170,6 +167,9 @@ impl RuleExecutor for ExtismExecutor {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "test-utils")]
+    use crate::test_utils::wat_to_wasm;
+
     use super::*;
 
     #[test]
@@ -183,5 +183,80 @@ mod tests {
         let mut executor = ExtismExecutor::new();
         let result = executor.call_lint("nonexistent", "{}");
         assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_memory_limit() {
+        let mut executor = ExtismExecutor::new();
+
+        // A rule that tries to allocate 200MB (3200 pages)
+        // 3200 * 64KB = 200MB > 128MB limit
+        // We use a simplified module for this test as we just want it to fail loading
+        let wasm = wat_to_wasm(
+            r#"
+            (module
+                (memory (export "memory") 3200)
+                (func (export "get_manifest") (result i32) (i32.const 0))
+            )
+            "#,
+        );
+
+        // Loading should fail because the initial memory exceeds the limit
+        let result = executor.load(&wasm);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+
+        // Debug output to see actual error
+        println!("Memory limit error: {}", err_msg);
+
+        // Check for specific error related to memory limit
+        // The error message depends on the runtime but should contain "memory", "limit" or "oom"
+        assert!(
+            err_msg.to_lowercase().contains("memory")
+                || err_msg.to_lowercase().contains("limit")
+                || err_msg.to_lowercase().contains("oom"),
+            "Unexpected error message: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_infinite_loop() {
+        // Use a short timeout for testing (200ms instead of 5s)
+        let mut executor = ExtismExecutor::new().with_timeout(200);
+
+        // Infinite loop rule (Extism ABI)
+        // We put the loop in get_manifest so load() fails with timeout
+        // This avoids needing a valid manifest to proceed
+        let wasm = wat_to_wasm(
+            r#"
+            (module
+                (memory (export "memory") 1)
+
+                (func (export "get_manifest") (result i32)
+                    (loop
+                        (br 0)
+                    )
+                    (i32.const 0)
+                )
+            )
+            "#,
+        );
+
+        // Should return an error due to timeout during load (get_manifest execution)
+        let result = executor.load(&wasm);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+
+        println!("Timeout error: {}", err_msg);
+
+        let err_lower = err_msg.to_lowercase();
+        assert!(
+            err_lower.contains("timeout") || err_lower.contains("deadline"),
+            "Expected timeout error, got: {}",
+            err_msg
+        );
     }
 }
