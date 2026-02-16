@@ -666,8 +666,8 @@ impl Linter {
             global_keys.insert((
                 d.span.start,
                 d.span.end,
-                d.message.clone(),
-                d.rule_id.clone(),
+                d.message.as_str(),
+                d.rule_id.as_str(),
             ));
         }
 
@@ -776,11 +776,11 @@ impl Linter {
     /// Distributes diagnostics to blocks efficiently using a sorted cursor approach.
     ///
     /// This optimization reduces complexity from O(Blocks * Diagnostics) to O(Blocks + Diagnostics)
-    /// (plus sorting cost O(D log D)), which is significant for large files with many blocks.
-    fn distribute_diagnostics(
+    /// (plus sorting cost O(B log B + D log D)), which is significant for large files with many blocks.
+    fn distribute_diagnostics<'a>(
         mut blocks: Vec<BlockCacheEntry>,
         diagnostics: &[tsuzulint_plugin::Diagnostic],
-        global_keys: &HashSet<(u32, u32, String, String)>,
+        global_keys: &HashSet<(u32, u32, &'a str, &'a str)>,
     ) -> Vec<BlockCacheEntry> {
         // Ensure blocks are sorted by start position for the sweep-line algorithm to work correctly
         blocks.sort_by_key(|b| b.span.start);
@@ -793,8 +793,8 @@ impl Linter {
                 let key = (
                     d.span.start,
                     d.span.end,
-                    d.message.clone(),
-                    d.rule_id.clone(),
+                    d.message.as_str(),
+                    d.rule_id.as_str(),
                 );
                 !global_keys.contains(&key)
             })
@@ -1733,8 +1733,6 @@ mod tests {
         use tsuzulint_ast::Span;
         use tsuzulint_plugin::Diagnostic;
 
-        let global_keys = HashSet::new();
-
         // Create 2 disjoint blocks
         let block1 = BlockCacheEntry {
             hash: "b1".to_string(),
@@ -1783,9 +1781,16 @@ mod tests {
         };
 
         // Note: Diagnostics can be unsorted initially
-        let diagnostics = vec![diag2.clone(), diag1.clone(), diag_outside, diag_overlap];
+        let diagnostics = vec![
+            diag2.clone(),
+            diag1.clone(),
+            diag_outside.clone(),
+            diag_overlap,
+        ];
 
-        let result = Linter::distribute_diagnostics(blocks, &diagnostics, &global_keys);
+        // Case 1: Empty global keys
+        let global_keys: HashSet<(u32, u32, &str, &str)> = HashSet::new();
+        let result = Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys);
 
         assert_eq!(result.len(), 2);
 
@@ -1796,5 +1801,25 @@ mod tests {
         // Block 2 should contain diag2
         assert_eq!(result[1].diagnostics.len(), 1);
         assert_eq!(result[1].diagnostics[0].rule_id, "rule2");
+
+        // Case 2: Filter global diagnostics
+        let mut global_keys_filtered = HashSet::new();
+        // Mark diag1 as global
+        global_keys_filtered.insert((
+            diag1.span.start,
+            diag1.span.end,
+            diag1.message.as_str(),
+            diag1.rule_id.as_str(),
+        ));
+
+        let result_filtered =
+            Linter::distribute_diagnostics(blocks, &diagnostics, &global_keys_filtered);
+
+        // Block 1 should NOT contain diag1 anymore (filtered out)
+        assert!(result_filtered[0].diagnostics.is_empty());
+
+        // Block 2 should still contain diag2
+        assert_eq!(result_filtered[1].diagnostics.len(), 1);
+        assert_eq!(result_filtered[1].diagnostics[0].rule_id, "rule2");
     }
 }
