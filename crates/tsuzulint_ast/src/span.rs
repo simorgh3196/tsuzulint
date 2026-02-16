@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 /// Uses 1-indexed lines and 0-indexed columns for compatibility with
 /// textlint and JavaScript AST conventions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 // #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 pub struct Position {
     /// Line number (1-indexed).
@@ -31,7 +34,10 @@ impl Position {
 ///
 /// Uses byte offsets (0-indexed) for efficient slicing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 // #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 pub struct Span {
     /// Start byte offset (0-indexed, inclusive).
@@ -87,7 +93,10 @@ impl Span {
 ///
 /// This is used for serialization to match textlint's `loc` format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
 // #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 pub struct Location {
     /// Start position.

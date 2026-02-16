@@ -7,7 +7,9 @@ use tsuzulint_ast::Span;
 use tsuzulint_plugin::Diagnostic;
 
 /// A cached block of content.
-#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 // #[rkyv(check_bytes)]
 pub struct BlockCacheEntry {
     /// Hash of the block content.
@@ -21,7 +23,9 @@ pub struct BlockCacheEntry {
 }
 
 /// A cache entry for a single file.
-#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 // #[rkyv(check_bytes)]
 pub struct CacheEntry {
     /// Hash of the file content.
