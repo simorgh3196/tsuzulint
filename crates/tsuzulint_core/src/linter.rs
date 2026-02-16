@@ -1983,7 +1983,12 @@ mod tests {
         };
 
         // Note: Diagnostics can be unsorted initially
-        let diagnostics = vec![diag2.clone(), diag1.clone(), diag_outside, diag_overlap];
+        let diagnostics = vec![
+            diag2.clone(),
+            diag1.clone(),
+            diag_outside.clone(),
+            diag_overlap,
+        ];
 
         let result = Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys);
 
