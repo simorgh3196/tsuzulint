@@ -4576,6 +4576,7 @@ dependencies = [
  "lindera",
  "miette",
  "thiserror 2.0.18",
+ "unicode-segmentation",
 ]
 
 [[package]]
