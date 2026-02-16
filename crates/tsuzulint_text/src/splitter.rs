@@ -166,24 +166,12 @@ impl SentenceSplitter {
                     return true;
                 }
 
-                // If the split happened AT a newline char (meaning the segment ENDED with \n),
-                // and it's not a double newline sequence, we typically merge.
-
-                // Case 1: If segment ends with `\n` and NEXT char is `\n`, UAX puts boundary *between* them?
-                // If we split at `\n` and the NEXT char is `\n`, it means we are in the middle of `\n\n`.
-                // In that case, we should probably NOT split yet, but wait for the second `\n`.
                 if next_char == Some('\n') {
                     return false;
                 }
 
-                // Case 2: Single Newline (`\n`) -> Soft wrap -> SUPPRESS split.
-                // Unless it's EOF or something.
-                if text[..idx].ends_with('\n') {
-                    return false;
-                }
-
-                // If none of the above (e.g. `\n\n` ending), we allow split.
-                true
+                // Single newline -> soft wrap -> suppress split.
+                false
             }
             _ => {
                 // Default: If UAX says split, and no override triggered, we split.

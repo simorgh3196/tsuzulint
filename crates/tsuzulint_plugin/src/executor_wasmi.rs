@@ -319,6 +319,7 @@ impl RuleExecutor for WasmiExecutor {
 }
 
 #[cfg(test)]
+#[cfg(feature = "test-utils")]
 mod tests {
     use crate::test_utils::{valid_rule_wat, wat_to_wasm};
 
