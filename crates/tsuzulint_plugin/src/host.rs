@@ -68,7 +68,7 @@ struct LintResponse {
 /// host.load_rule("./rules/no-todo.wasm")?;
 ///
 /// // Run the rule on an AST node
-/// let diagnostics = host.run_rule("no-todo", &node_json, source)?;
+/// let diagnostics = host.run_rule("no-todo", &node_bytes, source)?;
 /// ```
 pub struct PluginHost {
     /// The WASM executor.
@@ -225,8 +225,8 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `name` - Rule name
-    /// * `node` - The AST node (serialized as JSON or a Serializable struct)
-    /// * `source` - The source text (serialized as JSON string)
+    /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
+    /// * `source` - The source text (serialized as Msgpack string)
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -278,7 +278,7 @@ impl PluginHost {
 
         let real_name = aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
 
-        let request_bytes = rmp_serde::to_vec(&request)
+        let request_bytes = rmp_serde::to_vec_named(&request)
             .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
 
         let response_bytes = executor.call_lint(real_name, &request_bytes)?;
@@ -293,8 +293,8 @@ impl PluginHost {
     ///
     /// # Arguments
     ///
-    /// * `node` - The AST node (serialized as JSON or a Serializable struct)
-    /// * `source` - The source text (serialized as JSON string)
+    /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
+    /// * `source` - The source text (serialized as Msgpack string)
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -377,8 +377,8 @@ mod tests {
     #[test]
     fn test_plugin_host_not_found() {
         let mut host = PluginHost::new();
-        let node_json = serde_json::to_string(&serde_json::json!({})).unwrap();
-        let node = serde_json::value::RawValue::from_string(node_json).unwrap();
+        let node_bytes = serde_json::to_string(&serde_json::json!({})).unwrap();
+        let node = serde_json::value::RawValue::from_string(node_bytes).unwrap();
         let source_json = serde_json::to_string("").unwrap();
         let source = serde_json::value::RawValue::from_string(source_json).unwrap();
 

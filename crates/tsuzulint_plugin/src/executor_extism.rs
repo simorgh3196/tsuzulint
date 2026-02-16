@@ -146,10 +146,10 @@ impl RuleExecutor for ExtismExecutor {
 
         let response_bytes = rule
             .plugin
-            .call::<&[u8], &[u8]>("lint", input_bytes)
+            .call::<&[u8], Vec<u8>>("lint", input_bytes)
             .map_err(|e| PluginError::call(format!("Rule '{}' failed: {}", rule_name, e)))?;
 
-        Ok(response_bytes.to_vec())
+        Ok(response_bytes)
     }
 
     fn unload(&mut self, rule_name: &str) -> bool {

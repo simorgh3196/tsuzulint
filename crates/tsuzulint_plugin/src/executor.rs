@@ -53,7 +53,7 @@ pub trait RuleExecutor {
     /// # Arguments
     ///
     /// * `rule_name` - Name of the rule to call
-    /// * `input_json` - Msgpack-serialized LintRequest
+    /// * `input_bytes` - Msgpack-serialized LintRequest
     ///
     /// # Returns
     ///
