@@ -41,15 +41,14 @@ impl SentenceSplitter {
             }
 
             // Simple splitting logic:
-            // - Split on `。`, `!`, `?`
-            // - Split on double newline `\n\n` (paragraph break)
-            // - Handle "." only if followed by space? (For English mixed in) - Keep simple for now.
-            // Note: Single punctuation marks are treated as valid sentences to respect user intent.
+            // - Split on `。` (Kuten) always.
+            // - Split on `!`, `?` (and variants) ONLY if followed by whitespace or EOF.
+            // - Split on double newline `\n\n` (paragraph break).
+            // - Handle "." only if followed by space or EOF.
             let (is_sentence_end, extra_len) = match c {
-                '。' | '！' | '？' | '!' | '?' => (true, 0),
-                '.' => {
-                    // Start simple heuristic: only split on '.' if followed by whitespace or end of text.
-                    // This prevents splitting on "3.14", "example.com", "ver.1.0" etc.
+                '。' => (true, 0),
+                '！' | '？' | '!' | '?' | '.' => {
+                    // Check if followed by whitespace or end of text.
                     if let Some((_, next_c)) = chars.peek() {
                         if next_c.is_whitespace() {
                             (true, 0)
@@ -125,17 +124,6 @@ mod tests {
     fn test_split_ignore_code() {
         let text = "これは `code.` です。";
         // Mock ignore range for `code.` (from index 10 to 17)
-        // "これは " (10 bytes) ` (1 byte) "code." (5 bytes) ` (1 byte) " です。"
-        // indices:
-        // 0: こ
-        // 3: れ
-        // 6: は
-        // 9:
-        // 10: `
-        // 11: c
-        // 15: . (this is inside code)
-        // 16: `
-
         let ignore_range = 10..17; // `code.`
         let sentences = SentenceSplitter::split(text, &[ignore_range]);
 
@@ -160,32 +148,40 @@ mod tests {
     #[test]
     fn test_split_consecutive_punctuation() {
         let text = "Hello。。World!?";
+        // "Hello。。" -> "Hello。" and "。"
+        // "World!?" -> No split (no space).
+        // "World!?" -> followed by EOF -> Split.
         let sentences = SentenceSplitter::split(text, &[]);
-        // Expect: "Hello。", "。", "World!", "?"
-        // Current logic:
-        // 1. "Hello" -> '。' found at end of Hello. sentence="Hello。"
-        // 2. Next '。' -> sentence="。"
-        // 3. "World" -> '!' found. sentence="World!"
-        // 4. Next '?' -> sentence="?"
-        assert_eq!(sentences.len(), 4);
+        assert_eq!(sentences.len(), 3);
         assert_eq!(sentences[0].text, "Hello。");
         assert_eq!(sentences[1].text, "。");
-        assert_eq!(sentences[2].text, "World!");
-        assert_eq!(sentences[3].text, "?");
+        assert_eq!(sentences[2].text, "World!?");
+    }
+
+    #[test]
+    fn test_split_no_space_exclamation() {
+        let text = "すごい！！本当に！？";
+        let sentences = SentenceSplitter::split(text, &[]);
+        assert_eq!(sentences.len(), 1);
+        assert_eq!(sentences[0].text, "すごい！！本当に！？");
+    }
+
+    #[test]
+    fn test_split_with_space_exclamation() {
+        let text = "すごい！！ 本当に！？";
+        let sentences = SentenceSplitter::split(text, &[]);
+        assert_eq!(sentences.len(), 2);
+        assert_eq!(sentences[0].text, "すごい！！");
+        assert_eq!(sentences[1].text, " 本当に！？");
     }
 
     #[test]
     fn test_split_newlines() {
         let text = "Line1.\nLine2.\n\nParagraph2.";
-        // Test that:
-        // - `.` splits sentences.
-        // - `\n\n` (double newline) splits sentences (paragraph break).
-        // - Single `\n` does NOT split sentences.
-
         let sentences = SentenceSplitter::split(text, &[]);
         assert_eq!(sentences.len(), 3);
         assert_eq!(sentences[0].text, "Line1.");
-        assert_eq!(sentences[1].text, "\nLine2."); // newline is part of this sentence start
+        assert_eq!(sentences[1].text, "\nLine2.");
         assert_eq!(sentences[2].text, "Paragraph2.");
     }
 
@@ -202,9 +198,6 @@ mod tests {
     fn test_split_double_newline_behavior() {
         let text = "A\n\nB";
         let sentences = SentenceSplitter::split(text, &[]);
-        // Current behavior (before fix): "A\n", "\nB" (or "A\n" and "B" if \n is trimmed?)
-        // Desired behavior: "A\n\n", "B"
-
         assert_eq!(sentences.len(), 2);
         assert_eq!(sentences[0].text, "A\n\n");
         assert_eq!(sentences[1].text, "B");
@@ -214,11 +207,6 @@ mod tests {
     fn test_split_english_mixed() {
         let text = "This is ver.1.0. Please visit example.com.";
         let sentences = SentenceSplitter::split(text, &[]);
-        // Should split at first "ver.1.0. " (because of trailing space) and last "."
-        // "ver.1.0" -> '.' followed by '0' -> no split
-        // "1.0." -> '.' followed by space -> split
-        // "example.com." -> '.' followed by EOF -> split
-
         assert_eq!(sentences.len(), 2);
         assert_eq!(sentences[0].text, "This is ver.1.0.");
         assert_eq!(sentences[1].text, " Please visit example.com.");
@@ -228,15 +216,6 @@ mod tests {
     fn test_split_english_abbreviations() {
         let text = "e.g. example vs. sample";
         let sentences = SentenceSplitter::split(text, &[]);
-        // "e.g. " -> split
-        // "example vs. " -> split
-        // "sample" -> remainder
-
-        // Current heuristic splits on "e.g. " twice?
-        // "e." -> followed by 'g' -> no split
-        // "g. " -> followed by space -> split "e.g. "
-        // "vs. " -> followed by space -> split "example vs. "
-
         assert_eq!(sentences.len(), 3);
         assert_eq!(sentences[0].text, "e.g.");
         assert_eq!(sentences[1].text, " example vs.");
