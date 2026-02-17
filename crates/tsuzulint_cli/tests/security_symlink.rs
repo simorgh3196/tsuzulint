@@ -1,5 +1,4 @@
-use assert_cmd::Command;
-use predicates::prelude::*;
+use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -31,10 +30,8 @@ fn test_init_symlink_overwrite_vulnerability() {
     }
 
     // Run `tzlint init --force`
-    let mut cmd = Command::cargo_bin("tzlint").unwrap();
-    cmd.current_dir(dir.path())
-        .arg("init")
-        .arg("--force");
+    let mut cmd = cargo_bin_cmd!("tzlint");
+    cmd.current_dir(dir.path()).arg("init").arg("--force");
 
     // Before fix: This overwrites the target file through the symlink.
     // After fix: This should replace the symlink with a file, preserving the target.
@@ -46,12 +43,18 @@ fn test_init_symlink_overwrite_vulnerability() {
 
     // NOTE: This assertion WILL FAIL before the fix is applied.
     // We expect "Important Data" to be preserved.
-    assert_eq!(content, "Important Data", "Security vulnerability: Target file was overwritten!");
+    assert_eq!(
+        content, "Important Data",
+        "Security vulnerability: Target file was overwritten!"
+    );
 
     // Check if config file is now a regular file (not a symlink)
     let meta = fs::symlink_metadata(&config_path).unwrap();
     assert!(meta.is_file(), "Config file should be a regular file now");
-    assert!(!meta.is_symlink(), "Config file should not be a symlink anymore");
+    assert!(
+        !meta.is_symlink(),
+        "Config file should not be a symlink anymore"
+    );
 }
 
 #[test]
@@ -93,9 +96,8 @@ fn test_plugin_install_symlink_refusal() {
     // We can rely on the unit test I will add to `main.rs` for `update_config_with_plugin`.
     // But let's try a best effort here with `tzlint init` without force first.
 
-    let mut cmd = Command::cargo_bin("tzlint").unwrap();
-    cmd.current_dir(dir.path())
-        .arg("init"); // No force
+    let mut cmd = cargo_bin_cmd!("tzlint");
+    cmd.current_dir(dir.path()).arg("init"); // No force
 
     // Should fail because file exists (symlink)
     cmd.assert().failure();
