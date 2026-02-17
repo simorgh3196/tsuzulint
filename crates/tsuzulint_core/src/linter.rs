@@ -1822,5 +1822,35 @@ mod tests {
         // Block 2 should still contain diag2
         assert_eq!(result_filtered[1].diagnostics.len(), 1);
         assert_eq!(result_filtered[1].diagnostics[0].rule_id, "rule2");
+
+        // Case 3: Boundary condition – diagnostic at exact block boundary (half-open interval)
+        let block_boundary = BlockCacheEntry {
+            hash: "bb".to_string(),
+            span: Span::new(10, 20),
+            diagnostics: vec![],
+        };
+        let diag_at_end = Diagnostic {
+            rule_id: "rule_boundary".to_string(),
+            message: "at_end".to_string(),
+            span: Span::new(20, 25), // starts exactly at block.end
+            severity: tsuzulint_plugin::Severity::Error,
+            fix: None,
+            loc: None,
+        };
+        let diag_zero_at_end = Diagnostic {
+            rule_id: "rule_zero".to_string(),
+            message: "zero_at_end".to_string(),
+            span: Span::new(20, 20), // zero-length at block.end
+            severity: tsuzulint_plugin::Severity::Error,
+            fix: None,
+            loc: None,
+        };
+        let result_boundary = Linter::distribute_diagnostics(
+            vec![block_boundary],
+            &[diag_at_end, diag_zero_at_end],
+            &HashSet::new(),
+        );
+        // Neither diagnostic should be assigned (half-open: block.end is exclusive)
+        assert!(result_boundary[0].diagnostics.is_empty());
     }
 }
