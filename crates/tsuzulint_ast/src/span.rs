@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
     feature = "rkyv",
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
 )]
-// #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 pub struct Position {
     /// Line number (1-indexed).
     pub line: u32,
@@ -38,7 +37,6 @@ impl Position {
     feature = "rkyv",
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
 )]
-// #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 pub struct Span {
     /// Start byte offset (0-indexed, inclusive).
     pub start: u32,
@@ -97,7 +95,6 @@ impl Span {
     feature = "rkyv",
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
 )]
-// #[cfg_attr(feature = "rkyv", rkyv(check_bytes))]
 pub struct Location {
     /// Start position.
     pub start: Position,

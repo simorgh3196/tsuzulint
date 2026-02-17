@@ -22,11 +22,6 @@ rkyv = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-[features]
-default = ["native"]
-native = ["tsuzulint_plugin/native"]
-browser = ["tsuzulint_plugin/browser"]
-
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
