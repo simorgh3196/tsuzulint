@@ -687,7 +687,7 @@ impl Linter {
         // We need to associate diagnostics with blocks for NEXT time.
         // We ensure we ONLY store diagnostics that belong to the block and are NOT global.
         // Use optimized distribution algorithm: O(B+D) + sort O(B log B + D log D)
-        // instead of O(B*D). See [distribute_diagnostics](cci:1://file:///Users/simorgh3196/go/src/github.com/simorgh3196/tsuzulint/crates/tsuzulint_core/src/linter.rs:775:4-851:5) docstring for details.
+        // instead of O(B*D). See [Self::distribute_diagnostics] docstring for details.
         let new_blocks =
             Self::distribute_diagnostics(current_blocks, &final_diagnostics, &global_keys);
 
