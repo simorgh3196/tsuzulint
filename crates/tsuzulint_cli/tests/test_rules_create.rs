@@ -57,7 +57,12 @@ fn test_rules_create_generates_valid_project() -> Result<(), Box<dyn std::error:
     );
 
     // lint uses MessagePack (Vec<u8> in/out)
-    let lint_decl = Regex::new(r"pub\s+fn\s+lint\s*\(\s*input\s*:\s*Vec<\s*u8\s*>\s*\)\s*->\s*FnResult<\s*Vec<\s*u8\s*>\s*>").unwrap();
+    let lint_decl = Regex::new(concat!(
+        r"pub\s+fn\s+lint\s*\(",
+        r"\s*input\s*:\s*Vec<\s*u8\s*>",
+        r"\s*\)\s*->\s*FnResult<\s*Vec<\s*u8\s*>\s*>",
+    ))
+    .unwrap();
     assert!(
         lint_decl.is_match(lib_rs_str),
         "lint must accept Vec<u8> (MessagePack protocol)"
@@ -94,7 +99,8 @@ fn test_rules_create_fails_on_existing_directory() -> Result<(), Box<dyn std::er
         .arg("create")
         .arg(rule_name)
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicate::str::contains("already exists"));
 
     Ok(())
 }
