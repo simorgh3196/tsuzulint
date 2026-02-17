@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use extism::{Manifest, Plugin, Wasm};
+use extism::{Manifest, Plugin, PluginBuilder, Wasm};
 use tracing::{debug, info};
 
 use crate::executor::{LoadResult, RuleExecutor};
@@ -38,6 +38,8 @@ pub struct ExtismExecutor {
     rules: HashMap<String, LoadedRule>,
     /// Timeout for WASM execution in milliseconds.
     timeout_ms: u64,
+    /// Fuel limit for WASM execution (number of instructions).
+    fuel_limit: Option<u64>,
 }
 
 impl ExtismExecutor {
@@ -46,6 +48,7 @@ impl ExtismExecutor {
         Self {
             rules: HashMap::new(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
+            fuel_limit: None,
         }
     }
 
@@ -53,6 +56,13 @@ impl ExtismExecutor {
     #[cfg(all(test, feature = "test-utils"))]
     pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Sets the fuel limit for WASM execution.
+    #[cfg(all(test, feature = "test-utils"))]
+    pub fn with_fuel_limit(mut self, limit: u64) -> Self {
+        self.fuel_limit = Some(limit);
         self
     }
 
@@ -85,7 +95,14 @@ impl ExtismExecutor {
         let manifest = self.configure_manifest(manifest);
 
         // Create the plugin with WASI support
-        let mut plugin = Plugin::new(&manifest, [], true)
+        let mut builder = PluginBuilder::new(&manifest).with_wasi(true);
+
+        if let Some(limit) = self.fuel_limit {
+            builder = builder.with_fuel_limit(limit);
+        }
+
+        let mut plugin = builder
+            .build()
             .map_err(|e| PluginError::load(format!("Failed to create plugin: {}", e)))?;
 
         // Get the rule manifest by calling get_manifest()
@@ -262,6 +279,45 @@ mod tests {
         assert!(
             err_lower.contains("timeout") || err_lower.contains("deadline"),
             "Expected timeout error, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_fuel_limit() {
+        // Use a fuel limit of 1000 instructions
+        let mut executor = ExtismExecutor::new().with_fuel_limit(1000);
+
+        // Infinite loop rule (Extism ABI)
+        // We put the loop in get_manifest so load() fails with fuel limit exceeded
+        let wasm = wat_to_wasm(
+            r#"
+            (module
+                (memory (export "memory") 1)
+
+                (func (export "get_manifest") (result i32)
+                    (loop
+                        (br 0)
+                    )
+                    (i32.const 0)
+                )
+            )
+            "#,
+        );
+
+        // Should return an error due to fuel limit during load
+        let result = executor.load(&wasm);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+
+        println!("Fuel limit error: {}", err_msg);
+
+        // Check for specific error related to fuel limit
+        // The error message typically contains "fuel"
+        assert!(
+            err_msg.to_lowercase().contains("fuel") || err_msg.to_lowercase().contains("limit"),
+            "Expected fuel limit error, got: {}",
             err_msg
         );
     }
