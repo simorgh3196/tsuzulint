@@ -14,6 +14,7 @@ use tracing::warn;
 #[allow(unused_imports)]
 use crate::executor::RuleExecutor;
 use crate::{Diagnostic, PluginError, RuleManifest};
+use tsuzulint_text::{Token, Sentence};
 
 #[cfg(feature = "native")]
 use crate::executor_extism::ExtismExecutor;
@@ -38,6 +39,10 @@ compile_error!("Either 'native' or 'browser' feature must be enabled.");
 /// Request sent to a rule's lint function.
 #[derive(Debug, Serialize)]
 struct LintRequest<'a, T: Serialize> {
+    /// Tokens in the text.
+    tokens: Vec<Token>,
+    /// Sentences in the text.
+    sentences: Vec<Sentence>,
     /// The node to lint (serialized).
     node: &'a T,
     /// Rule configuration.
@@ -237,6 +242,8 @@ impl PluginHost {
         name: &str,
         node: &T,
         source: &serde_json::value::RawValue,
+        tokens: &serde_json::value::RawValue,
+        sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         Self::run_rule_with_parts(
@@ -246,6 +253,8 @@ impl PluginHost {
             name,
             node,
             source,
+            tokens,
+            sentences,
             file_path,
         )
     }
@@ -259,6 +268,8 @@ impl PluginHost {
         name: &str,
         node: &T,
         source: &serde_json::value::RawValue,
+        tokens: &serde_json::value::RawValue,
+        sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let config = configs
@@ -269,10 +280,18 @@ impl PluginHost {
         let source_str: String = serde_json::from_str(source.get())
             .map_err(|e| PluginError::call(format!("Invalid source JSON: {}", e)))?;
 
+        let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
+            .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
+
+        let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
+            .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
+
         let request = LintRequest {
             node,
             config,
             source: source_str,
+            tokens: tokens_vec,
+            sentences: sentences_vec,
             file_path,
         };
 
@@ -304,6 +323,8 @@ impl PluginHost {
         &mut self,
         node: &T,
         source: &serde_json::value::RawValue,
+        tokens: &serde_json::value::RawValue,
+        sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let mut all_diagnostics = Vec::new();
@@ -319,6 +340,8 @@ impl PluginHost {
                 name,
                 node,
                 source,
+                tokens,
+                sentences,
                 file_path,
             ) {
                 Ok(diagnostics) => {
@@ -382,7 +405,9 @@ mod tests {
         let source_json = serde_json::to_string("").unwrap();
         let source = serde_json::value::RawValue::from_string(source_json).unwrap();
 
-        let result = host.run_rule("nonexistent", &node, &source, None);
+        let tokens_raw = serde_json::value::RawValue::from_string(serde_json::to_string(&Vec::<Token>::new()).unwrap()).unwrap();
+        let sentences_raw = serde_json::value::RawValue::from_string(serde_json::to_string(&Vec::<Sentence>::new()).unwrap()).unwrap();
+        let result = host.run_rule("nonexistent", &node, &source, &tokens_raw, &sentences_raw, None);
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 
@@ -406,6 +431,8 @@ mod tests {
             pub node: serde_json::Value,
             pub config: serde_json::Value,
             pub source: String,
+            pub tokens: Vec<Token>,
+            pub sentences: Vec<Sentence>,
             pub file_path: Option<String>,
             #[serde(default)]
             pub helpers: Option<serde_json::Value>,
@@ -413,6 +440,8 @@ mod tests {
 
         let node_data = serde_json::json!({"type": "Doc", "children": []});
         let config = serde_json::json!({"option": "value"});
+        let tokens = vec![];
+        let sentences = vec![];
         let source = "test content".to_string();
         let file_path = Some("test.md");
 
@@ -421,6 +450,8 @@ mod tests {
             node: &node_data,
             config: config.clone(),
             source: source.clone(),
+            tokens: tokens.clone(),
+            sentences: sentences.clone(),
             file_path,
         };
 
@@ -433,6 +464,8 @@ mod tests {
 
         // Verify content
         assert_eq!(guest_request.source, source);
+        assert_eq!(guest_request.tokens, tokens);
+        assert_eq!(guest_request.sentences, sentences);
         assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
         assert_eq!(guest_request.config, config);
         assert_eq!(guest_request.node, node_data);

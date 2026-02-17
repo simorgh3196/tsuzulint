@@ -14,6 +14,7 @@ browser = ["wasmi"]
 test-utils = ["wat"]
 
 [dependencies]
+tsuzulint_text = { workspace = true }
 tsuzulint_ast = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
