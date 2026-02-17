@@ -10,7 +10,6 @@ use tsuzulint_plugin::Diagnostic;
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
-// #[rkyv(check_bytes)]
 pub struct BlockCacheEntry {
     /// Hash of the block content.
     pub hash: String,
@@ -26,7 +25,6 @@ pub struct BlockCacheEntry {
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
-// #[rkyv(check_bytes)]
 pub struct CacheEntry {
     /// Hash of the file content.
     pub content_hash: String,
