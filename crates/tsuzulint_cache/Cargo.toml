@@ -13,12 +13,12 @@ native = ["tsuzulint_plugin/native"]
 browser = ["tsuzulint_plugin/browser"]
 
 [dependencies]
-tsuzulint_plugin = { workspace = true }
-tsuzulint_ast = { workspace = true }
+tsuzulint_plugin = { workspace = true, features = ["rkyv"] }
+tsuzulint_ast = { workspace = true, features = ["rkyv"] }
 blake3 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rkyv = { workspace = true }
+rkyv = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

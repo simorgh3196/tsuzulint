@@ -8,8 +8,12 @@ rust-version.workspace = true
 description = "AST types for TsuzuLint natural language linter"
 
 [dependencies]
+rkyv = { workspace = true, optional = true, features = ["std"] }
 bumpalo = { workspace = true }
 serde = { workspace = true }
+
+[features]
+rkyv = ["dep:rkyv"]
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
