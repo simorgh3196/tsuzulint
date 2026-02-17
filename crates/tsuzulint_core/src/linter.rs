@@ -971,9 +971,6 @@ impl Linter {
             .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
         let sentences = SentenceSplitter::split(content, &ignore_ranges);
 
-        let tokens_raw = Self::to_raw_value(&tokens, "tokens")?;
-        let sentences_raw = Self::to_raw_value(&sentences, "sentences")?;
-
         // Run rules
         let diagnostics = {
             let mut host = self
@@ -1801,6 +1798,7 @@ mod tests {
             loaded
         );
     }
+
     #[test]
     fn test_lint_files_partial_failure() {
         let (config, _temp) = test_config();
