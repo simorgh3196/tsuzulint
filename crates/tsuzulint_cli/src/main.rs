@@ -525,6 +525,7 @@ crate-type = ["cdylib"]
 extism-pdk = "1.2"
 serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
+rmp-serde = "1.3"
 "#,
         name.replace('-', "_")
     );
@@ -588,8 +589,8 @@ pub fn get_manifest() -> FnResult<String> {{
 }}
 
 #[plugin_fn]
-pub fn lint(input: String) -> FnResult<String> {{
-    let request: LintRequest = serde_json::from_str(&input)?;
+pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {{
+    let request: LintRequest = rmp_serde::from_slice(&input)?;
     let mut diagnostics = Vec::new();
 
     // TODO: Implement your rule logic here
@@ -607,7 +608,7 @@ pub fn lint(input: String) -> FnResult<String> {{
     // }}
 
     let response = LintResponse {{ diagnostics }};
-    Ok(serde_json::to_string(&response)?)
+    Ok(rmp_serde::to_vec_named(&response)?)
 }}
 "#,
         name, name, name
