@@ -976,7 +976,6 @@ mod tests {
         assert_eq!(matches[0].matched_text, "ﬁsh");
         assert_eq!(matches[1].matched_text, "Straße");
     }
-}
 
     #[test]
     fn lint_response_msgpack_serialization() {
@@ -988,3 +987,4 @@ mod tests {
         assert_eq!(decoded.diagnostics.len(), 1);
         assert_eq!(decoded.diagnostics[0].rule_id, "test");
     }
+}

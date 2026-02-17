@@ -68,7 +68,7 @@ struct LintResponse {
 /// host.load_rule("./rules/no-todo.wasm")?;
 ///
 /// // Run the rule on an AST node
-/// let diagnostics = host.run_rule("no-todo", &node_bytes, source)?;
+/// let diagnostics = host.run_rule("no-todo", &node, &source, Some("example.md"))?;
 /// ```
 pub struct PluginHost {
     /// The WASM executor.
@@ -421,19 +421,21 @@ mod tests {
             node: &node_data,
             config: config.clone(),
             source: source.clone(),
-            file_path: file_path,
+            file_path,
         };
 
         // Serialize using rmp_serde (as done in host)
         let bytes = rmp_serde::to_vec_named(&host_request).expect("Serialization failed");
 
         // Guest side (deserialize using rmp_serde)
-        let guest_request: PdkLintRequest = rmp_serde::from_slice(&bytes).expect("Deserialization failed");
+        let guest_request: PdkLintRequest =
+            rmp_serde::from_slice(&bytes).expect("Deserialization failed");
 
         // Verify content
         assert_eq!(guest_request.source, source);
         assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
         assert_eq!(guest_request.config, config);
         assert_eq!(guest_request.node, node_data);
+        assert_eq!(guest_request.helpers, None);
     }
 }
