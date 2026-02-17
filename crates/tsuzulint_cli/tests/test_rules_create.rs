@@ -1,6 +1,7 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::prelude::*;
 use predicates::prelude::*;
+use regex::Regex;
 
 #[test]
 fn test_rules_create_generates_valid_project() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,10 +42,13 @@ fn test_rules_create_generates_valid_project() -> Result<(), Box<dyn std::error:
 
     // --- src/lib.rs checks ---
     let lib_rs = std::fs::read_to_string(rule_dir.child("src/lib.rs").path())?;
+    let lib_rs_str = lib_rs.as_str();
 
     // get_manifest uses JSON (String return type)
+    let get_manifest_decl =
+        Regex::new(r"pub\s+fn\s+get_manifest\s*\(\s*\)\s*->\s*FnResult<\s*String\s*>").unwrap();
     assert!(
-        lib_rs.contains("pub fn get_manifest() -> FnResult<String>"),
+        get_manifest_decl.is_match(lib_rs_str),
         "get_manifest must return String (JSON protocol)"
     );
     assert!(
@@ -53,8 +57,9 @@ fn test_rules_create_generates_valid_project() -> Result<(), Box<dyn std::error:
     );
 
     // lint uses MessagePack (Vec<u8> in/out)
+    let lint_decl = Regex::new(r"pub\s+fn\s+lint\s*\(\s*input\s*:\s*Vec<\s*u8\s*>\s*\)\s*->\s*FnResult<\s*Vec<\s*u8\s*>\s*>").unwrap();
     assert!(
-        lib_rs.contains("pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>>"),
+        lint_decl.is_match(lib_rs_str),
         "lint must accept Vec<u8> (MessagePack protocol)"
     );
     assert!(
@@ -69,7 +74,7 @@ fn test_rules_create_generates_valid_project() -> Result<(), Box<dyn std::error:
     // Rule name is correctly embedded
     assert!(
         lib_rs.contains(&format!("\"{}\"", rule_name)),
-        "Rule name must be embedded in generate code"
+        "Rule name must be embedded in generated code"
     );
 
     Ok(())
