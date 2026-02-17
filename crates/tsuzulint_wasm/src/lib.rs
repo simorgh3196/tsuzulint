@@ -21,8 +21,8 @@ pub struct TextLinter {
 
 struct AnalysisData {
     source: Box<serde_json::value::RawValue>,
-    tokens: Box<serde_json::value::RawValue>,
-    sentences: Box<serde_json::value::RawValue>,
+    tokens: Vec<tsuzulint_text::Token>,
+    sentences: Vec<tsuzulint_text::Sentence>,
 }
 
 #[wasm_bindgen]
@@ -51,32 +51,20 @@ impl TextLinter {
         self.host.configure_rule(name, config).map_err(to_js_error)
     }
 
-    /// Prepares text analysis data (source, tokens, sentences) as pre-serialized JSON.
+    /// Prepares text analysis data (source, tokens, sentences).
     fn prepare_text_analysis(&self, content: &str) -> Result<AnalysisData, JsError> {
-        let source_json = serde_json::to_string(&content).map_err(to_js_error)?;
-        let source_raw =
-            serde_json::value::RawValue::from_string(source_json).map_err(to_js_error)?;
+        let source_raw = serde_json::value::to_raw_value(&content).map_err(to_js_error)?;
 
         let tokens = self.tokenizer.tokenize(content).map_err(to_js_error)?;
 
         // TODO: Compute ignore ranges from AST (code blocks, inline code)
-        // Currently empty as we don't have easy access to AST here without parsing twice?
-        // Or we should move parsing here?
         let ignore_ranges: Vec<std::ops::Range<usize>> = Vec::new();
         let sentences = SentenceSplitter::split(content, &ignore_ranges);
 
-        let tokens_json = serde_json::to_string(&tokens).map_err(to_js_error)?;
-        let tokens_raw =
-            serde_json::value::RawValue::from_string(tokens_json).map_err(to_js_error)?;
-
-        let sentences_json = serde_json::to_string(&sentences).map_err(to_js_error)?;
-        let sentences_raw =
-            serde_json::value::RawValue::from_string(sentences_json).map_err(to_js_error)?;
-
         Ok(AnalysisData {
             source: source_raw,
-            tokens: tokens_raw,
-            sentences: sentences_raw,
+            tokens,
+            sentences,
         })
     }
 
@@ -105,15 +93,14 @@ impl TextLinter {
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
 
         // Convert AST to pre-serialized JSON
-        let ast_json = serde_json::to_string(&ast).map_err(to_js_error)?;
-        let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(to_js_error)?;
+        let ast_raw = serde_json::value::to_raw_value(&ast).map_err(to_js_error)?;
 
         // Prepare analysis data
         let analysis = self.prepare_text_analysis(content)?;
 
         // Run all rules
         self.host
-            .run_all_rules(
+            .run_all_rules_with_parts(
                 &ast_raw,
                 &analysis.source,
                 &analysis.tokens,
@@ -381,8 +368,23 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
-    fn test_configure_rule() {
+    fn test_configure_unknown_rule_fails() {
         let mut linter = TextLinter::new().unwrap();
+        let config = serde_json::json!({ "option": "value" });
+        let js_val = serde_wasm_bindgen::to_value(&config).unwrap();
+
+        let result = linter.configure_rule("unknown-rule", js_val);
+        assert!(result.is_err());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_configure_rule_success() {
+        let mut linter = TextLinter::new().unwrap();
+        let wasm = include_bytes!(
+            "../../tsuzulint_core/tests/fixtures/simple_rule/target/wasm32-wasip1/release/simple_rule.wasm"
+        );
+        linter.load_rule(wasm).unwrap();
+
         let config = serde_json::json!({ "option": "value" });
         let js_val = serde_wasm_bindgen::to_value(&config).unwrap();
 

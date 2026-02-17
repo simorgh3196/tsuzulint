@@ -580,10 +580,6 @@ impl Linter {
             // This avoids re-escaping the source string for every rule execution
             let source_raw = Self::to_raw_value(&content, "content")?;
 
-            // Serialize tokens and sentences
-            let tokens_raw = Self::to_raw_value(&tokens, "tokens")?;
-            let sentences_raw = Self::to_raw_value(&sentences, "sentences")?;
-
             // A. Run Global Rules
             // Global rules must always run on the full document if anything changed
             // because they depend on the full context.
@@ -593,12 +589,12 @@ impl Linter {
                     // Optimized path for single rule: avoid RawValue
                     let rule = &global_rule_names[0];
                     let start = Instant::now();
-                    match host.run_rule(
+                    match host.run_rule_with_parts(
                         rule,
                         &ast,
                         &source_raw,
-                        &tokens_raw,
-                        &sentences_raw,
+                        &tokens,
+                        &sentences,
                         path.to_str(),
                     ) {
                         Ok(diags) => global_diagnostics.extend(diags),
@@ -613,12 +609,12 @@ impl Linter {
 
                     for rule in global_rule_names {
                         let start = Instant::now();
-                        match host.run_rule(
+                        match host.run_rule_with_parts(
                             &rule,
                             &ast_raw,
                             &source_raw,
-                            &tokens_raw,
-                            &sentences_raw,
+                            &tokens,
+                            &sentences,
                             path.to_str(),
                         ) {
                             Ok(diags) => global_diagnostics.extend(diags),
@@ -646,12 +642,12 @@ impl Linter {
                                 // Optimized path for single rule
                                 let rule = &block_rule_names[0];
                                 let start = Instant::now();
-                                match host.run_rule(
+                                match host.run_rule_with_parts(
                                     rule,
                                     node,
                                     &source_raw,
-                                    &tokens_raw,
-                                    &sentences_raw,
+                                    &tokens,
+                                    &sentences,
                                     path.to_str(),
                                 ) {
                                     Ok(diags) => block_diagnostics.extend(diags),
@@ -664,12 +660,12 @@ impl Linter {
                             } else if let Ok(node_raw) = Self::to_raw_value(node, "block node") {
                                 for rule in &block_rule_names {
                                     let start = Instant::now();
-                                    match host.run_rule(
+                                    match host.run_rule_with_parts(
                                         rule,
                                         &node_raw,
                                         &source_raw,
-                                        &tokens_raw,
-                                        &sentences_raw,
+                                        &tokens,
+                                        &sentences,
                                         path.to_str(),
                                     ) {
                                         Ok(diags) => block_diagnostics.extend(diags),
@@ -984,11 +980,11 @@ impl Linter {
                 .plugin_host
                 .lock()
                 .map_err(|_| LinterError::Internal("Plugin host lock poisoned".to_string()))?;
-            host.run_all_rules(
+            host.run_all_rules_with_parts(
                 &ast_raw,
                 &source_raw,
-                &tokens_raw,
-                &sentences_raw,
+                &tokens,
+                &sentences,
                 path.to_str(),
             )?
         };

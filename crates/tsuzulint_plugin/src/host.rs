@@ -247,28 +247,46 @@ impl PluginHost {
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         // Deserialize tokens and sentences first
+        // We do this here only once per run_rule call.
+        // For multiple rules, callers should use run_rule_with_parts.
         let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
             .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
 
         let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
             .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
 
-        Self::run_rule_with_parts(
+        self.run_rule_with_parts(name, node, source, &tokens_vec, &sentences_vec, file_path)
+    }
+
+    /// Runs a rule on a node with pre-deserialized analysis data.
+    ///
+    /// This is an optimized version of `run_rule` that avoids repeated
+    /// deserialization of tokens and sentences when running multiple rules.
+    pub fn run_rule_with_parts<T: Serialize>(
+        &mut self,
+        name: &str,
+        node: &T,
+        source: &serde_json::value::RawValue,
+        tokens: &[Token],
+        sentences: &[Sentence],
+        file_path: Option<&str>,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        Self::run_rule_with_parts_internal(
             &mut self.executor,
             &self.configs,
             &self.aliases,
             name,
             node,
             source,
-            &tokens_vec,
-            &sentences_vec,
+            tokens,
+            sentences,
             file_path,
         )
     }
 
     /// Internal helper to run a rule with split borrows.
     #[allow(clippy::too_many_arguments)]
-    fn run_rule_with_parts<T: Serialize>(
+    fn run_rule_with_parts_internal<T: Serialize>(
         executor: &mut Executor,
         configs: &HashMap<String, serde_json::Value>,
         aliases: &HashMap<String, String>,
@@ -328,8 +346,6 @@ impl PluginHost {
         sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        let mut all_diagnostics = Vec::new();
-
         // Deserialize tokens and sentences ONCE
         let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
             .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
@@ -337,19 +353,33 @@ impl PluginHost {
         let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
             .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
 
+        self.run_all_rules_with_parts(node, source, &tokens_vec, &sentences_vec, file_path)
+    }
+
+    /// Runs all loaded rules on a node with pre-deserialized analysis data.
+    pub fn run_all_rules_with_parts<T: Serialize>(
+        &mut self,
+        node: &T,
+        source: &serde_json::value::RawValue,
+        tokens: &[Token],
+        sentences: &[Sentence],
+        file_path: Option<&str>,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        let mut all_diagnostics = Vec::new();
+
         // Iterate over manifest keys directly without collecting into a Vec.
         // We can do this because run_rule_with_parts takes split borrows,
         // so `self.manifests` (immutable) is not conflicted with `self.executor` (mutable).
         for name in self.manifests.keys() {
-            match Self::run_rule_with_parts(
+            match Self::run_rule_with_parts_internal(
                 &mut self.executor,
                 &self.configs,
                 &self.aliases,
                 name,
                 node,
                 source,
-                &tokens_vec,
-                &sentences_vec,
+                tokens,
+                sentences,
                 file_path,
             ) {
                 Ok(diagnostics) => {
