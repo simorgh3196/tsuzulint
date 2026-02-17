@@ -158,7 +158,10 @@ impl CacheManager {
             if let Some(candidates) = cached_blocks_map.get_mut(&current_block.hash)
                 && let Some(best_match_idx) = Self::find_best_match(current_block, candidates)
             {
-                let matched_block = candidates.remove(best_match_idx);
+                // Optimization: swap_remove is O(1) while remove is O(N).
+                // Order of candidates does not matter for finding the best match
+                // since find_best_match scans the entire list.
+                let matched_block = candidates.swap_remove(best_match_idx);
                 matched_mask[i] = true;
 
                 // Calculate offset shift
@@ -193,30 +196,17 @@ impl CacheManager {
 
     /// Finds the best match among candidates for a current block.
     /// Ideally, we want the one strictly matching in order or closest in position.
-    /// For now, we take the first one (simple approach), or maybe closest span start.
     fn find_best_match(
         current_block: &BlockCacheEntry,
         candidates: &[&BlockCacheEntry],
     ) -> Option<usize> {
-        if candidates.is_empty() {
-            return None;
-        }
-
-        // Heuristic: Pick the candidate closest in position to current block
-        // This helps when there are duplicate blocks (e.g. empty lines or recurring headers)
-        let mut best_idx = 0;
-        let mut min_dist =
-            (current_block.span.start as i64 - candidates[0].span.start as i64).abs();
-
-        for (i, candidate) in candidates.iter().enumerate().skip(1) {
-            let dist = (current_block.span.start as i64 - candidate.span.start as i64).abs();
-            if dist < min_dist {
-                min_dist = dist;
-                best_idx = i;
-            }
-        }
-
-        Some(best_idx)
+        candidates
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, candidate)| {
+                (current_block.span.start as i64 - candidate.span.start as i64).abs()
+            })
+            .map(|(index, _)| index)
     }
 
     /// Stores a cache entry for a file.
