@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tsuzulint_text::{Tokenizer, SentenceSplitter};
 use std::time::{Duration, Instant};
+use tsuzulint_text::{SentenceSplitter, Tokenizer};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
@@ -65,7 +65,9 @@ impl Linter {
         }
 
         // Initialize tokenizer
-        let tokenizer = Arc::new(Tokenizer::new().map_err(|e| LinterError::Internal(format!("Failed to initialize tokenizer: {}", e)))?);
+        let tokenizer = Arc::new(Tokenizer::new().map_err(|e| {
+            LinterError::Internal(format!("Failed to initialize tokenizer: {}", e))
+        })?);
 
         // Build glob patterns
         let include_globs = Self::build_globset(&config.include)?;
@@ -507,7 +509,10 @@ impl Linter {
         let rule_versions = Self::get_rule_versions_from_host(host);
 
         // Tokenize content
-        let tokens = self.tokenizer.tokenize(&content).map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
+        let tokens = self
+            .tokenizer
+            .tokenize(&content)
+            .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
         let sentences = SentenceSplitter::split(&content, &[]);
 
         // 1. Check full cache first
@@ -567,19 +572,20 @@ impl Linter {
                 .map_err(|e| LinterError::Internal(format!("Failed to create RawValue: {}", e)))?;
 
             // Serialize tokens and sentences
-            let tokens_json = serde_json::to_string(&tokens).map_err(|e| {
-                LinterError::Internal(format!("Failed to serialize tokens: {}", e))
-            })?;
-            let tokens_raw = serde_json::value::RawValue::from_string(tokens_json).map_err(|e| {
-                LinterError::Internal(format!("Failed to create RawValue for tokens: {}", e))
-            })?;
+            let tokens_json = serde_json::to_string(&tokens)
+                .map_err(|e| LinterError::Internal(format!("Failed to serialize tokens: {}", e)))?;
+            let tokens_raw =
+                serde_json::value::RawValue::from_string(tokens_json).map_err(|e| {
+                    LinterError::Internal(format!("Failed to create RawValue for tokens: {}", e))
+                })?;
 
             let sentences_json = serde_json::to_string(&sentences).map_err(|e| {
                 LinterError::Internal(format!("Failed to serialize sentences: {}", e))
             })?;
-            let sentences_raw = serde_json::value::RawValue::from_string(sentences_json).map_err(|e| {
-                LinterError::Internal(format!("Failed to create RawValue for sentences: {}", e))
-            })?;
+            let sentences_raw =
+                serde_json::value::RawValue::from_string(sentences_json).map_err(|e| {
+                    LinterError::Internal(format!("Failed to create RawValue for sentences: {}", e))
+                })?;
 
             // A. Run Global Rules
             // Global rules must always run on the full document if anything changed
@@ -590,7 +596,14 @@ impl Linter {
                     // Optimized path for single rule: avoid RawValue
                     let rule = &global_rule_names[0];
                     let start = Instant::now();
-                    match host.run_rule(rule, &ast, &source_raw, &tokens_raw, &sentences_raw, path.to_str()) {
+                    match host.run_rule(
+                        rule,
+                        &ast,
+                        &source_raw,
+                        &tokens_raw,
+                        &sentences_raw,
+                        path.to_str(),
+                    ) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
@@ -609,7 +622,14 @@ impl Linter {
 
                     for rule in global_rule_names {
                         let start = Instant::now();
-                        match host.run_rule(&rule, &ast_raw, &source_raw, &tokens_raw, &sentences_raw, path.to_str()) {
+                        match host.run_rule(
+                            &rule,
+                            &ast_raw,
+                            &source_raw,
+                            &tokens_raw,
+                            &sentences_raw,
+                            path.to_str(),
+                        ) {
                             Ok(diags) => global_diagnostics.extend(diags),
                             Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                         }
@@ -635,7 +655,14 @@ impl Linter {
                                 // Optimized path for single rule
                                 let rule = &block_rule_names[0];
                                 let start = Instant::now();
-                                match host.run_rule(rule, node, &source_raw, &tokens_raw, &sentences_raw, path.to_str()) {
+                                match host.run_rule(
+                                    rule,
+                                    node,
+                                    &source_raw,
+                                    &tokens_raw,
+                                    &sentences_raw,
+                                    path.to_str(),
+                                ) {
                                     Ok(diags) => block_diagnostics.extend(diags),
                                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                 }
@@ -884,22 +911,24 @@ impl Linter {
         })?;
 
         // Tokenize content
-        let tokens = self.tokenizer.tokenize(content).map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
+        let tokens = self
+            .tokenizer
+            .tokenize(content)
+            .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
         let sentences = SentenceSplitter::split(content, &[]);
 
-        let tokens_json = serde_json::to_string(&tokens).map_err(|e| {
-            LinterError::Internal(format!("Failed to serialize tokens: {}", e))
-        })?;
+        let tokens_json = serde_json::to_string(&tokens)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize tokens: {}", e)))?;
         let tokens_raw = serde_json::value::RawValue::from_string(tokens_json).map_err(|e| {
             LinterError::Internal(format!("Failed to create RawValue for tokens: {}", e))
         })?;
 
-        let sentences_json = serde_json::to_string(&sentences).map_err(|e| {
-            LinterError::Internal(format!("Failed to serialize sentences: {}", e))
-        })?;
-        let sentences_raw = serde_json::value::RawValue::from_string(sentences_json).map_err(|e| {
-            LinterError::Internal(format!("Failed to create RawValue for sentences: {}", e))
-        })?;
+        let sentences_json = serde_json::to_string(&sentences)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize sentences: {}", e)))?;
+        let sentences_raw =
+            serde_json::value::RawValue::from_string(sentences_json).map_err(|e| {
+                LinterError::Internal(format!("Failed to create RawValue for sentences: {}", e))
+            })?;
 
         // Run rules
         let diagnostics = {
@@ -907,7 +936,13 @@ impl Linter {
                 .plugin_host
                 .lock()
                 .map_err(|_| LinterError::Internal("Plugin host lock poisoned".to_string()))?;
-            host.run_all_rules(&ast_raw, &source_raw, &tokens_raw, &sentences_raw, path.to_str())?
+            host.run_all_rules(
+                &ast_raw,
+                &source_raw,
+                &tokens_raw,
+                &sentences_raw,
+                path.to_str(),
+            )?
         };
 
         Ok(diagnostics)

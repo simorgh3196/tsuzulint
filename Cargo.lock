@@ -4617,6 +4617,7 @@ dependencies = [
  "tsuzulint_ast",
  "tsuzulint_parser",
  "tsuzulint_plugin",
+ "tsuzulint_text",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]

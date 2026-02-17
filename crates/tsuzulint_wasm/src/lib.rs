@@ -1,148 +1,57 @@
-//! # tsuzulint_wasm
-//!
-//! WebAssembly bindings for TsuzuLint, enabling browser-based text linting.
-//!
-//! This crate provides JavaScript/TypeScript bindings for the TsuzuLint linter
-//! using wasm-bindgen. It enables running the complete linter in the browser
-//! with support for dynamically loading WASM rules.
-//!
-//! ## Architecture
-//!
-//! ```text
-//! ┌─────────────────────────────────────────┐
-//! │ Browser (JavaScript)                    │
-//! │   ↓                                     │
-//! │ tsuzulint_wasm (this crate)                │
-//! │   ↓                                     │
-//! │ tsuzulint_plugin (browser feature)         │
-//! │   ↓                                     │
-//! │ wasmi (pure Rust WASM interpreter)      │
-//! │   ↓                                     │
-//! │ WASM Rules (same as native)             │
-//! └─────────────────────────────────────────┘
-//! ```
-//!
-//! ## Usage (JavaScript/TypeScript)
-//!
-//! ```javascript
-//! import init, { TextLinter } from 'tsuzulint-wasm';
-//!
-//! async function main() {
-//!   await init();
-//!
-//!   const linter = new TextLinter();
-//!
-//!   // Load a rule from WASM bytes
-//!   const ruleWasm = await fetch('/rules/no-todo.wasm')
-//!     .then(r => r.arrayBuffer())
-//!     .then(buf => new Uint8Array(buf));
-//!
-//!   linter.loadRule(ruleWasm);
-//!   linter.configureRule('no-todo', JSON.stringify({ allowed: ['FIXME'] }));
-//!
-//!   // Lint text
-//!   const diagnostics = linter.lint('# Hello\n\nTODO: Fix this', 'markdown');
-//!   console.log(diagnostics);
-//! }
-//! ```
-
-use wasm_bindgen::prelude::*;
-
 use tsuzulint_ast::AstArena;
 use tsuzulint_parser::{MarkdownParser, Parser, PlainTextParser};
 use tsuzulint_plugin::{Diagnostic, PluginHost, Severity};
+use tsuzulint_text::{SentenceSplitter, Tokenizer};
+use wasm_bindgen::prelude::*;
 
-/// Initialize panic hook for better error messages in browser console.
-#[wasm_bindgen(start)]
-pub fn init_panic_hook() {
-    #[cfg(feature = "console_error_panic_hook")]
-    console_error_panic_hook::set_once();
-}
-
-/// A text linter for browser environments.
-///
-/// This is the main entry point for using TsuzuLint in the browser.
-/// It provides methods to load rules, configure them, and lint text.
 #[wasm_bindgen]
 pub struct TextLinter {
     host: PluginHost,
+    tokenizer: Tokenizer,
 }
 
 #[wasm_bindgen]
 impl TextLinter {
-    /// Creates a new TextLinter instance.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self {
-            host: PluginHost::new(),
-        }
+        console_error_panic_hook::set_once();
+        let host = PluginHost::new();
+        let tokenizer = Tokenizer::new().expect("Failed to initialize tokenizer");
+
+        // Load default rules or configure them here if needed
+        // For WASM, rules might be loaded differently
+
+        Self { host, tokenizer }
     }
 
-    /// Loads a WASM rule from bytes.
-    ///
-    /// # Arguments
-    ///
-    /// * `wasm_bytes` - The WASM binary content as a Uint8Array
-    ///
-    /// # Returns
-    ///
-    /// The rule name on success, or throws an error on failure.
+    /// Loads a rule from WASM bytes.
     #[wasm_bindgen(js_name = loadRule)]
     pub fn load_rule(&mut self, wasm_bytes: &[u8]) -> Result<String, JsError> {
         let manifest = self
             .host
             .load_rule_bytes(wasm_bytes)
             .map_err(|e| JsError::new(&e.to_string()))?;
-
         Ok(manifest.name)
     }
 
-    /// Configures a loaded rule.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The rule name
-    /// * `config_json` - The configuration as a JSON string
+    /// Configures a rule.
     #[wasm_bindgen(js_name = configureRule)]
-    pub fn configure_rule(&mut self, name: &str, config_json: &str) -> Result<(), JsError> {
-        let config: serde_json::Value =
-            serde_json::from_str(config_json).map_err(|e| JsError::new(&e.to_string()))?;
-
+    pub fn configure_rule(&mut self, name: &str, config_json: JsValue) -> Result<(), JsError> {
+        let config = serde_wasm_bindgen::from_value(config_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
         self.host
             .configure_rule(name, config)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Returns the names of all loaded rules.
-    #[wasm_bindgen(js_name = loadedRules)]
+    #[wasm_bindgen(js_name = getLoadedRules)]
     pub fn loaded_rules(&self) -> Vec<String> {
-        self.host.loaded_rules().map(|s| s.to_string()).collect()
-    }
-
-    /// Unloads a rule.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The rule name to unload
-    ///
-    /// # Returns
-    ///
-    /// `true` if the rule was unloaded, `false` if it wasn't loaded.
-    #[wasm_bindgen(js_name = unloadRule)]
-    pub fn unload_rule(&mut self, name: &str) -> bool {
-        self.host.unload_rule(name)
+        self.host.loaded_rules().cloned().collect()
     }
 
     /// Lints text content.
-    ///
-    /// # Arguments
-    ///
-    /// * `content` - The text content to lint
-    /// * `file_type` - The file type (e.g., "markdown", "txt")
-    ///
-    /// # Returns
-    ///
-    /// An array of diagnostic objects.
+    #[wasm_bindgen]
     pub fn lint(&mut self, content: &str, file_type: &str) -> Result<JsValue, JsError> {
         let arena = AstArena::new();
 
@@ -168,10 +77,27 @@ impl TextLinter {
         let source_raw = serde_json::value::RawValue::from_string(source_json)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
+        // Tokenize content
+        let tokens = self
+            .tokenizer
+            .tokenize(content)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let sentences = SentenceSplitter::split(content, &[]);
+
+        let tokens_json =
+            serde_json::to_string(&tokens).map_err(|e| JsError::new(&e.to_string()))?;
+        let tokens_raw = serde_json::value::RawValue::from_string(tokens_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        let sentences_json =
+            serde_json::to_string(&sentences).map_err(|e| JsError::new(&e.to_string()))?;
+        let sentences_raw = serde_json::value::RawValue::from_string(sentences_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
         // Run all rules
         let diagnostics = self
             .host
-            .run_all_rules(&ast_raw, &source_raw, None)
+            .run_all_rules(&ast_raw, &source_raw, &tokens_raw, &sentences_raw, None)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Convert diagnostics to JavaScript objects
@@ -183,7 +109,7 @@ impl TextLinter {
 
     /// Lints text content and returns diagnostics as a JSON string.
     ///
-    /// This is an alternative to `lint()` that returns a JSON string
+    /// This is an alternative to  that returns a JSON string
     /// instead of JavaScript objects, which may be more efficient for
     /// some use cases.
     #[wasm_bindgen(js_name = lintJson)]
@@ -212,10 +138,27 @@ impl TextLinter {
         let source_raw = serde_json::value::RawValue::from_string(source_json)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
+        // Tokenize content
+        let tokens = self
+            .tokenizer
+            .tokenize(content)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let sentences = SentenceSplitter::split(content, &[]);
+
+        let tokens_json =
+            serde_json::to_string(&tokens).map_err(|e| JsError::new(&e.to_string()))?;
+        let tokens_raw = serde_json::value::RawValue::from_string(tokens_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        let sentences_json =
+            serde_json::to_string(&sentences).map_err(|e| JsError::new(&e.to_string()))?;
+        let sentences_raw = serde_json::value::RawValue::from_string(sentences_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
         // Run all rules
         let diagnostics = self
             .host
-            .run_all_rules(&ast_raw, &source_raw, None)
+            .run_all_rules(&ast_raw, &source_raw, &tokens_raw, &sentences_raw, None)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         serde_json::to_string(&diagnostics).map_err(|e| JsError::new(&e.to_string()))

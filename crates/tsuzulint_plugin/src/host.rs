@@ -14,7 +14,7 @@ use tracing::warn;
 #[allow(unused_imports)]
 use crate::executor::RuleExecutor;
 use crate::{Diagnostic, PluginError, RuleManifest};
-use tsuzulint_text::{Token, Sentence};
+use tsuzulint_text::{Sentence, Token};
 
 #[cfg(feature = "native")]
 use crate::executor_extism::ExtismExecutor;
@@ -405,9 +405,22 @@ mod tests {
         let source_json = serde_json::to_string("").unwrap();
         let source = serde_json::value::RawValue::from_string(source_json).unwrap();
 
-        let tokens_raw = serde_json::value::RawValue::from_string(serde_json::to_string(&Vec::<Token>::new()).unwrap()).unwrap();
-        let sentences_raw = serde_json::value::RawValue::from_string(serde_json::to_string(&Vec::<Sentence>::new()).unwrap()).unwrap();
-        let result = host.run_rule("nonexistent", &node, &source, &tokens_raw, &sentences_raw, None);
+        let tokens_raw = serde_json::value::RawValue::from_string(
+            serde_json::to_string(&Vec::<Token>::new()).unwrap(),
+        )
+        .unwrap();
+        let sentences_raw = serde_json::value::RawValue::from_string(
+            serde_json::to_string(&Vec::<Sentence>::new()).unwrap(),
+        )
+        .unwrap();
+        let result = host.run_rule(
+            "nonexistent",
+            &node,
+            &source,
+            &tokens_raw,
+            &sentences_raw,
+            None,
+        );
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 
