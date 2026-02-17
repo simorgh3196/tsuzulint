@@ -14,8 +14,8 @@ pub fn get_manifest() -> FnResult<String> {
 }
 
 #[plugin_fn]
-pub fn lint(input: String) -> FnResult<String> {
-    let request: LintRequest = serde_json::from_str(&input)?;
+pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
+    let request: LintRequest = rmp_serde::from_slice(&input)?;
     let mut diagnostics = Vec::new();
 
     // Check if the source contains "error"
@@ -29,5 +29,5 @@ pub fn lint(input: String) -> FnResult<String> {
         }
     }
 
-    Ok(serde_json::to_string(&LintResponse { diagnostics })?)
+    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
 }

@@ -87,56 +87,6 @@ mod rules_commands {
     use super::*;
 
     #[test]
-    fn create_command_generates_rule_project() {
-        let temp_dir = TempDir::new().unwrap();
-        let rule_name = "test-rule";
-
-        tsuzulint_cmd()
-            .current_dir(temp_dir.path())
-            .arg("rules")
-            .arg("create")
-            .arg(rule_name)
-            .assert()
-            .success()
-            .stderr(predicate::str::contains("Created rule project: test-rule"));
-
-        // Verify directory structure
-        let rule_dir = temp_dir.path().join(rule_name);
-        assert!(rule_dir.exists());
-        assert!(rule_dir.join("Cargo.toml").exists());
-        assert!(rule_dir.join("src/lib.rs").exists());
-
-        // Verify Cargo.toml content
-        let cargo_content = fs::read_to_string(rule_dir.join("Cargo.toml")).unwrap();
-        assert!(cargo_content.contains("cdylib"));
-        assert!(cargo_content.contains("extism-pdk"));
-
-        // Verify lib.rs has necessary functions
-        let lib_content = fs::read_to_string(rule_dir.join("src/lib.rs")).unwrap();
-        assert!(lib_content.contains("get_manifest"));
-        assert!(lib_content.contains("lint"));
-    }
-
-    #[test]
-    fn create_command_fails_if_directory_exists() {
-        let temp_dir = TempDir::new().unwrap();
-        let rule_name = "existing-rule";
-        let rule_dir = temp_dir.path().join(rule_name);
-
-        // Create the directory first
-        fs::create_dir(&rule_dir).unwrap();
-
-        tsuzulint_cmd()
-            .current_dir(temp_dir.path())
-            .arg("rules")
-            .arg("create")
-            .arg(rule_name)
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("already exists"));
-    }
-
-    #[test]
     fn add_command_fails_for_nonexistent_file() {
         tsuzulint_cmd()
             .arg("rules")

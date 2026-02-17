@@ -14,6 +14,7 @@ extism-manifest = { workspace = true, optional = true }
 wasmi = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+rmp-serde = "1.3"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tsuzulint_ast = { workspace = true }

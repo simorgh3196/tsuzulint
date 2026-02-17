@@ -89,7 +89,7 @@ impl WasmiExecutor {
     }
 
     /// Reads a string from WASM memory.
-    fn read_string(store: &Store<HostState>, ptr: i32, len: i32) -> Result<String, PluginError> {
+    fn read_bytes(store: &Store<HostState>, ptr: i32, len: i32) -> Result<Vec<u8>, PluginError> {
         let memory = store
             .data()
             .memory
@@ -100,17 +100,16 @@ impl WasmiExecutor {
             .get(ptr as usize..(ptr + len) as usize)
             .ok_or_else(|| PluginError::call("Memory access out of bounds"))?;
 
-        String::from_utf8(data.to_vec())
-            .map_err(|e| PluginError::call(format!("Invalid UTF-8: {}", e)))
+        Ok(data.to_vec())
     }
 
     /// Writes a string to WASM memory and returns the pointer.
-    fn write_string(
+    fn write_bytes(
         store: &mut Store<HostState>,
         alloc_fn: &TypedFunc<i32, i32>,
-        data: &str,
+        data: &[u8],
     ) -> Result<(i32, i32), PluginError> {
-        let bytes = data.as_bytes();
+        let bytes = data;
         let len = bytes.len() as i32;
 
         // Allocate memory in WASM
@@ -251,7 +250,10 @@ impl RuleExecutor for WasmiExecutor {
             .call(&mut store, ())
             .map_err(|e| PluginError::call(format!("Failed to get manifest: {}", e)))?;
 
-        let manifest_json = Self::read_string(&store, manifest_ptr, manifest_len)?;
+        let manifest_bytes = Self::read_bytes(&store, manifest_ptr, manifest_len)?;
+        let manifest_json = String::from_utf8(manifest_bytes).map_err(|e| {
+            PluginError::invalid_manifest(format!("Invalid UTF-8 in manifest: {}", e))
+        })?;
         let rule_manifest: RuleManifest = serde_json::from_str(&manifest_json)
             .map_err(|e| PluginError::invalid_manifest(e.to_string()))?;
 
@@ -278,7 +280,7 @@ impl RuleExecutor for WasmiExecutor {
         })
     }
 
-    fn call_lint(&mut self, rule_name: &str, input_json: &str) -> Result<String, PluginError> {
+    fn call_lint(&mut self, rule_name: &str, input_bytes: &[u8]) -> Result<Vec<u8>, PluginError> {
         let rule = self
             .rules
             .get_mut(rule_name)
@@ -291,7 +293,7 @@ impl RuleExecutor for WasmiExecutor {
 
         // Write input to WASM memory
         let (input_ptr, input_len) =
-            Self::write_string(&mut rule.store, &rule.alloc_fn, input_json)?;
+            Self::write_bytes(&mut rule.store, &rule.alloc_fn, input_bytes)?;
 
         // Call lint function
         let (output_ptr, output_len) =
@@ -300,7 +302,7 @@ impl RuleExecutor for WasmiExecutor {
                 .map_err(|e| PluginError::call(format!("Rule '{}' failed: {}", rule_name, e)))?;
 
         // Read output from WASM memory
-        let response_json = Self::read_string(&rule.store, output_ptr, output_len)?;
+        let response_json = Self::read_bytes(&rule.store, output_ptr, output_len)?;
 
         Ok(response_json)
     }
@@ -352,15 +354,15 @@ mod tests {
         let wasm = wat_to_wasm(&valid_rule_wat());
         executor.load(&wasm).expect("Failed to load rule");
 
-        let result = executor.call_lint("test-rule", "{\"text\":\"hello\"}");
+        let result = executor.call_lint("test-rule", b"{\"text\":\"hello\"}");
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "[]");
+        assert_eq!(result.unwrap(), b"[]");
     }
 
     #[test]
     fn test_executor_call_not_found() {
         let mut executor = WasmiExecutor::new();
-        let result = executor.call_lint("nonexistent", "{}");
+        let result = executor.call_lint("nonexistent", b"{}");
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 
@@ -436,7 +438,7 @@ mod tests {
 
         executor.load(&wasm).expect("Failed to load rule");
 
-        let result = executor.call_lint("error-rule", "{}");
+        let result = executor.call_lint("error-rule", b"{}");
         assert!(result.is_err());
         // Verify it captures the runtime error
         let err_msg = result.unwrap_err().to_string();
@@ -457,7 +459,7 @@ mod tests {
         let large_input = "a".repeat(1024 * 10); // 10KB
         let input_json = format!("{{\"text\":\"{}\"}}", large_input);
 
-        let result = executor.call_lint("test-rule", &input_json);
+        let result = executor.call_lint("test-rule", input_json.as_bytes());
         assert!(result.is_ok());
     }
 
@@ -583,11 +585,11 @@ mod tests {
         ));
 
         executor.load(&wasm).expect("Failed to load rule");
-        let result = executor.call_lint("invalid-utf8", "{}");
+        let result = executor.call_lint("invalid-utf8", b"{}");
         // Should handle the UTF-8 error (may succeed with replacement chars or fail gracefully)
         // The exact behavior depends on String::from_utf8_lossy vs from_utf8
         // Our implementation uses from_utf8, so it should error
-        assert!(result.is_err() || result.unwrap().contains("\u{FFFD}"));
+        assert_eq!(result.unwrap(), vec![0xff, 0xfe]);
     }
 
     #[test]
@@ -655,7 +657,7 @@ mod tests {
         executor.load(&wasm).expect("Failed to load rule");
 
         // Should return an error (trap) due to fuel exhaustion
-        let result = executor.call_lint("infinite-loop", "{}");
+        let result = executor.call_lint("infinite-loop", b"{}");
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         // Wasmi fuel exhaustion error: "all fuel consumed by WebAssembly"
