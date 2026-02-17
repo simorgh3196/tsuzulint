@@ -483,10 +483,17 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
 fn run_init(force: bool) -> Result<()> {
     let config_path = PathBuf::from(LinterConfig::CONFIG_FILES[0]);
 
-    if config_path.exists() && !force {
-        return Err(miette::miette!(
-            "Config file already exists. Use --force to overwrite."
-        ));
+    // Check for existence using symlink_metadata to handle symlinks correctly (broken or not)
+    if let Ok(_metadata) = std::fs::symlink_metadata(&config_path) {
+        if !force {
+            return Err(miette::miette!(
+                "Config file already exists. Use --force to overwrite."
+            ));
+        }
+
+        // If force is enabled, remove the existing file or symlink
+        // remove_file removes the symlink itself, not the target
+        std::fs::remove_file(&config_path).into_diagnostic()?;
     }
 
     let default_config = r#"{
@@ -738,6 +745,14 @@ fn update_config_with_plugin(
         run_init(false)?;
         PathBuf::from(LinterConfig::CONFIG_FILES[0])
     };
+
+    // Check for symlink to prevent overwriting arbitrary files
+    if std::fs::symlink_metadata(&path_to_use).is_ok_and(|m| m.is_symlink()) {
+        return Err(miette::miette!(
+            "Refusing to modify configuration file because it is a symbolic link: {}",
+            path_to_use.display()
+        ));
+    }
 
     let content = std::fs::read_to_string(&path_to_use).into_diagnostic()?;
 
