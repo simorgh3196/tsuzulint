@@ -508,13 +508,6 @@ impl Linter {
         let config_hash = self.config_hash.clone();
         let rule_versions = Self::get_rule_versions_from_host(host);
 
-        // Tokenize content
-        let tokens = self
-            .tokenizer
-            .tokenize(&content)
-            .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
-        let sentences = SentenceSplitter::split(&content, &[]);
-
         // 1. Check full cache first
         {
             let cache = self
@@ -531,6 +524,13 @@ impl Linter {
                 ));
             }
         }
+
+        // Tokenize content
+        let tokens = self
+            .tokenizer
+            .tokenize(&content)
+            .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
+        let sentences = SentenceSplitter::split(&content, &[]);
 
         // Find appropriate parser
         let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");

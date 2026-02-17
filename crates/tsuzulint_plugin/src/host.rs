@@ -246,6 +246,13 @@ impl PluginHost {
         sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
+        // Deserialize tokens and sentences first
+        let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
+            .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
+
+        let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
+            .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
+
         Self::run_rule_with_parts(
             &mut self.executor,
             &self.configs,
@@ -253,8 +260,8 @@ impl PluginHost {
             name,
             node,
             source,
-            tokens,
-            sentences,
+            &tokens_vec,
+            &sentences_vec,
             file_path,
         )
     }
@@ -268,8 +275,8 @@ impl PluginHost {
         name: &str,
         node: &T,
         source: &serde_json::value::RawValue,
-        tokens: &serde_json::value::RawValue,
-        sentences: &serde_json::value::RawValue,
+        tokens: &[Token],
+        sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let config = configs
@@ -280,18 +287,12 @@ impl PluginHost {
         let source_str: String = serde_json::from_str(source.get())
             .map_err(|e| PluginError::call(format!("Invalid source JSON: {}", e)))?;
 
-        let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
-            .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
-
-        let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
-            .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
-
         let request = LintRequest {
             node,
             config,
             source: source_str,
-            tokens: tokens_vec,
-            sentences: sentences_vec,
+            tokens: tokens.to_vec(),
+            sentences: sentences.to_vec(),
             file_path,
         };
 
@@ -329,6 +330,13 @@ impl PluginHost {
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let mut all_diagnostics = Vec::new();
 
+        // Deserialize tokens and sentences ONCE
+        let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
+            .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
+
+        let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
+            .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
+
         // Iterate over manifest keys directly without collecting into a Vec.
         // We can do this because run_rule_with_parts takes split borrows,
         // so `self.manifests` (immutable) is not conflicted with `self.executor` (mutable).
@@ -340,8 +348,8 @@ impl PluginHost {
                 name,
                 node,
                 source,
-                tokens,
-                sentences,
+                &tokens_vec,
+                &sentences_vec,
                 file_path,
             ) {
                 Ok(diagnostics) => {

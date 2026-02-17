@@ -10,18 +10,25 @@ pub struct TextLinter {
     tokenizer: Tokenizer,
 }
 
+struct AnalysisData {
+    source: Box<serde_json::value::RawValue>,
+    tokens: Box<serde_json::value::RawValue>,
+    sentences: Box<serde_json::value::RawValue>,
+}
+
 #[wasm_bindgen]
 impl TextLinter {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
+    pub fn new() -> Result<TextLinter, JsError> {
         console_error_panic_hook::set_once();
         let host = PluginHost::new();
-        let tokenizer = Tokenizer::new().expect("Failed to initialize tokenizer");
+        let tokenizer = Tokenizer::new()
+            .map_err(|e| JsError::new(&format!("Failed to initialize tokenizer: {}", e)))?;
 
         // Load default rules or configure them here if needed
         // For WASM, rules might be loaded differently
 
-        Self { host, tokenizer }
+        Ok(Self { host, tokenizer })
     }
 
     /// Loads a rule from WASM bytes.
@@ -42,6 +49,38 @@ impl TextLinter {
         self.host
             .configure_rule(name, config)
             .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Prepares text analysis (source, tokens, sentences).
+    fn prepare_text_analysis(&self, content: &str) -> Result<AnalysisData, JsError> {
+        // Pre-serialize source
+        let source_json =
+            serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
+        let source_raw = serde_json::value::RawValue::from_string(source_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        // Tokenize content
+        let tokens = self
+            .tokenizer
+            .tokenize(content)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let sentences = SentenceSplitter::split(content, &[]);
+
+        let tokens_json =
+            serde_json::to_string(&tokens).map_err(|e| JsError::new(&e.to_string()))?;
+        let tokens_raw = serde_json::value::RawValue::from_string(tokens_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        let sentences_json =
+            serde_json::to_string(&sentences).map_err(|e| JsError::new(&e.to_string()))?;
+        let sentences_raw = serde_json::value::RawValue::from_string(sentences_json)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        Ok(AnalysisData {
+            source: source_raw,
+            tokens: tokens_raw,
+            sentences: sentences_raw,
+        })
     }
 
     /// Returns the names of all loaded rules.
@@ -71,33 +110,20 @@ impl TextLinter {
         let ast_raw = serde_json::value::RawValue::from_string(ast_json)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
-        // Pre-serialize source
-        let source_json =
-            serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
-        let source_raw = serde_json::value::RawValue::from_string(source_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        // Tokenize content
-        let tokens = self
-            .tokenizer
-            .tokenize(content)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let sentences = SentenceSplitter::split(content, &[]);
-
-        let tokens_json =
-            serde_json::to_string(&tokens).map_err(|e| JsError::new(&e.to_string()))?;
-        let tokens_raw = serde_json::value::RawValue::from_string(tokens_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        let sentences_json =
-            serde_json::to_string(&sentences).map_err(|e| JsError::new(&e.to_string()))?;
-        let sentences_raw = serde_json::value::RawValue::from_string(sentences_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        // Prepare analysis data
+        // Prepare analysis data
+        let analysis = self.prepare_text_analysis(content)?;
 
         // Run all rules
         let diagnostics = self
             .host
-            .run_all_rules(&ast_raw, &source_raw, &tokens_raw, &sentences_raw, None)
+            .run_all_rules(
+                &ast_raw,
+                &analysis.source,
+                &analysis.tokens,
+                &analysis.sentences,
+                None,
+            )
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         // Convert diagnostics to JavaScript objects
@@ -109,7 +135,7 @@ impl TextLinter {
 
     /// Lints text content and returns diagnostics as a JSON string.
     ///
-    /// This is an alternative to  that returns a JSON string
+    /// This is an alternative to [`lint`] that returns a JSON string
     /// instead of JavaScript objects, which may be more efficient for
     /// some use cases.
     #[wasm_bindgen(js_name = lintJson)]
@@ -132,33 +158,20 @@ impl TextLinter {
         let ast_raw = serde_json::value::RawValue::from_string(ast_json)
             .map_err(|e| JsError::new(&e.to_string()))?;
 
-        // Pre-serialize source
-        let source_json =
-            serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
-        let source_raw = serde_json::value::RawValue::from_string(source_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        // Tokenize content
-        let tokens = self
-            .tokenizer
-            .tokenize(content)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let sentences = SentenceSplitter::split(content, &[]);
-
-        let tokens_json =
-            serde_json::to_string(&tokens).map_err(|e| JsError::new(&e.to_string()))?;
-        let tokens_raw = serde_json::value::RawValue::from_string(tokens_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        let sentences_json =
-            serde_json::to_string(&sentences).map_err(|e| JsError::new(&e.to_string()))?;
-        let sentences_raw = serde_json::value::RawValue::from_string(sentences_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        // Prepare analysis data
+        // Prepare analysis data
+        let analysis = self.prepare_text_analysis(content)?;
 
         // Run all rules
         let diagnostics = self
             .host
-            .run_all_rules(&ast_raw, &source_raw, &tokens_raw, &sentences_raw, None)
+            .run_all_rules(
+                &ast_raw,
+                &analysis.source,
+                &analysis.tokens,
+                &analysis.sentences,
+                None,
+            )
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         serde_json::to_string(&diagnostics).map_err(|e| JsError::new(&e.to_string()))
@@ -167,7 +180,7 @@ impl TextLinter {
 
 impl Default for TextLinter {
     fn default() -> Self {
-        Self::new()
+        Self::new().expect("Failed to initialize TextLinter via default()")
     }
 }
 
@@ -227,7 +240,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_linter_new() {
-        let linter = TextLinter::new();
+        let linter = TextLinter::new().unwrap();
         assert!(linter.loaded_rules().is_empty());
     }
 
