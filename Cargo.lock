@@ -4450,6 +4450,7 @@ dependencies = [
  "jsonc-parser",
  "miette",
  "predicates",
+ "regex",
  "serde_json",
  "tempfile",
  "tokio",
