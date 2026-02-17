@@ -43,7 +43,8 @@ struct LintRequest<'a, T: Serialize> {
     /// Rule configuration.
     config: serde_json::Value,
     /// Source text.
-    source: String,
+    #[serde(borrow)]
+    source: &'a serde_json::value::RawValue,
     /// File path (if available).
     file_path: Option<&'a str>,
 }
@@ -68,7 +69,7 @@ struct LintResponse {
 /// host.load_rule("./rules/no-todo.wasm")?;
 ///
 /// // Run the rule on an AST node
-/// let diagnostics = host.run_rule("no-todo", &node, &source, Some("example.md"))?;
+/// let diagnostics = host.run_rule("no-todo", &node_json, source)?;
 /// ```
 pub struct PluginHost {
     /// The WASM executor.
@@ -225,7 +226,7 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `name` - Rule name
-    /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
+    /// * `node` - The AST node (serialized as JSON or a Serializable struct)
     /// * `source` - The source text (serialized as JSON string)
     /// * `file_path` - Optional file path
     ///
@@ -266,24 +267,19 @@ impl PluginHost {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
-        let source_str: String = serde_json::from_str(source.get())
-            .map_err(|e| PluginError::call(format!("Invalid source JSON: {}", e)))?;
-
         let request = LintRequest {
             node,
             config,
-            source: source_str,
+            source,
             file_path,
         };
 
         let real_name = aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
 
-        let request_bytes = rmp_serde::to_vec_named(&request)
-            .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
+        let request_json = serde_json::to_string(&request)?;
+        let response_json = executor.call_lint(real_name, &request_json)?;
 
-        let response_bytes = executor.call_lint(real_name, &request_bytes)?;
-
-        let response: LintResponse = rmp_serde::from_slice(&response_bytes)
+        let response: LintResponse = serde_json::from_str(&response_json)
             .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
 
         Ok(response.diagnostics)
@@ -293,7 +289,7 @@ impl PluginHost {
     ///
     /// # Arguments
     ///
-    /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
+    /// * `node` - The AST node (serialized as JSON or a Serializable struct)
     /// * `source` - The source text (serialized as JSON string)
     /// * `file_path` - Optional file path
     ///
@@ -375,10 +371,16 @@ mod tests {
     }
 
     #[test]
+    fn test_plugin_host_default() {
+        let host = PluginHost::default();
+        assert!(host.loaded_rules().next().is_none());
+    }
+
+    #[test]
     fn test_plugin_host_not_found() {
         let mut host = PluginHost::new();
-        let node_bytes = serde_json::to_string(&serde_json::json!({})).unwrap();
-        let node = serde_json::value::RawValue::from_string(node_bytes).unwrap();
+        let node_json = serde_json::to_string(&serde_json::json!({})).unwrap();
+        let node = serde_json::value::RawValue::from_string(node_json).unwrap();
         let source_json = serde_json::to_string("").unwrap();
         let source = serde_json::value::RawValue::from_string(source_json).unwrap();
 
@@ -394,48 +396,289 @@ mod tests {
     }
 
     #[test]
-    fn test_serialization_compat_with_pdk() {
-        // This test simulates the serialization of LintRequest in the host
-        // and deserialization in the PDK (using a mock struct that matches PDK).
+    fn test_get_manifest_not_loaded() {
+        let host = PluginHost::new();
+        assert!(host.get_manifest("nonexistent").is_none());
+    }
 
-        use serde::Deserialize;
+    #[test]
+    fn test_unload_rule_not_found() {
+        let mut host = PluginHost::new();
+        assert!(!host.unload_rule("nonexistent"));
+    }
 
-        // Mock of the PDK's LintRequest struct
-        #[derive(Debug, Clone, Deserialize)]
-        struct PdkLintRequest {
-            pub node: serde_json::Value,
-            pub config: serde_json::Value,
-            pub source: String,
-            pub file_path: Option<String>,
-            #[serde(default)]
-            pub helpers: Option<serde_json::Value>,
-        }
+    #[test]
+    fn test_unload_all_empty() {
+        let mut host = PluginHost::new();
+        host.unload_all();
+        assert!(host.loaded_rules().next().is_none());
+    }
 
-        let node_data = serde_json::json!({"type": "Doc", "children": []});
-        let config = serde_json::json!({"option": "value"});
-        let source = "test content".to_string();
-        let file_path = Some("test.md");
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_load_and_unload_rule() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
 
-        // Host side
-        let host_request = LintRequest {
-            node: &node_data,
-            config: config.clone(),
-            source: source.clone(),
-            file_path,
+        let mut host = PluginHost::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        // Load rule
+        let manifest = host.load_rule_bytes(&wasm).expect("Failed to load rule");
+        assert_eq!(manifest.name, "test-rule");
+
+        // Verify it's in loaded_rules
+        let loaded: Vec<&String> = host.loaded_rules().collect();
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded.contains(&&"test-rule".to_string()));
+
+        // Get manifest
+        let retrieved_manifest = host.get_manifest("test-rule");
+        assert!(retrieved_manifest.is_some());
+        assert_eq!(retrieved_manifest.unwrap().name, "test-rule");
+
+        // Unload rule
+        assert!(host.unload_rule("test-rule"));
+        assert!(host.loaded_rules().next().is_none());
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_configure_and_run_rule() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut host = PluginHost::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        // Load rule
+        host.load_rule_bytes(&wasm).expect("Failed to load rule");
+
+        // Configure rule
+        let config = serde_json::json!({"key": "value"});
+        host.configure_rule("test-rule", config.clone())
+            .expect("Failed to configure rule");
+
+        // Verify configuration was set
+        assert_eq!(host.configs.get("test-rule").unwrap(), &config);
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_rename_rule() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut host = PluginHost::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        // Load rule
+        host.load_rule_bytes(&wasm).expect("Failed to load rule");
+
+        // Rename rule
+        host.rename_rule("test-rule", "renamed-rule", None)
+            .expect("Failed to rename rule");
+
+        // Verify old name is gone
+        assert!(host.get_manifest("test-rule").is_none());
+
+        // Verify new name exists
+        let manifest = host.get_manifest("renamed-rule");
+        assert!(manifest.is_some());
+        assert_eq!(manifest.unwrap().name, "test-rule"); // Internal name unchanged
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_rename_rule_with_new_manifest() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut host = PluginHost::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        // Load rule
+        host.load_rule_bytes(&wasm).expect("Failed to load rule");
+
+        // Create new manifest
+        let new_manifest = RuleManifest {
+            name: "custom-name".to_string(),
+            version: "2.0.0".to_string(),
+            description: Some("Custom description".to_string()),
+            fixable: true,
+            node_types: vec!["Custom".to_string()],
+            isolation_level: crate::IsolationLevel::Global,
+            schema: None,
         };
 
-        // Serialize using rmp_serde (as done in host)
-        let bytes = rmp_serde::to_vec_named(&host_request).expect("Serialization failed");
+        // Rename with new manifest
+        host.rename_rule("test-rule", "custom-rule", Some(new_manifest.clone()))
+            .expect("Failed to rename rule");
 
-        // Guest side (deserialize using rmp_serde)
-        let guest_request: PdkLintRequest =
-            rmp_serde::from_slice(&bytes).expect("Deserialization failed");
+        // Verify new manifest is used
+        let retrieved_manifest = host.get_manifest("custom-rule");
+        assert!(retrieved_manifest.is_some());
+        assert_eq!(retrieved_manifest.unwrap().name, "custom-name");
+        assert_eq!(retrieved_manifest.unwrap().version, "2.0.0");
+    }
 
-        // Verify content
-        assert_eq!(guest_request.source, source);
-        assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
-        assert_eq!(guest_request.config, config);
-        assert_eq!(guest_request.node, node_data);
-        assert_eq!(guest_request.helpers, None);
+    #[test]
+    fn test_rename_rule_not_found() {
+        let mut host = PluginHost::new();
+        let result = host.rename_rule("nonexistent", "new-name", None);
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_run_all_rules_empty() {
+        let mut host = PluginHost::new();
+        let node = serde_json::json!({"type": "Str", "value": "test"});
+        let node_json = serde_json::to_string(&node).unwrap();
+        let node_raw = serde_json::value::RawValue::from_string(node_json).unwrap();
+        let source_json = serde_json::to_string("test").unwrap();
+        let source_raw = serde_json::value::RawValue::from_string(source_json).unwrap();
+
+        let result = host.run_all_rules(&node_raw, &source_raw, None);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_run_all_rules_with_multiple_rules() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut host = PluginHost::new();
+
+        // Load first rule
+        let wasm1 = wat_to_wasm(&valid_rule_wat());
+        host.load_rule_bytes(&wasm1).expect("Failed to load rule 1");
+
+        // Load second rule with different name
+        let json2 = r#"{"name":"test-rule-2","version":"1.0.0","description":"Test rule 2"}"#;
+        let len2 = json2.len();
+        let wat2 = format!(
+            r#"
+            (module
+                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
+                (memory (export "memory") 1)
+                (func (export "get_manifest")
+                    (call $output_set (i64.const 0) (i64.const {}))
+                )
+                (func (export "lint")
+                    (call $output_set (i64.const 100) (i64.const 2))
+                )
+                (func (export "alloc") (param i64) (result i64)
+                    (i64.const 128)
+                )
+                (data (i32.const 0) "{}")
+                (data (i32.const 100) "[]")
+            )
+            "#,
+            len2,
+            json2.replace("\"", "\\\"")
+        );
+        let wasm2 = wat_to_wasm(&wat2);
+        host.load_rule_bytes(&wasm2).expect("Failed to load rule 2");
+
+        // Run all rules
+        let node = serde_json::json!({"type": "Str", "value": "test"});
+        let node_json = serde_json::to_string(&node).unwrap();
+        let node_raw = serde_json::value::RawValue::from_string(node_json).unwrap();
+        let source_json = serde_json::to_string("test").unwrap();
+        let source_raw = serde_json::value::RawValue::from_string(source_json).unwrap();
+
+        let result = host.run_all_rules(&node_raw, &source_raw, None);
+        assert!(result.is_ok());
+
+        // Verify both rules were loaded
+        let loaded: Vec<&String> = host.loaded_rules().collect();
+        assert_eq!(loaded.len(), 2);
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_load_rule_from_file() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+        use std::io::Write;
+
+        let mut host = PluginHost::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        // Write WASM to temporary file
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        temp_file.write_all(&wasm).unwrap();
+        let path = temp_file.path();
+
+        // Load from file
+        let manifest = host.load_rule(path).expect("Failed to load rule from file");
+        assert_eq!(manifest.name, "test-rule");
+    }
+
+    #[test]
+    fn test_load_rule_from_nonexistent_file() {
+        let mut host = PluginHost::new();
+        let result = host.load_rule("/nonexistent/path/to/rule.wasm");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_unload_all_with_multiple_rules() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut host = PluginHost::new();
+
+        // Load multiple rules
+        let wasm = wat_to_wasm(&valid_rule_wat());
+        host.load_rule_bytes(&wasm).expect("Failed to load rule");
+
+        // Verify loaded
+        assert_eq!(host.loaded_rules().count(), 1);
+
+        // Unload all
+        host.unload_all();
+
+        // Verify all unloaded
+        assert_eq!(host.loaded_rules().count(), 0);
+        assert!(host.get_manifest("test-rule").is_none());
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_rename_preserves_config() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut host = PluginHost::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        // Load and configure rule
+        host.load_rule_bytes(&wasm).expect("Failed to load rule");
+        let config = serde_json::json!({"test": "value"});
+        host.configure_rule("test-rule", config.clone())
+            .expect("Failed to configure");
+
+        // Rename
+        host.rename_rule("test-rule", "new-rule", None)
+            .expect("Failed to rename");
+
+        // Verify config was moved
+        assert_eq!(host.configs.get("new-rule").unwrap(), &config);
+        assert!(!host.configs.contains_key("test-rule"));
+    }
+
+    #[test]
+    #[cfg(all(feature = "test-utils", feature = "native"))]
+    fn test_double_unload() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut host = PluginHost::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        // Load rule
+        host.load_rule_bytes(&wasm).expect("Failed to load rule");
+
+        // First unload should succeed
+        assert!(host.unload_rule("test-rule"));
+
+        // Second unload should return false
+        assert!(!host.unload_rule("test-rule"));
     }
 }

@@ -525,7 +525,6 @@ crate-type = ["cdylib"]
 extism-pdk = "1.2"
 serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
-rmp-serde = "1.3"
 "#,
         name.replace('-', "_")
     );
@@ -589,8 +588,8 @@ pub fn get_manifest() -> FnResult<String> {{
 }}
 
 #[plugin_fn]
-pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {{
-    let request: LintRequest = rmp_serde::from_slice(&input)?;
+pub fn lint(input: String) -> FnResult<String> {{
+    let request: LintRequest = serde_json::from_str(&input)?;
     let mut diagnostics = Vec::new();
 
     // TODO: Implement your rule logic here
@@ -608,7 +607,7 @@ pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {{
     // }}
 
     let response = LintResponse {{ diagnostics }};
-    Ok(rmp_serde::to_vec_named(&response)?)
+    Ok(serde_json::to_string(&response)?)
 }}
 "#,
         name, name, name
@@ -1262,5 +1261,243 @@ mod tests {
             }
         }));
         assert_eq!(json["options"]["test-alias"]["foo"], "bar");
+    }
+
+    #[test]
+    fn test_generate_rule_def_github_with_alias() {
+        let manifest = create_dummy_manifest();
+        let spec = PluginSpec {
+            source: PluginSource::GitHub {
+                owner: "owner".to_string(),
+                repo: "repo".to_string(),
+                version: None,
+            },
+            alias: Some("my-alias".to_string()),
+        };
+
+        let result = generate_rule_def(&spec, "my-alias", &manifest).unwrap();
+        assert!(result.contains("owner/repo@1.0.0"));
+        assert!(result.contains("my-alias"));
+        assert!(result.contains("github"));
+    }
+
+    #[test]
+    fn test_generate_rule_def_github_no_alias() {
+        let manifest = create_dummy_manifest();
+        let spec = PluginSpec {
+            source: PluginSource::GitHub {
+                owner: "owner".to_string(),
+                repo: "repo".to_string(),
+                version: None,
+            },
+            alias: None,
+        };
+
+        let result = generate_rule_def(&spec, "test-rule", &manifest).unwrap();
+        assert!(result.contains("owner/repo@1.0.0"));
+        assert!(!result.contains("\"as\""));
+    }
+
+    #[test]
+    fn test_generate_rule_def_url() {
+        let manifest = create_dummy_manifest();
+        let spec = PluginSpec {
+            source: PluginSource::Url("https://example.com/rule.wasm".to_string()),
+            alias: Some("url-rule".to_string()),
+        };
+
+        let result = generate_rule_def(&spec, "url-rule", &manifest).unwrap();
+        assert!(result.contains("https://example.com/rule.wasm"));
+        assert!(result.contains("url-rule"));
+        assert!(result.contains("url"));
+    }
+
+    #[test]
+    fn test_generate_rule_def_path() {
+        let manifest = create_dummy_manifest();
+        let spec = PluginSpec {
+            source: PluginSource::Path("./rules/my-rule".to_string()),
+            alias: Some("path-rule".to_string()),
+        };
+
+        let result = generate_rule_def(&spec, "path-rule", &manifest).unwrap();
+        assert!(result.contains("./rules/my-rule"));
+        assert!(result.contains("path-rule"));
+        assert!(result.contains("path"));
+    }
+
+    #[test]
+    fn test_generate_options_def_with_default_options() {
+        let manifest = create_dummy_manifest();
+        let result = generate_options_def("test-alias", &manifest).unwrap();
+        assert!(result.contains("test-alias"));
+        assert!(result.contains("foo"));
+        assert!(result.contains("bar"));
+    }
+
+    #[test]
+    fn test_generate_options_def_no_options() {
+        let mut manifest = create_dummy_manifest();
+        manifest.options = None;
+
+        let result = generate_options_def("test-alias", &manifest).unwrap();
+        assert!(result.contains("test-alias"));
+        assert!(result.contains("true"));
+    }
+
+    #[test]
+    fn test_build_spec_from_detail_path() {
+        let (spec, alias) = build_spec_from_detail("path", "./rules/my-rule", Some("my-alias"));
+        assert!(spec.is_some());
+        assert!(matches!(
+            spec.as_ref().unwrap().source,
+            PluginSource::Path(_)
+        ));
+        assert_eq!(alias, Some("my-alias".to_string()));
+    }
+
+    #[test]
+    fn test_update_config_with_plugin_preserves_comments() {
+        use std::io::Write;
+        let manifest = create_dummy_manifest();
+        let spec = create_dummy_spec();
+        let alias = "test-alias";
+
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            r#"{{
+  // This is a comment
+  "rules": [],
+  "options": {{}}
+}}"#
+        )
+        .unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // Comments should be preserved
+        assert!(content.contains("// This is a comment"));
+    }
+
+    #[test]
+    fn test_update_config_with_plugin_handles_trailing_comma() {
+        use std::io::Write;
+        let manifest = create_dummy_manifest();
+        let spec = create_dummy_spec();
+        let alias = "test-alias";
+
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            r#"{{
+  "rules": [
+    "existing/rule",
+  ],
+  "options": {{}}
+}}"#
+        )
+        .unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
+
+        let rules = json["rules"].as_array().unwrap();
+        assert!(rules.len() >= 2);
+    }
+
+    #[test]
+    fn test_update_config_with_plugin_duplicate_rule() {
+        use std::io::Write;
+        let manifest = create_dummy_manifest();
+        let spec = create_dummy_spec();
+        let alias = "test-alias";
+
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            r#"{{
+  "rules": ["owner/repo@1.0.0"],
+  "options": {{}}
+}}"#
+        )
+        .unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
+
+        let rules = json["rules"].as_array().unwrap();
+        // Should not add duplicate
+        assert_eq!(rules.len(), 1);
+    }
+
+    #[test]
+    fn test_update_config_with_plugin_duplicate_option() {
+        use std::io::Write;
+        let manifest = create_dummy_manifest();
+        let spec = create_dummy_spec();
+        let alias = "test-alias";
+
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            r#"{{
+  "rules": [],
+  "options": {{
+    "test-alias": {{"existing": true}}
+  }}
+}}"#
+        )
+        .unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
+
+        let options = json["options"].as_object().unwrap();
+        // Should not add duplicate option key
+        assert_eq!(options.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_rule_def_with_special_characters() {
+        let manifest = create_dummy_manifest();
+        let spec = PluginSpec {
+            source: PluginSource::GitHub {
+                owner: "owner-with-dash".to_string(),
+                repo: "repo_with_underscore".to_string(),
+                version: None,
+            },
+            alias: Some("my-rule-alias".to_string()),
+        };
+
+        let result = generate_rule_def(&spec, "my-rule-alias", &manifest).unwrap();
+        assert!(result.contains("owner-with-dash"));
+        assert!(result.contains("repo_with_underscore"));
+    }
+
+    #[test]
+    fn test_generate_options_def_with_complex_options() {
+        let mut manifest = create_dummy_manifest();
+        manifest.options = Some(serde_json::json!({
+            "nested": {
+                "key": "value"
+            },
+            "array": [1, 2, 3]
+        }));
+
+        let result = generate_options_def("test-alias", &manifest).unwrap();
+        assert!(result.contains("nested"));
+        assert!(result.contains("array"));
     }
 }

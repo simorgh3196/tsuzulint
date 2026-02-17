@@ -3,7 +3,7 @@
 //! This module provides high-performance WASM execution using Extism,
 //! which internally uses wasmtime for JIT compilation.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 
 use extism::{Manifest, Plugin, Wasm};
@@ -70,12 +70,6 @@ impl ExtismExecutor {
 
         // Deny all network access
         manifest.allowed_hosts = Some(vec![]);
-
-        // Deny all file system access
-        manifest.allowed_paths = Some(BTreeMap::new());
-
-        // Clear configuration to prevent environment leakage
-        manifest.config = BTreeMap::new();
 
         manifest
     }
@@ -144,18 +138,18 @@ impl RuleExecutor for ExtismExecutor {
         self.load_from_manifest(manifest)
     }
 
-    fn call_lint(&mut self, rule_name: &str, input_bytes: &[u8]) -> Result<Vec<u8>, PluginError> {
+    fn call_lint(&mut self, rule_name: &str, input_json: &str) -> Result<String, PluginError> {
         let rule = self
             .rules
             .get_mut(rule_name)
             .ok_or_else(|| PluginError::not_found(rule_name))?;
 
-        let response_bytes = rule
+        let response_json: String = rule
             .plugin
-            .call::<&[u8], Vec<u8>>("lint", input_bytes)
+            .call("lint", input_json)
             .map_err(|e| PluginError::call(format!("Rule '{}' failed: {}", rule_name, e)))?;
 
-        Ok(response_bytes)
+        Ok(response_json)
     }
 
     fn unload(&mut self, rule_name: &str) -> bool {
@@ -187,7 +181,7 @@ mod tests {
     #[test]
     fn test_executor_call_not_found() {
         let mut executor = ExtismExecutor::new();
-        let result = executor.call_lint("nonexistent", &[]);
+        let result = executor.call_lint("nonexistent", "{}");
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 
@@ -264,5 +258,159 @@ mod tests {
             "Expected timeout error, got: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn test_executor_default() {
+        let executor = ExtismExecutor::default();
+        assert!(executor.loaded_rules().is_empty());
+    }
+
+    #[test]
+    fn test_executor_unload_returns_false_for_nonexistent() {
+        let mut executor = ExtismExecutor::new();
+        assert!(!executor.unload("nonexistent-rule"));
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_unload_all() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut executor = ExtismExecutor::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+        executor.load(&wasm).expect("Failed to load rule");
+
+        assert_eq!(executor.loaded_rules().len(), 1);
+        executor.unload_all();
+        assert!(executor.loaded_rules().is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_is_loaded() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut executor = ExtismExecutor::new();
+        assert!(!executor.is_loaded("test-rule"));
+
+        let wasm = wat_to_wasm(&valid_rule_wat());
+        executor.load(&wasm).expect("Failed to load rule");
+
+        assert!(executor.is_loaded("test-rule"));
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_load_invalid_wasm() {
+        let mut executor = ExtismExecutor::new();
+        let invalid_wasm = b"not valid wasm at all";
+
+        let result = executor.load(invalid_wasm);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_load_file_valid() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+        use std::io::Write;
+
+        let mut executor = ExtismExecutor::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        temp_file.write_all(&wasm).unwrap();
+
+        let result = executor.load_file(temp_file.path());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().name, "test-rule");
+    }
+
+    #[test]
+    fn test_executor_load_file_nonexistent() {
+        let mut executor = ExtismExecutor::new();
+        let result = executor.load_file(std::path::Path::new("/nonexistent/path/rule.wasm"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_empty_wasm() {
+        let mut executor = ExtismExecutor::new();
+        let result = executor.load(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_load_bytes_and_call() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut executor = ExtismExecutor::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        executor.load(&wasm).expect("Failed to load");
+
+        let result = executor.call_lint("test-rule", "{}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_unload_and_reload() {
+        use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+
+        let mut executor = ExtismExecutor::new();
+        let wasm = wat_to_wasm(&valid_rule_wat());
+
+        // Load
+        executor.load(&wasm).expect("Failed to load");
+        assert!(executor.is_loaded("test-rule"));
+
+        // Unload
+        assert!(executor.unload("test-rule"));
+        assert!(!executor.is_loaded("test-rule"));
+
+        // Reload
+        executor.load(&wasm).expect("Failed to reload");
+        assert!(executor.is_loaded("test-rule"));
+    }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_executor_network_denial() {
+        use crate::test_utils::wat_to_wasm;
+
+        let mut executor = ExtismExecutor::new();
+
+        // This WASM module would try to make network requests if allowed
+        // But our configuration denies network access
+        let json = r#"{"name":"network-test","version":"1.0.0"}"#;
+        let len = json.len();
+        let wasm = wat_to_wasm(&format!(
+            r#"
+            (module
+                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
+                (memory (export "memory") 1)
+                (func (export "get_manifest")
+                    (call $output_set (i64.const 0) (i64.const {}))
+                )
+                (func (export "lint")
+                    (call $output_set (i64.const 0) (i64.const 0))
+                )
+                (func (export "alloc") (param i64) (result i64)
+                    (i64.const 128)
+                )
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        ));
+
+        // Should load successfully (network is just denied, not required)
+        let result = executor.load(&wasm);
+        assert!(result.is_ok());
     }
 }
