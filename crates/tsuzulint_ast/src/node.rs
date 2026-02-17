@@ -93,33 +93,73 @@ impl<'a> Serialize for TxtNode<'a> {
     where
         S: serde::Serializer,
     {
-        #[derive(Serialize)]
-        struct TxtNodeProxy<'a> {
-            #[serde(rename = "type")]
-            node_type: NodeType,
-            range: [u32; 2],
-            #[serde(skip_serializing_if = "Option::is_none")]
-            children: Option<&'a [TxtNode<'a>]>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            value: Option<&'a str>,
-            #[serde(flatten)]
-            data: NodeData<'a>,
+        use serde::ser::SerializeStruct;
+
+        let mut len = 2; // type, range
+        if self.node_type.is_parent() || !self.children.is_empty() {
+            len += 1;
+        }
+        if self.value.is_some() {
+            len += 1;
+        }
+        if self.data.url.is_some() {
+            len += 1;
+        }
+        if self.data.title.is_some() {
+            len += 1;
+        }
+        if self.data.depth.is_some() {
+            len += 1;
+        }
+        if self.data.ordered.is_some() {
+            len += 1;
+        }
+        if self.data.lang.is_some() {
+            len += 1;
+        }
+        if self.data.identifier.is_some() {
+            len += 1;
+        }
+        if self.data.label.is_some() {
+            len += 1;
         }
 
-        let children = if self.node_type.is_parent() || !self.children.is_empty() {
-            Some(self.children)
-        } else {
-            None
-        };
+        let mut state = serializer.serialize_struct("TxtNode", len)?;
 
-        let proxy = TxtNodeProxy {
-            node_type: self.node_type,
-            range: [self.span.start, self.span.end],
-            children,
-            value: self.value,
-            data: self.data,
-        };
-        proxy.serialize(serializer)
+        state.serialize_field("type", &self.node_type)?;
+        state.serialize_field("range", &[self.span.start, self.span.end])?;
+
+        if self.node_type.is_parent() || !self.children.is_empty() {
+            state.serialize_field("children", &self.children)?;
+        }
+
+        if let Some(value) = &self.value {
+            state.serialize_field("value", value)?;
+        }
+
+        if let Some(url) = &self.data.url {
+            state.serialize_field("url", url)?;
+        }
+        if let Some(title) = &self.data.title {
+            state.serialize_field("title", title)?;
+        }
+        if let Some(depth) = &self.data.depth {
+            state.serialize_field("depth", depth)?;
+        }
+        if let Some(ordered) = &self.data.ordered {
+            state.serialize_field("ordered", ordered)?;
+        }
+        if let Some(lang) = &self.data.lang {
+            state.serialize_field("lang", lang)?;
+        }
+        if let Some(identifier) = &self.data.identifier {
+            state.serialize_field("identifier", identifier)?;
+        }
+        if let Some(label) = &self.data.label {
+            state.serialize_field("label", label)?;
+        }
+
+        state.end()
     }
 }
 
