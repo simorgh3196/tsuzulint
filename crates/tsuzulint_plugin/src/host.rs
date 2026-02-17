@@ -40,9 +40,9 @@ compile_error!("Either 'native' or 'browser' feature must be enabled.");
 #[derive(Debug, Serialize)]
 struct LintRequest<'a, T: Serialize> {
     /// Tokens in the text.
-    tokens: Vec<Token>,
+    tokens: &'a [Token],
     /// Sentences in the text.
-    sentences: Vec<Sentence>,
+    sentences: &'a [Sentence],
     /// The node to lint (serialized).
     node: &'a T,
     /// Rule configuration.
@@ -291,8 +291,8 @@ impl PluginHost {
             node,
             config,
             source: source_str,
-            tokens: tokens.to_vec(),
-            sentences: sentences.to_vec(),
+            tokens,
+            sentences,
             file_path,
         };
 
@@ -471,8 +471,8 @@ mod tests {
             node: &node_data,
             config: config.clone(),
             source: source.clone(),
-            tokens: tokens.clone(),
-            sentences: sentences.clone(),
+            tokens: &tokens,
+            sentences: &sentences,
             file_path,
         };
 

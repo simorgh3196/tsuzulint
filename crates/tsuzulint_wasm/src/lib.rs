@@ -4,6 +4,15 @@ use tsuzulint_plugin::{Diagnostic, PluginHost, Severity};
 use tsuzulint_text::{SentenceSplitter, Tokenizer};
 use wasm_bindgen::prelude::*;
 
+/// Converts any `Display`-implementing error into `JsError`.
+///
+/// Centralizes the `map_err(|e| JsError::new(&e.to_string()))` pattern
+/// used throughout this crate. We cannot use `impl From<E> for JsError`
+/// due to the orphan rule (both traits are from external crates).
+fn to_js_error(e: impl std::fmt::Display) -> JsError {
+    JsError::new(&e.to_string())
+}
+
 #[wasm_bindgen]
 pub struct TextLinter {
     host: PluginHost,
@@ -25,56 +34,44 @@ impl TextLinter {
         let tokenizer = Tokenizer::new()
             .map_err(|e| JsError::new(&format!("Failed to initialize tokenizer: {}", e)))?;
 
-        // Load default rules or configure them here if needed
-        // For WASM, rules might be loaded differently
-
         Ok(Self { host, tokenizer })
     }
 
     /// Loads a rule from WASM bytes.
     #[wasm_bindgen(js_name = loadRule)]
     pub fn load_rule(&mut self, wasm_bytes: &[u8]) -> Result<String, JsError> {
-        let manifest = self
-            .host
-            .load_rule_bytes(wasm_bytes)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let manifest = self.host.load_rule_bytes(wasm_bytes).map_err(to_js_error)?;
         Ok(manifest.name)
     }
 
     /// Configures a rule.
     #[wasm_bindgen(js_name = configureRule)]
     pub fn configure_rule(&mut self, name: &str, config_json: JsValue) -> Result<(), JsError> {
-        let config = serde_wasm_bindgen::from_value(config_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        self.host
-            .configure_rule(name, config)
-            .map_err(|e| JsError::new(&e.to_string()))
+        let config = serde_wasm_bindgen::from_value(config_json).map_err(to_js_error)?;
+        self.host.configure_rule(name, config).map_err(to_js_error)
     }
 
-    /// Prepares text analysis (source, tokens, sentences).
+    /// Prepares text analysis data (source, tokens, sentences) as pre-serialized JSON.
     fn prepare_text_analysis(&self, content: &str) -> Result<AnalysisData, JsError> {
-        // Pre-serialize source
-        let source_json =
-            serde_json::to_string(&content).map_err(|e| JsError::new(&e.to_string()))?;
-        let source_raw = serde_json::value::RawValue::from_string(source_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let source_json = serde_json::to_string(&content).map_err(to_js_error)?;
+        let source_raw =
+            serde_json::value::RawValue::from_string(source_json).map_err(to_js_error)?;
 
-        // Tokenize content
-        let tokens = self
-            .tokenizer
-            .tokenize(content)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let sentences = SentenceSplitter::split(content, &[]);
+        let tokens = self.tokenizer.tokenize(content).map_err(to_js_error)?;
 
-        let tokens_json =
-            serde_json::to_string(&tokens).map_err(|e| JsError::new(&e.to_string()))?;
-        let tokens_raw = serde_json::value::RawValue::from_string(tokens_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        // TODO: Compute ignore ranges from AST (code blocks, inline code)
+        // Currently empty as we don't have easy access to AST here without parsing twice?
+        // Or we should move parsing here?
+        let ignore_ranges: Vec<std::ops::Range<usize>> = Vec::new();
+        let sentences = SentenceSplitter::split(content, &ignore_ranges);
 
-        let sentences_json =
-            serde_json::to_string(&sentences).map_err(|e| JsError::new(&e.to_string()))?;
-        let sentences_raw = serde_json::value::RawValue::from_string(sentences_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let tokens_json = serde_json::to_string(&tokens).map_err(to_js_error)?;
+        let tokens_raw =
+            serde_json::value::RawValue::from_string(tokens_json).map_err(to_js_error)?;
+
+        let sentences_json = serde_json::to_string(&sentences).map_err(to_js_error)?;
+        let sentences_raw =
+            serde_json::value::RawValue::from_string(sentences_json).map_err(to_js_error)?;
 
         Ok(AnalysisData {
             source: source_raw,
@@ -89,9 +86,11 @@ impl TextLinter {
         self.host.loaded_rules().cloned().collect()
     }
 
-    /// Lints text content.
-    #[wasm_bindgen]
-    pub fn lint(&mut self, content: &str, file_type: &str) -> Result<JsValue, JsError> {
+    /// Core linting pipeline shared by [`lint`] and [`lint_json`].
+    ///
+    /// Parses `content` using the parser selected by `file_type`,
+    /// prepares text analysis, and runs all loaded rules.
+    fn run_lint(&mut self, content: &str, file_type: &str) -> Result<Vec<Diagnostic>, JsError> {
         let arena = AstArena::new();
 
         // Select parser based on file type
@@ -105,18 +104,15 @@ impl TextLinter {
             .parse(&arena, content)
             .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
 
-        // Convert AST to JSON for plugin consumption
-        let ast_json = serde_json::to_string(&ast).map_err(|e| JsError::new(&e.to_string()))?;
-        let ast_raw = serde_json::value::RawValue::from_string(ast_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        // Convert AST to pre-serialized JSON
+        let ast_json = serde_json::to_string(&ast).map_err(to_js_error)?;
+        let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(to_js_error)?;
 
-        // Prepare analysis data
         // Prepare analysis data
         let analysis = self.prepare_text_analysis(content)?;
 
         // Run all rules
-        let diagnostics = self
-            .host
+        self.host
             .run_all_rules(
                 &ast_raw,
                 &analysis.source,
@@ -124,13 +120,16 @@ impl TextLinter {
                 &analysis.sentences,
                 None,
             )
-            .map_err(|e| JsError::new(&e.to_string()))?;
+            .map_err(to_js_error)
+    }
 
-        // Convert diagnostics to JavaScript objects
+    /// Lints text content and returns diagnostics as JavaScript objects.
+    #[wasm_bindgen]
+    pub fn lint(&mut self, content: &str, file_type: &str) -> Result<JsValue, JsError> {
+        let diagnostics = self.run_lint(content, file_type)?;
         let js_diagnostics: Vec<JsDiagnostic> =
             diagnostics.into_iter().map(JsDiagnostic::from).collect();
-
-        serde_wasm_bindgen::to_value(&js_diagnostics).map_err(|e| JsError::new(&e.to_string()))
+        serde_wasm_bindgen::to_value(&js_diagnostics).map_err(to_js_error)
     }
 
     /// Lints text content and returns diagnostics as a JSON string.
@@ -140,41 +139,8 @@ impl TextLinter {
     /// some use cases.
     #[wasm_bindgen(js_name = lintJson)]
     pub fn lint_json(&mut self, content: &str, file_type: &str) -> Result<String, JsError> {
-        let arena = AstArena::new();
-
-        // Select parser based on file type
-        let parser: Box<dyn Parser> = match file_type {
-            "markdown" | "md" => Box::new(MarkdownParser::new()),
-            _ => Box::new(PlainTextParser::new()),
-        };
-
-        // Parse the content
-        let ast = parser
-            .parse(&arena, content)
-            .map_err(|e| JsError::new(&format!("Parse error: {}", e)))?;
-
-        // Convert AST to JSON for plugin consumption
-        let ast_json = serde_json::to_string(&ast).map_err(|e| JsError::new(&e.to_string()))?;
-        let ast_raw = serde_json::value::RawValue::from_string(ast_json)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        // Prepare analysis data
-        // Prepare analysis data
-        let analysis = self.prepare_text_analysis(content)?;
-
-        // Run all rules
-        let diagnostics = self
-            .host
-            .run_all_rules(
-                &ast_raw,
-                &analysis.source,
-                &analysis.tokens,
-                &analysis.sentences,
-                None,
-            )
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        serde_json::to_string(&diagnostics).map_err(|e| JsError::new(&e.to_string()))
+        let diagnostics = self.run_lint(content, file_type)?;
+        serde_json::to_string(&diagnostics).map_err(to_js_error)
     }
 }
 
@@ -399,5 +365,50 @@ mod tests {
         assert_eq!(json["title"], "Example");
         assert_eq!(json["lang"], "rust");
         assert_eq!(json["ordered"], true);
+    }
+
+    #[wasm_bindgen_test]
+    fn test_load_rule_success() {
+        let mut linter = TextLinter::new().unwrap();
+        // Path relative to crates/tsuzulint_wasm/src/lib.rs
+        // This assumes the fixture has been built by tsuzulint_core tests or manual build
+        let wasm = include_bytes!(
+            "../../tsuzulint_core/tests/fixtures/simple_rule/target/wasm32-wasip1/release/simple_rule.wasm"
+        );
+        let result = linter.load_rule(wasm);
+        assert!(result.is_ok(), "Failed to load rule: {:?}", result.err());
+        assert_eq!(result.unwrap(), "test-rule");
+    }
+
+    #[wasm_bindgen_test]
+    fn test_configure_rule() {
+        let mut linter = TextLinter::new().unwrap();
+        let config = serde_json::json!({ "option": "value" });
+        let js_val = serde_wasm_bindgen::to_value(&config).unwrap();
+
+        let result = linter.configure_rule("test-rule", js_val);
+        assert!(result.is_ok());
+    }
+
+    #[wasm_bindgen_test]
+    fn test_lint_json_empty() {
+        let mut linter = TextLinter::new().unwrap();
+        let result = linter.lint_json("text", "txt").unwrap();
+        assert_eq!(result, "[]");
+    }
+
+    #[wasm_bindgen_test]
+    fn test_lint_with_rule() {
+        let mut linter = TextLinter::new().unwrap();
+        let wasm = include_bytes!(
+            "../../tsuzulint_core/tests/fixtures/simple_rule/target/wasm32-wasip1/release/simple_rule.wasm"
+        );
+        linter.load_rule(wasm).unwrap();
+
+        let content = "This contains error.";
+        let result_json = linter.lint_json(content, "txt").unwrap();
+
+        assert!(result_json.contains("test-rule"));
+        assert!(result_json.contains("Found error keyword"));
     }
 }
