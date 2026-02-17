@@ -73,17 +73,17 @@ pub fn get_manifest() -> FnResult<String> {
 
 /// Lints a node for sentence length.
 #[plugin_fn]
-pub fn lint(input: String) -> FnResult<String> {
+pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
     lint_impl(input)
 }
 
-fn lint_impl(input: String) -> FnResult<String> {
-    let request: LintRequest = serde_json::from_str(&input)?;
+fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
+    let request: LintRequest = rmp_serde::from_slice(&input)?;
     let mut diagnostics = Vec::new();
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(serde_json::to_string(&LintResponse { diagnostics })?);
+        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
     }
 
     // Parse configuration
@@ -111,7 +111,7 @@ fn lint_impl(input: String) -> FnResult<String> {
         }
     }
 
-    Ok(serde_json::to_string(&LintResponse { diagnostics })?)
+    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
 }
 
 #[cfg(test)]
@@ -133,8 +133,8 @@ mod tests {
             "file_path": null
         });
 
-        let output = lint_impl(request.to_string()).unwrap();
-        let response: LintResponse = serde_json::from_str(&output).unwrap();
+        let output = lint_impl(rmp_serde::to_vec_named(&request).unwrap()).unwrap();
+        let response: LintResponse = rmp_serde::from_slice(&output).unwrap();
 
         // "Short sentence." is 15 chars (fine)
         // "Very long sentence..." is > 20 chars (warning)
@@ -155,31 +155,8 @@ mod tests {
             "range": [0, text.len()]
         });
 
-        // Explicitly use _skip_code: false to ensure it's picked up
-        // Default is true (skip), so if alias works, this will mean skip_code = false
-        // But wait, the rule implementation doesn't check skip_code in lint_impl?
-        // Ah, the lint_impl provided in the file ONLY checks length.
-        // Logic for skipping code is likely in `tsuzulint_core` or handled by `extract_node_text` / node types?
-        // Let's check `lint_impl` again.
-
-        // 80: fn lint_impl(input: String) -> FnResult<String> {
-        // ...
-        // 85:     if !is_node_type(&request.node, "Str") {
-        // ...
-        // 90:     let config: Config = serde_json::from_value(request.config.clone()).unwrap_or_default();
-        // ...
-        // 93:     if let Some((start, _end, text)) = extract_node_text(&request.node, &request.source) {
-
-        // It seems `skip_code` field in Config is NOT USED in `lint_impl` in the provided code!
-        // Struct definition:
-        // struct Config { ... skip_code: bool }
-
-        // Uses:
-        // 98:             if sentence.char_count > config.max {
-
-        // `config.skip_code` is NOT used!
-        // If it is not used, then the test won't verify functionality, only deserialization.
-        // Validating deserialization is enough to verify the alias works for loading Config.
+        // Verify that both `_skip_code` (legacy alias) and `skip_code` keys
+        // are correctly deserialized into the Config struct.
 
         let config_json = r#"{ "max": 100, "_skip_code": false }"#;
         let config: Config = serde_json::from_str(config_json).unwrap();
