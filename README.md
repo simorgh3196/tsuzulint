@@ -7,6 +7,7 @@ A high-performance natural language linter written in Rust, inspired by [textlin
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](https://www.rust-lang.org)
 [![CI](https://github.com/simorgh3196/tsuzulint/actions/workflows/ci.yml/badge.svg)](https://github.com/simorgh3196/tsuzulint/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/simorgh3196/tsuzulint/graph/badge.svg?token=LX4CPY51UG)](https://codecov.io/gh/simorgh3196/tsuzulint)
 
 > [!WARNING]
 > **Research-only / WIP (Work In Progress)**
