@@ -58,15 +58,13 @@ fn test_init_symlink_overwrite_vulnerability() {
 }
 
 #[test]
-fn test_init_without_force_preserves_symlink_target() {
+fn test_init_without_force_rejects_existing_symlink() {
     let dir = tempdir().unwrap();
     let config_path = dir.path().join(".tsuzulint.jsonc");
     let target_path = dir.path().join("target_file");
 
-    // Create valid config in target
     fs::write(&target_path, r#"{ "rules": [] }"#).unwrap();
 
-    // Create symlink
     #[cfg(unix)]
     symlink(&target_path, &config_path).unwrap();
     #[cfg(windows)]
@@ -75,12 +73,10 @@ fn test_init_without_force_preserves_symlink_target() {
     }
 
     let mut cmd = cargo_bin_cmd!("tzlint");
-    cmd.current_dir(dir.path()).arg("init"); // No force
+    cmd.current_dir(dir.path()).arg("init");
 
-    // Should fail because file exists (symlink detection)
     cmd.assert().failure();
 
-    // Check target content is preserved
     let content = fs::read_to_string(&target_path).unwrap();
     assert_eq!(content, r#"{ "rules": [] }"#);
 }
