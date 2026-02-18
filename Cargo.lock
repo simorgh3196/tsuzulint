@@ -4448,6 +4448,7 @@ dependencies = [
  "assert_fs",
  "clap",
  "jsonc-parser",
+ "libc",
  "miette",
  "predicates",
  "regex",

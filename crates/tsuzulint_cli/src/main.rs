@@ -483,19 +483,6 @@ fn output_results(results: &[LintResult], format: &str, timings: bool) -> Result
 fn run_init(force: bool) -> Result<()> {
     let config_path = PathBuf::from(LinterConfig::CONFIG_FILES[0]);
 
-    // Check for existence using symlink_metadata to handle symlinks correctly (broken or not)
-    if let Ok(_metadata) = std::fs::symlink_metadata(&config_path) {
-        if !force {
-            return Err(miette::miette!(
-                "Config file already exists. Use --force to overwrite."
-            ));
-        }
-
-        // If force is enabled, remove the existing file or symlink
-        // remove_file removes the symlink itself, not the target
-        std::fs::remove_file(&config_path).into_diagnostic()?;
-    }
-
     let default_config = r#"{
   "rules": [],
   "options": {},
@@ -503,10 +490,44 @@ fn run_init(force: bool) -> Result<()> {
 }
 "#;
 
-    std::fs::write(&config_path, default_config).into_diagnostic()?;
-    info!("Created {}", config_path.display());
+    loop {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
 
-    Ok(())
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+
+        match options.open(&config_path) {
+            Ok(mut file) => {
+                use std::io::Write;
+                file.write_all(default_config.as_bytes())
+                    .into_diagnostic()?;
+                info!("Created {}", config_path.display());
+                return Ok(());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if !force {
+                    return Err(miette::miette!(
+                        "Config file already exists. Use --force to overwrite."
+                    ));
+                }
+
+                // If force is enabled, remove the existing file or symlink and retry.
+                // Re-check existence to avoid infinite loop if removal fails for other reasons.
+                if std::fs::symlink_metadata(&config_path).is_ok() {
+                    std::fs::remove_file(&config_path).into_diagnostic()?;
+                } else {
+                    // Path no longer exists, but we got AlreadyExists?
+                    // This could happen if another process is racing.
+                    // Just retry the loop.
+                }
+            }
+            Err(e) => return Err(e).into_diagnostic(),
+        }
+    }
 }
 
 fn run_create_rule(name: &str) -> Result<()> {
@@ -747,7 +768,7 @@ fn update_config_with_plugin(
     };
 
     // Check for symlink to prevent overwriting arbitrary files
-    if std::fs::symlink_metadata(&path_to_use).is_ok_and(|m| m.is_symlink()) {
+    if std::fs::symlink_metadata(&path_to_use).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(miette::miette!(
             "Refusing to modify configuration file because it is a symbolic link: {}",
             path_to_use.display()
@@ -1280,6 +1301,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "Cannot create symlink without privileges on Windows CI"
+    )]
     fn test_update_config_refuses_symlink() {
         use tempfile::NamedTempFile;
         // Create a target file
@@ -1291,10 +1316,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(target_path, &symlink_path).unwrap();
         #[cfg(windows)]
-        if std::os::windows::fs::symlink_file(target_path, &symlink_path).is_err() {
-            // Skip on Windows if privileges missing
-            return;
-        }
+        std::os::windows::fs::symlink_file(target_path, &symlink_path).unwrap();
 
         // Mock inputs
         let spec = create_dummy_spec();
@@ -1309,10 +1331,10 @@ mod tests {
 
         // Verify refusal
         assert!(result.is_err());
-        let err = result.unwrap_err();
+        let msg = result.unwrap_err().to_string();
         assert!(
-            err.to_string()
-                .contains("Refusing to modify configuration file because it is a symbolic link")
+            msg.contains("Refusing to modify configuration file because it is a symbolic link")
         );
+        assert!(msg.contains(&symlink_path.to_string_lossy().to_string()));
     }
 }
