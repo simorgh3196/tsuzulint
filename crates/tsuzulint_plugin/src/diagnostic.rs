@@ -51,6 +51,39 @@ pub struct Diagnostic {
     pub fix: Option<Fix>,
 }
 
+impl PartialEq for Diagnostic {
+    fn eq(&self, other: &Self) -> bool {
+        self.span == other.span && self.message == other.message && self.rule_id == other.rule_id
+    }
+}
+
+impl Eq for Diagnostic {}
+
+impl std::hash::Hash for Diagnostic {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.span.hash(state);
+        self.message.hash(state);
+        self.rule_id.hash(state);
+    }
+}
+
+impl PartialOrd for Diagnostic {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Diagnostic {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.span
+            .start
+            .cmp(&other.span.start)
+            .then(self.span.end.cmp(&other.span.end))
+            .then(self.message.cmp(&other.message))
+            .then(self.rule_id.cmp(&other.rule_id))
+    }
+}
+
 impl Diagnostic {
     /// Creates a new diagnostic.
     pub fn new(rule_id: impl Into<String>, message: impl Into<String>, span: Span) -> Self {
@@ -84,7 +117,7 @@ impl Diagnostic {
 }
 
 /// An auto-fix for a diagnostic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "rkyv",
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
@@ -279,6 +312,22 @@ mod tests {
         assert_eq!(original.rule_id, cloned.rule_id);
         assert_eq!(original.message, cloned.message);
         assert_eq!(original.severity, cloned.severity);
+    }
+
+    #[test]
+    fn test_diagnostic_equality_and_hash() {
+        use std::collections::HashSet;
+        let d1 = Diagnostic::new("rule1", "msg1", Span::new(0, 5));
+        let d2 = Diagnostic::new("rule1", "msg1", Span::new(0, 5));
+        let d3 = Diagnostic::new("rule2", "msg1", Span::new(0, 5));
+
+        assert_eq!(d1, d2);
+        assert_ne!(d1, d3);
+
+        let mut set = HashSet::new();
+        set.insert(d1.clone());
+        assert!(set.contains(&d2));
+        assert!(!set.contains(&d3));
     }
 
     #[test]
