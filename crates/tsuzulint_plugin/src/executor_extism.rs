@@ -19,6 +19,9 @@ const DEFAULT_MEMORY_MAX_PAGES: u32 = 2048;
 /// Default timeout for WASM execution (5000 ms).
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
 
+/// Default fuel limit for WASM execution (1 billion instructions).
+const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
+
 /// A loaded rule using Extism.
 struct LoadedRule {
     /// The Extism plugin instance.
@@ -48,7 +51,7 @@ impl ExtismExecutor {
         Self {
             rules: HashMap::new(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
-            fuel_limit: None,
+            fuel_limit: Some(DEFAULT_FUEL_LIMIT),
         }
     }
 
@@ -60,7 +63,7 @@ impl ExtismExecutor {
     }
 
     /// Sets the fuel limit for WASM execution.
-    #[cfg(all(test, feature = "test-utils"))]
+    #[allow(dead_code)]
     pub fn with_fuel_limit(mut self, limit: u64) -> Self {
         self.fuel_limit = Some(limit);
         self
@@ -95,7 +98,7 @@ impl ExtismExecutor {
         let manifest = self.configure_manifest(manifest);
 
         // Create the plugin with WASI support
-        let mut builder = PluginBuilder::new(&manifest).with_wasi(true);
+        let mut builder = PluginBuilder::new(manifest).with_wasi(true);
 
         if let Some(limit) = self.fuel_limit {
             builder = builder.with_fuel_limit(limit);
@@ -315,6 +318,7 @@ mod tests {
 
         // Check for specific error related to fuel limit
         // The error message typically contains "fuel"
+        // Note: Extism returns opaque errors, so string matching is currently the most practical way
         assert!(
             err_msg.to_lowercase().contains("fuel"),
             "Expected fuel limit error, got: {}",
