@@ -159,8 +159,10 @@ impl CacheManager {
                 && let Some(best_match_idx) = Self::find_best_match(current_block, candidates)
             {
                 // Optimization: swap_remove is O(1) while remove is O(N).
-                // Order of candidates does not matter for finding the best match
-                // since find_best_match scans the entire list.
+                // Although swap_remove changes candidate order (affecting tie-breaking in
+                // find_best_match), correctness is preserved: all candidates share the same
+                // hash (identical content), so their relative diagnostic positions are also
+                // identical and any matched candidate produces the same shifted diagnostics.
                 let matched_block = candidates.swap_remove(best_match_idx);
                 matched_mask[i] = true;
 
@@ -605,5 +607,105 @@ mod tests {
         assert!(messages.contains(&"Err1".to_string()));
         assert!(messages.contains(&"Err2".to_string()));
         assert!(messages.contains(&"Err3".to_string()));
+    }
+
+    #[test]
+    fn test_reconcile_blocks_span_shift() {
+        use tsuzulint_ast::Span;
+        let manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+
+        // Cached block "B" at 0-10 with diagnostic at 2-5
+        let block = BlockCacheEntry {
+            hash: "B".to_string(),
+            span: Span::new(0, 10),
+            diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(2, 5))],
+        };
+
+        let versions = HashMap::new();
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+            vec![block],
+        );
+        let mut manager = manager;
+        manager.set(path.clone(), entry);
+
+        // Current block "B" at 20-30 (shifted by +20)
+        let current_blocks = vec![BlockCacheEntry {
+            hash: "B".to_string(),
+            span: Span::new(20, 30),
+            diagnostics: vec![],
+        }];
+
+        let (diagnostics, matched) =
+            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+
+        // Assert matched
+        assert_eq!(matched, vec![true]);
+        assert_eq!(diagnostics.len(), 1);
+
+        // Assert diagnostic span is shifted: (2+20, 5+20) = (22, 25)
+        assert_eq!(diagnostics[0].span, Span::new(22, 25));
+        assert_eq!(diagnostics[0].message, "Err1");
+    }
+
+    #[test]
+    fn test_reconcile_blocks_tie_breaker() {
+        use tsuzulint_ast::Span;
+        let manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+
+        // Two identical cached blocks with same hash "C"
+        // Block 1: 5-10
+        // Block 2: 15-20
+        let block1 = BlockCacheEntry {
+            hash: "C".to_string(),
+            span: Span::new(5, 10),
+            diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(6, 8))],
+        };
+        let block2 = BlockCacheEntry {
+            hash: "C".to_string(),
+            span: Span::new(15, 20),
+            diagnostics: vec![Diagnostic::new("rule1", "Err2", Span::new(16, 18))],
+        };
+
+        let versions = HashMap::new();
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+            vec![block1, block2],
+        );
+        let mut manager = manager;
+        manager.set(path.clone(), entry);
+
+        // Current block "C" at 10-15
+        // Distance to block1 (5-10): |10-5| = 5
+        // Distance to block2 (15-20): |10-15| = 5
+        // This is a tie-breaker case for find_best_match.
+        // It should pick one (the first one) and the other should remain unmatched.
+        let current_blocks = vec![BlockCacheEntry {
+            hash: "C".to_string(),
+            span: Span::new(10, 15),
+            diagnostics: vec![],
+        }];
+
+        let (diagnostics, matched) =
+            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+
+        // Exactly one should match
+        assert_eq!(matched, vec![true]);
+        assert_eq!(diagnostics.len(), 1);
+
+        // If block1 was picked (start 5, current 10, shift +5):
+        // Span (6,8) -> (11,13)
+        // If block2 was picked (start 15, current 10, shift -5):
+        // Span (16,18) -> (11,13)
+        // In both cases, the span should be (11,13) because they are identical blocks.
+        assert_eq!(diagnostics[0].span, Span::new(11, 13));
     }
 }
