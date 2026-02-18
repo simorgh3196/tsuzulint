@@ -1326,9 +1326,6 @@ mod tests {
         let result =
             update_config_with_plugin(&spec, "test-rule", &manifest, Some(symlink_path.clone()));
 
-        // Cleanup
-        let _ = std::fs::remove_file(&symlink_path);
-
         // Verify refusal
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
@@ -1336,5 +1333,15 @@ mod tests {
             msg.contains("Refusing to modify configuration file because it is a symbolic link")
         );
         assert!(msg.contains(&symlink_path.to_string_lossy().to_string()));
+
+        // Verify that the symlink target was not modified
+        let target_content = std::fs::read(target_path).unwrap();
+        assert!(
+            target_content.is_empty(),
+            "Symlink target must not be modified"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file(&symlink_path);
     }
 }
