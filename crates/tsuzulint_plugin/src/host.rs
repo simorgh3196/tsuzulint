@@ -446,14 +446,7 @@ mod tests {
             serde_json::to_string(&Vec::<Sentence>::new()).unwrap(),
         )
         .unwrap();
-        let result = host.run_rule(
-            "nonexistent",
-            &node,
-            "",
-            &tokens_raw,
-            &sentences_raw,
-            None,
-        );
+        let result = host.run_rule("nonexistent", &node, "", &tokens_raw, &sentences_raw, None);
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 

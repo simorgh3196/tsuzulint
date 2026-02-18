@@ -972,13 +972,7 @@ impl Linter {
                 .plugin_host
                 .lock()
                 .map_err(|_| LinterError::Internal("Plugin host lock poisoned".to_string()))?;
-            host.run_all_rules_with_parts(
-                &ast_raw,
-                content,
-                &tokens,
-                &sentences,
-                path.to_str(),
-            )?
+            host.run_all_rules_with_parts(&ast_raw, content, &tokens, &sentences, path.to_str())?
         };
 
         Ok(diagnostics)

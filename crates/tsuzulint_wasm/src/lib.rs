@@ -20,7 +20,6 @@ pub struct TextLinter {
 }
 
 struct AnalysisData {
-    source: Box<serde_json::value::RawValue>,
     tokens: Vec<tsuzulint_text::Token>,
     sentences: Vec<tsuzulint_text::Sentence>,
 }
@@ -53,19 +52,13 @@ impl TextLinter {
 
     /// Prepares text analysis data (source, tokens, sentences).
     fn prepare_text_analysis(&self, content: &str) -> Result<AnalysisData, JsError> {
-        let source_raw = serde_json::value::to_raw_value(&content).map_err(to_js_error)?;
-
         let tokens = self.tokenizer.tokenize(content).map_err(to_js_error)?;
 
         // TODO: Compute ignore ranges from AST (code blocks, inline code)
         let ignore_ranges: Vec<std::ops::Range<usize>> = Vec::new();
         let sentences = SentenceSplitter::split(content, &ignore_ranges);
 
-        Ok(AnalysisData {
-            source: source_raw,
-            tokens,
-            sentences,
-        })
+        Ok(AnalysisData { tokens, sentences })
     }
 
     /// Returns the names of all loaded rules.
@@ -102,7 +95,7 @@ impl TextLinter {
         self.host
             .run_all_rules_with_parts(
                 &ast_raw,
-                &analysis.source,
+                content,
                 &analysis.tokens,
                 &analysis.sentences,
                 None,
