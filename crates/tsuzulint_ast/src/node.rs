@@ -102,27 +102,7 @@ impl<'a> Serialize for TxtNode<'a> {
         if self.value.is_some() {
             len += 1;
         }
-        if self.data.url.is_some() {
-            len += 1;
-        }
-        if self.data.title.is_some() {
-            len += 1;
-        }
-        if self.data.depth.is_some() {
-            len += 1;
-        }
-        if self.data.ordered.is_some() {
-            len += 1;
-        }
-        if self.data.lang.is_some() {
-            len += 1;
-        }
-        if self.data.identifier.is_some() {
-            len += 1;
-        }
-        if self.data.label.is_some() {
-            len += 1;
-        }
+        len += self.data.present_field_count();
 
         let mut state = serializer.serialize_struct("TxtNode", len)?;
 
@@ -137,27 +117,7 @@ impl<'a> Serialize for TxtNode<'a> {
             state.serialize_field("value", value)?;
         }
 
-        if let Some(url) = &self.data.url {
-            state.serialize_field("url", url)?;
-        }
-        if let Some(title) = &self.data.title {
-            state.serialize_field("title", title)?;
-        }
-        if let Some(depth) = &self.data.depth {
-            state.serialize_field("depth", depth)?;
-        }
-        if let Some(ordered) = &self.data.ordered {
-            state.serialize_field("ordered", ordered)?;
-        }
-        if let Some(lang) = &self.data.lang {
-            state.serialize_field("lang", lang)?;
-        }
-        if let Some(identifier) = &self.data.identifier {
-            state.serialize_field("identifier", identifier)?;
-        }
-        if let Some(label) = &self.data.label {
-            state.serialize_field("label", label)?;
-        }
+        self.data.serialize_fields(&mut state)?;
 
         state.end()
     }
@@ -223,6 +183,62 @@ impl<'a> TxtNode<'a> {
 }
 
 impl<'a> NodeData<'a> {
+    /// Returns the number of present (non-None) fields.
+    fn present_field_count(&self) -> usize {
+        let mut count = 0;
+        if self.url.is_some() {
+            count += 1;
+        }
+        if self.title.is_some() {
+            count += 1;
+        }
+        if self.depth.is_some() {
+            count += 1;
+        }
+        if self.ordered.is_some() {
+            count += 1;
+        }
+        if self.lang.is_some() {
+            count += 1;
+        }
+        if self.identifier.is_some() {
+            count += 1;
+        }
+        if self.label.is_some() {
+            count += 1;
+        }
+        count
+    }
+
+    /// Serializes present fields into the given struct serializer state.
+    fn serialize_fields<S: serde::ser::SerializeStruct>(
+        &self,
+        state: &mut S,
+    ) -> Result<(), S::Error> {
+        if let Some(url) = &self.url {
+            state.serialize_field("url", url)?;
+        }
+        if let Some(title) = &self.title {
+            state.serialize_field("title", title)?;
+        }
+        if let Some(depth) = &self.depth {
+            state.serialize_field("depth", depth)?;
+        }
+        if let Some(ordered) = &self.ordered {
+            state.serialize_field("ordered", ordered)?;
+        }
+        if let Some(lang) = &self.lang {
+            state.serialize_field("lang", lang)?;
+        }
+        if let Some(identifier) = &self.identifier {
+            state.serialize_field("identifier", identifier)?;
+        }
+        if let Some(label) = &self.label {
+            state.serialize_field("label", label)?;
+        }
+        Ok(())
+    }
+
     /// Creates new empty node data.
     #[inline]
     pub const fn new() -> Self {
@@ -524,5 +540,46 @@ mod tests {
         assert_eq!(json["type"], "Paragraph");
         assert!(json["children"].is_array());
         assert!(json["children"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_serialization_all_fields_len() {
+        let mut node = TxtNode::new_text(NodeType::CodeBlock, Span::new(0, 10), "code");
+        // Manually set all fields
+        node.data.url = Some("http://url");
+        node.data.title = Some("Title");
+        node.data.depth = Some(1);
+        node.data.ordered = Some(true);
+        node.data.lang = Some("rust");
+        node.data.identifier = Some("id");
+        node.data.label = Some("lbl");
+
+        let json = serde_json::to_value(&node).unwrap();
+        let obj = json.as_object().unwrap();
+
+        // Expected fields: type, range, value (since it's text), plus 7 data fields
+        // Total = 3 + 7 = 10
+        assert_eq!(obj.len(), 10);
+
+        assert_eq!(obj["url"], "http://url");
+        assert_eq!(obj["title"], "Title");
+        assert_eq!(obj["depth"], 1);
+        assert_eq!(obj["ordered"], true);
+        assert_eq!(obj["lang"], "rust");
+        assert_eq!(obj["identifier"], "id");
+        assert_eq!(obj["label"], "lbl");
+    }
+
+    #[test]
+    fn test_serialization_leaf_no_children() {
+        let node = TxtNode::new_leaf(NodeType::HorizontalRule, Span::new(0, 5));
+        let json = serde_json::to_value(&node).unwrap();
+        let obj = json.as_object().unwrap();
+
+        // Expected fields: type, range
+        // Total = 2
+        assert_eq!(obj.len(), 2);
+        assert!(!obj.contains_key("children"));
+        assert!(!obj.contains_key("value"));
     }
 }
