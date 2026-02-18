@@ -197,7 +197,7 @@ impl CacheManager {
     }
 
     /// Finds the best match among candidates for a current block.
-    /// Ideally, we want the one strictly matching in order or closest in position.
+    /// Selects the candidate whose start position is closest to the current block's start.
     fn find_best_match(
         current_block: &BlockCacheEntry,
         candidates: &[&BlockCacheEntry],
@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn test_reconcile_blocks_span_shift() {
         use tsuzulint_ast::Span;
-        let manager = CacheManager::new("/tmp/test-cache");
+        let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
 
         // Cached block "B" at 0-10 with diagnostic at 2-5
@@ -630,7 +630,6 @@ mod tests {
             vec![],
             vec![block],
         );
-        let mut manager = manager;
         manager.set(path.clone(), entry);
 
         // Current block "B" at 20-30 (shifted by +20)
@@ -655,7 +654,7 @@ mod tests {
     #[test]
     fn test_reconcile_blocks_tie_breaker() {
         use tsuzulint_ast::Span;
-        let manager = CacheManager::new("/tmp/test-cache");
+        let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
 
         // Two identical cached blocks with same hash "C"
@@ -680,7 +679,6 @@ mod tests {
             vec![],
             vec![block1, block2],
         );
-        let mut manager = manager;
         manager.set(path.clone(), entry);
 
         // Current block "C" at 10-15
