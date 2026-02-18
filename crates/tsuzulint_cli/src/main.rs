@@ -1301,7 +1301,8 @@ mod tests {
         let manifest = create_dummy_manifest();
 
         // Call the function with the symlink path
-        let result = update_config_with_plugin(&spec, "test-rule", &manifest, Some(symlink_path.clone()));
+        let result =
+            update_config_with_plugin(&spec, "test-rule", &manifest, Some(symlink_path.clone()));
 
         // Cleanup
         let _ = std::fs::remove_file(&symlink_path);
@@ -1309,6 +1310,9 @@ mod tests {
         // Verify refusal
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("Refusing to modify configuration file because it is a symbolic link"));
+        assert!(
+            err.to_string()
+                .contains("Refusing to modify configuration file because it is a symbolic link")
+        );
     }
 }
