@@ -63,6 +63,7 @@ impl ExtismExecutor {
     }
 
     /// Sets the fuel limit for WASM execution.
+    #[cfg(all(test, feature = "test-utils"))]
     pub fn with_fuel_limit(mut self, limit: u64) -> Self {
         self.fuel_limit = Some(limit);
         self
