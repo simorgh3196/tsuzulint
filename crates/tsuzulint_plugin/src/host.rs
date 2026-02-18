@@ -368,6 +368,9 @@ impl Default for PluginHost {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "test-utils")]
+    use crate::test_utils::wat_to_wasm;
+
     #[test]
     fn test_plugin_host_new() {
         let host = PluginHost::new();
@@ -437,5 +440,64 @@ mod tests {
         assert_eq!(guest_request.config, config);
         assert_eq!(guest_request.node, node_data);
         assert_eq!(guest_request.helpers, None);
+    }
+
+    #[test]
+    #[cfg(all(feature = "native", feature = "test-utils"))]
+    fn test_run_all_rules() {
+        let mut host = PluginHost::new();
+
+        let wat1 = r#"
+            (module
+                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
+                (memory (export "memory") 1)
+                (data (i32.const 0) "{\"name\":\"rule-a\",\"version\":\"1.0.0\"}")
+                ;; Response: {"diagnostics":[{"rule_id":"a","message":"m","span":{"start":0,"end":0}}]}
+                (data (i32.const 100) "\81\abdiagnostics\91\83\a7rule_id\a1a\a7message\a1m\a4span\82\a5start\00\a3end\00")
+                (func (export "get_manifest")
+                    (call $output_set (i64.const 0) (i64.const 35))
+                )
+                (func (export "lint")
+                    (call $output_set (i64.const 100) (i64.const 53))
+                )
+                (func (export "alloc") (param i64) (result i64)
+                    (i64.const 200)
+                )
+            )
+        "#;
+
+        let wat2 = r#"
+            (module
+                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
+                (memory (export "memory") 1)
+                (data (i32.const 0) "{\"name\":\"rule-b\",\"version\":\"1.0.0\"}")
+                ;; Response: {"diagnostics":[{"rule_id":"b","message":"m","span":{"start":0,"end":0}}]}
+                (data (i32.const 100) "\81\abdiagnostics\91\83\a7rule_id\a1b\a7message\a1m\a4span\82\a5start\00\a3end\00")
+                (func (export "get_manifest")
+                    (call $output_set (i64.const 0) (i64.const 35))
+                )
+                (func (export "lint")
+                    (call $output_set (i64.const 100) (i64.const 53))
+                )
+                (func (export "alloc") (param i64) (result i64)
+                    (i64.const 200)
+                )
+            )
+        "#;
+
+        host.load_rule_bytes(&wat_to_wasm(wat1)).unwrap();
+        host.load_rule_bytes(&wat_to_wasm(wat2)).unwrap();
+
+        let node_bytes = serde_json::to_string(&serde_json::json!({})).unwrap();
+        let node = serde_json::value::RawValue::from_string(node_bytes).unwrap();
+        let source_json = serde_json::to_string("test").unwrap();
+        let source = serde_json::value::RawValue::from_string(source_json).unwrap();
+
+        let diagnostics = host.run_all_rules(&node, &source, None).unwrap();
+
+        assert_eq!(diagnostics.len(), 2);
+        let rule_ids: Vec<_> = diagnostics.iter().map(|d| d.rule_id.as_str()).collect();
+        assert!(rule_ids.contains(&"a"));
+        assert!(rule_ids.contains(&"b"));
     }
 }
