@@ -1766,7 +1766,7 @@ mod tests {
         ];
 
         // Case 1: Empty global keys
-        let global_keys: HashSet<(u32, u32, &str, &str)> = HashSet::new();
+        let global_keys: HashSet<&Diagnostic> = HashSet::new();
         let result = Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys);
 
         assert_eq!(result.len(), 2);
@@ -1780,14 +1780,9 @@ mod tests {
         assert_eq!(result[1].diagnostics[0].rule_id, "rule2");
 
         // Case 2: Filter global diagnostics
-        let mut global_keys_filtered = HashSet::new();
+        let mut global_keys_filtered: HashSet<&Diagnostic> = HashSet::new();
         // Mark diag1 as global
-        global_keys_filtered.insert((
-            diag1.span.start,
-            diag1.span.end,
-            diag1.message.as_str(),
-            diag1.rule_id.as_str(),
-        ));
+        global_keys_filtered.insert(&diag1);
 
         let result_filtered =
             Linter::distribute_diagnostics(blocks, &diagnostics, &global_keys_filtered);
