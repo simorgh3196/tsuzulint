@@ -576,10 +576,6 @@ impl Linter {
 
         // Run rules
         {
-            // Pre-serialize source content (escape string once)
-            // This avoids re-escaping the source string for every rule execution
-            let source_raw = Self::to_raw_value(&content, "content")?;
-
             // A. Run Global Rules
             // Global rules must always run on the full document if anything changed
             // because they depend on the full context.
@@ -592,7 +588,7 @@ impl Linter {
                     match host.run_rule_with_parts(
                         rule,
                         &ast,
-                        &source_raw,
+                        &content,
                         &tokens,
                         &sentences,
                         path.to_str(),
@@ -612,7 +608,7 @@ impl Linter {
                         match host.run_rule_with_parts(
                             &rule,
                             &ast_raw,
-                            &source_raw,
+                            &content,
                             &tokens,
                             &sentences,
                             path.to_str(),
@@ -645,7 +641,7 @@ impl Linter {
                                 match host.run_rule_with_parts(
                                     rule,
                                     node,
-                                    &source_raw,
+                                    &content,
                                     &tokens,
                                     &sentences,
                                     path.to_str(),
@@ -663,7 +659,7 @@ impl Linter {
                                     match host.run_rule_with_parts(
                                         rule,
                                         &node_raw,
-                                        &source_raw,
+                                        &content,
                                         &tokens,
                                         &sentences,
                                         path.to_str(),
@@ -959,7 +955,6 @@ impl Linter {
         // Convert AST to JSON for plugin system
         // Serialize to string + RawValue to avoid serialization overhead in rules
         let ast_raw = Self::to_raw_value(&ast, "AST")?;
-        let source_raw = Self::to_raw_value(&content, "content")?;
 
         // Extract ignore ranges (CodeBlock and Code)
         let ignore_ranges = self.extract_ignore_ranges(&ast);
@@ -979,7 +974,7 @@ impl Linter {
                 .map_err(|_| LinterError::Internal("Plugin host lock poisoned".to_string()))?;
             host.run_all_rules_with_parts(
                 &ast_raw,
-                &source_raw,
+                content,
                 &tokens,
                 &sentences,
                 path.to_str(),

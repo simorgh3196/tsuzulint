@@ -48,7 +48,7 @@ struct LintRequest<'a, T: Serialize> {
     /// Rule configuration.
     config: serde_json::Value,
     /// Source text.
-    source: String,
+    source: &'a str,
     /// File path (if available).
     file_path: Option<&'a str>,
 }
@@ -73,7 +73,7 @@ struct LintResponse {
 /// host.load_rule("./rules/no-todo.wasm")?;
 ///
 /// // Run the rule on an AST node
-/// let diagnostics = host.run_rule("no-todo", &node, &source, Some("example.md"))?;
+/// let diagnostics = host.run_rule("no-todo", &node, "source content", &tokens, &sentences, Some("example.md"))?;
 /// ```
 pub struct PluginHost {
     /// The WASM executor.
@@ -231,7 +231,7 @@ impl PluginHost {
     ///
     /// * `name` - Rule name
     /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
-    /// * `source` - The source text (serialized as JSON string)
+    /// * `source` - The source text
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -241,7 +241,7 @@ impl PluginHost {
         &mut self,
         name: &str,
         node: &T,
-        source: &serde_json::value::RawValue,
+        source: &str,
         tokens: &serde_json::value::RawValue,
         sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
@@ -266,7 +266,7 @@ impl PluginHost {
         &mut self,
         name: &str,
         node: &T,
-        source: &serde_json::value::RawValue,
+        source: &str,
         tokens: &[Token],
         sentences: &[Sentence],
         file_path: Option<&str>,
@@ -292,7 +292,7 @@ impl PluginHost {
         aliases: &HashMap<String, String>,
         name: &str,
         node: &T,
-        source: &serde_json::value::RawValue,
+        source: &str,
         tokens: &[Token],
         sentences: &[Sentence],
         file_path: Option<&str>,
@@ -302,13 +302,10 @@ impl PluginHost {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
-        let source_str: String = serde_json::from_str(source.get())
-            .map_err(|e| PluginError::call(format!("Invalid source JSON: {}", e)))?;
-
         let request = LintRequest {
             node,
             config,
-            source: source_str,
+            source,
             tokens,
             sentences,
             file_path,
@@ -332,7 +329,7 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
-    /// * `source` - The source text (serialized as JSON string)
+    /// * `source` - The source text
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -341,7 +338,7 @@ impl PluginHost {
     pub fn run_all_rules<T: Serialize>(
         &mut self,
         node: &T,
-        source: &serde_json::value::RawValue,
+        source: &str,
         tokens: &serde_json::value::RawValue,
         sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
@@ -360,7 +357,7 @@ impl PluginHost {
     pub fn run_all_rules_with_parts<T: Serialize>(
         &mut self,
         node: &T,
-        source: &serde_json::value::RawValue,
+        source: &str,
         tokens: &[Token],
         sentences: &[Sentence],
         file_path: Option<&str>,
@@ -440,8 +437,6 @@ mod tests {
         let mut host = PluginHost::new();
         let node_bytes = serde_json::to_string(&serde_json::json!({})).unwrap();
         let node = serde_json::value::RawValue::from_string(node_bytes).unwrap();
-        let source_json = serde_json::to_string("").unwrap();
-        let source = serde_json::value::RawValue::from_string(source_json).unwrap();
 
         let tokens_raw = serde_json::value::RawValue::from_string(
             serde_json::to_string(&Vec::<Token>::new()).unwrap(),
@@ -454,7 +449,7 @@ mod tests {
         let result = host.run_rule(
             "nonexistent",
             &node,
-            &source,
+            "",
             &tokens_raw,
             &sentences_raw,
             None,
@@ -493,14 +488,14 @@ mod tests {
         let config = serde_json::json!({"option": "value"});
         let tokens = vec![];
         let sentences = vec![];
-        let source = "test content".to_string();
+        let source = "test content";
         let file_path = Some("test.md");
 
         // Host side
         let host_request = LintRequest {
             node: &node_data,
             config: config.clone(),
-            source: source.clone(),
+            source,
             tokens: &tokens,
             sentences: &sentences,
             file_path,
