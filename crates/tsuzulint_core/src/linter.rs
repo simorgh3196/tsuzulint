@@ -1780,7 +1780,7 @@ mod tests {
         assert_eq!(result[1].diagnostics[0].rule_id, "rule2");
 
         // Case 2: Filter global diagnostics
-        let mut global_keys_filtered: HashSet<&Diagnostic> = HashSet::new();
+        let mut global_keys_filtered = HashSet::new();
         // Mark diag1 as global
         global_keys_filtered.insert(&diag1);
 
