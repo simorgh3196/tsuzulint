@@ -61,6 +61,13 @@ jobs:
         with:
           target: wasm32-wasip1
 
+      - name: Build simple_rule fixture
+        run: |
+          cd crates/tsuzulint_core/tests/fixtures/simple_rule
+          cargo build --target wasm32-wasip1 --release
+          cd -
+
+
       - name: Run tests
         run: cargo test --workspace --all-features
 
