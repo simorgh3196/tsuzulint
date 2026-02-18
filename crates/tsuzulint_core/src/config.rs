@@ -202,9 +202,10 @@ impl LinterConfig {
     }
 
     /// Computes a hash of the configuration for cache invalidation.
-    pub fn hash(&self) -> String {
-        let json = serde_json::to_string(self).unwrap_or_default();
-        blake3::hash(json.as_bytes()).to_hex().to_string()
+    pub fn hash(&self) -> Result<String, LinterError> {
+        let json = serde_json::to_string(self)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize config: {}", e)))?;
+        Ok(blake3::hash(json.as_bytes()).to_hex().to_string())
     }
 }
 
@@ -371,7 +372,7 @@ mod tests {
         let config2 = LinterConfig::new();
 
         // Same configs should produce same hash
-        assert_eq!(config1.hash(), config2.hash());
+        assert_eq!(config1.hash().unwrap(), config2.hash().unwrap());
     }
 
     #[test]
@@ -382,14 +383,14 @@ mod tests {
         config2.cache = false;
 
         // Different configs should produce different hashes
-        assert_ne!(config1.hash(), config2.hash());
+        assert_ne!(config1.hash().unwrap(), config2.hash().unwrap());
 
         // Adding rules should change hash
         config1
             .rules
             .push(RuleDefinition::Simple("test-rule".to_string()));
-        let hash_after_rule = config1.hash();
-        assert_ne!(LinterConfig::new().hash(), hash_after_rule);
+        let hash_after_rule = config1.hash().unwrap();
+        assert_ne!(LinterConfig::new().hash().unwrap(), hash_after_rule);
     }
 
     #[test]

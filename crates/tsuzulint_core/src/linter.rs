@@ -72,7 +72,7 @@ impl Linter {
         Self::load_configured_rules(&config, &mut host);
 
         // Pre-compute config hash
-        let config_hash = config.hash();
+        let config_hash = config.hash()?;
 
         Ok(Self {
             config,
@@ -1225,7 +1225,7 @@ mod tests {
     #[test]
     fn test_linter_config_hash_caching() {
         let (config, _temp) = test_config();
-        let expected_hash = config.hash();
+        let expected_hash = config.hash().unwrap();
         let linter = Linter::new(config).unwrap();
 
         // Verify that the hash stored in Linter matches the one computed from config
