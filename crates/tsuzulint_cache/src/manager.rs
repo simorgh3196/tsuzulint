@@ -530,4 +530,80 @@ mod tests {
         assert!(manager.is_valid(&PathBuf::from("/path/b.md"), "hash_b", "config", &versions));
         assert!(manager.is_valid(&PathBuf::from("/path/c.txt"), "hash_c", "config", &versions));
     }
+
+    #[test]
+    fn test_reconcile_blocks_with_multiple_candidates_and_order() {
+        use tsuzulint_ast::Span;
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+
+        // Create 3 identical blocks at different positions in the cache
+        // Hash "A" at 0-10, 20-30, 40-50
+        let block1 = BlockCacheEntry {
+            hash: "A".to_string(),
+            span: Span::new(0, 10),
+            diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(1, 5))],
+        };
+        let block2 = BlockCacheEntry {
+            hash: "A".to_string(),
+            span: Span::new(20, 30),
+            diagnostics: vec![Diagnostic::new("rule1", "Err2", Span::new(21, 25))],
+        };
+        let block3 = BlockCacheEntry {
+            hash: "A".to_string(),
+            span: Span::new(40, 50),
+            diagnostics: vec![Diagnostic::new("rule1", "Err3", Span::new(41, 45))],
+        };
+
+        let cached_blocks = vec![block1, block2, block3];
+        let versions = HashMap::new();
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+            cached_blocks,
+        );
+        manager.set(path.clone(), entry);
+
+        // Current blocks:
+        // 1. "A" at 0-10 (should match cached block1)
+        // 2. "A" at 40-50 (should match cached block3)
+        // 3. "A" at 20-30 (should match cached block2)
+        // Note: We process them in an order that might trigger swap_remove behavior if we are not careful,
+        // but here we just want to ensure that "best match" (closest distance) is respected.
+
+        // Let's mix up the order in current_blocks to test robustness
+        let current_blocks = vec![
+            BlockCacheEntry {
+                hash: "A".to_string(),
+                span: Span::new(0, 10), // Matches cached block1 (dist 0)
+                diagnostics: vec![],
+            },
+            BlockCacheEntry {
+                hash: "A".to_string(),
+                span: Span::new(40, 50), // Matches cached block3 (dist 0)
+                diagnostics: vec![],
+            },
+            BlockCacheEntry {
+                hash: "A".to_string(),
+                span: Span::new(20, 30), // Matches cached block2 (dist 0)
+                diagnostics: vec![],
+            },
+        ];
+
+        let (diagnostics, matched) =
+            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+
+        // All 3 should match
+        assert!(matched.iter().all(|&m| m));
+        assert_eq!(diagnostics.len(), 3);
+
+        // Verify that we got the correct diagnostics back (meaning correct blocks were matched)
+        // Since we didn't shift positions (current == cached), spans should be identical to cached diagnostics.
+        let messages: Vec<String> = diagnostics.iter().map(|d| d.message.clone()).collect();
+        assert!(messages.contains(&"Err1".to_string()));
+        assert!(messages.contains(&"Err2".to_string()));
+        assert!(messages.contains(&"Err3".to_string()));
+    }
 }
