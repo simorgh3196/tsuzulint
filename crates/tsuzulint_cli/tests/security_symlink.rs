@@ -58,7 +58,7 @@ fn test_init_symlink_overwrite_vulnerability() {
 }
 
 #[test]
-fn test_plugin_install_symlink_refusal() {
+fn test_init_without_force_preserves_symlink_target() {
     let dir = tempdir().unwrap();
     let config_path = dir.path().join(".tsuzulint.jsonc");
     let target_path = dir.path().join("target_file");
@@ -74,35 +74,13 @@ fn test_plugin_install_symlink_refusal() {
         return;
     }
 
-    // Run `tzlint plugin install`
-    // We use a dummy URL to trigger the config update logic (after resolution logic would run)
-    // But since resolution happens first, we need to pass a valid spec or mock it.
-    // However, `tsuzulint_registry` attempts network calls.
-    // We can use a `path` spec to avoid network, pointing to a dummy rule.
-    // But we need a valid rule manifest.
-
-    let rule_dir = dir.path().join("rule");
-    fs::create_dir(&rule_dir).unwrap();
-    let wasm_path = rule_dir.join("rule.wasm");
-    fs::write(&wasm_path, b"").unwrap(); // Dummy WASM
-    // We need hash.
-    // Actually, constructing a valid local rule is complicated.
-
-    // Instead, we expect it to fail fast if we use --url with missing --as (validating args happens early)
-    // No, we want to test update_config_with_plugin which happens AT THE END.
-
-    // Creating a full integration test for plugin install with mocks is hard because we can't easily inject mocks into the binary.
-    // However, the vulnerability is in `update_config_with_plugin`.
-    // We can rely on the unit test I will add to `main.rs` for `update_config_with_plugin`.
-    // But let's try a best effort here with `tzlint init` without force first.
-
     let mut cmd = cargo_bin_cmd!("tzlint");
     cmd.current_dir(dir.path()).arg("init"); // No force
 
-    // Should fail because file exists (symlink)
+    // Should fail because file exists (symlink detection)
     cmd.assert().failure();
 
-    // Check target content
+    // Check target content is preserved
     let content = fs::read_to_string(&target_path).unwrap();
     assert_eq!(content, r#"{ "rules": [] }"#);
 }

@@ -1278,4 +1278,37 @@ mod tests {
         }));
         assert_eq!(json["options"]["test-alias"]["foo"], "bar");
     }
+
+    #[test]
+    fn test_update_config_refuses_symlink() {
+        use tempfile::NamedTempFile;
+        // Create a target file
+        let target_file = NamedTempFile::new().unwrap();
+        let target_path = target_file.path();
+
+        // Create a symlink to it
+        let symlink_path = target_path.parent().unwrap().join("symlink_config.json");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target_path, &symlink_path).unwrap();
+        #[cfg(windows)]
+        if std::os::windows::fs::symlink_file(target_path, &symlink_path).is_err() {
+            // Skip on Windows if privileges missing
+            return;
+        }
+
+        // Mock inputs
+        let spec = create_dummy_spec();
+        let manifest = create_dummy_manifest();
+
+        // Call the function with the symlink path
+        let result = update_config_with_plugin(&spec, "test-rule", &manifest, Some(symlink_path.clone()));
+
+        // Cleanup
+        let _ = std::fs::remove_file(&symlink_path);
+
+        // Verify refusal
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Refusing to modify configuration file because it is a symbolic link"));
+    }
 }
