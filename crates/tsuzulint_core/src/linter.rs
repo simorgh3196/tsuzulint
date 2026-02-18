@@ -657,9 +657,6 @@ impl Linter {
         all_diagnostics.extend(global_diagnostics.iter().cloned());
         all_diagnostics.extend(block_diagnostics);
 
-        let mut final_diagnostics = Vec::new();
-        let mut seen_diagnostics = HashSet::new();
-
         // Also track which diagnostics are "global" so we don't stick them into block cache
         let mut global_keys = HashSet::new();
         for d in &global_diagnostics {
@@ -671,17 +668,12 @@ impl Linter {
             ));
         }
 
-        for diag in all_diagnostics {
-            let key = (
-                diag.span.start,
-                diag.span.end,
-                diag.message.clone(),
-                diag.rule_id.clone(),
-            );
-            if seen_diagnostics.insert(key) {
-                final_diagnostics.push(diag);
-            }
-        }
+        // Sort by derived order (RuleId first) to bring duplicates together
+        all_diagnostics.sort();
+        all_diagnostics.dedup();
+        // Re-sort by position for consistent output and downstream processing
+        all_diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start));
+        let final_diagnostics = all_diagnostics;
 
         // Update cache
         // We need to associate diagnostics with blocks for NEXT time.
