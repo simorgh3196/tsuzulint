@@ -4516,6 +4516,7 @@ dependencies = [
  "tsuzulint_manifest",
  "tsuzulint_parser",
  "tsuzulint_plugin",
+ "tsuzulint_text",
  "walkdir",
 ]
 
@@ -4572,6 +4573,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "tsuzulint_ast",
+ "tsuzulint_text",
  "wasmi",
  "wat",
 ]
@@ -4602,6 +4604,7 @@ version = "0.1.0"
 dependencies = [
  "lindera",
  "miette",
+ "serde",
  "thiserror 2.0.18",
  "unicode-segmentation",
 ]
@@ -4618,6 +4621,7 @@ dependencies = [
  "tsuzulint_ast",
  "tsuzulint_parser",
  "tsuzulint_plugin",
+ "tsuzulint_text",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]

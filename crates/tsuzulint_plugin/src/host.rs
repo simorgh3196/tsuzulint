@@ -14,6 +14,7 @@ use tracing::warn;
 #[allow(unused_imports)]
 use crate::executor::RuleExecutor;
 use crate::{Diagnostic, PluginError, RuleManifest};
+use tsuzulint_text::{Sentence, Token};
 
 #[cfg(feature = "native")]
 use crate::executor_extism::ExtismExecutor;
@@ -38,6 +39,10 @@ compile_error!("Either 'native' or 'browser' feature must be enabled.");
 /// Request sent to a rule's lint function.
 #[derive(Debug, Serialize)]
 struct LintRequest<'a, T: Serialize> {
+    /// Tokens in the text.
+    tokens: &'a [Token],
+    /// Sentences in the text.
+    sentences: &'a [Sentence],
     /// The node to lint (serialized).
     node: &'a T,
     /// Rule configuration.
@@ -237,28 +242,59 @@ impl PluginHost {
         name: &str,
         node: &T,
         source: &serde_json::value::RawValue,
+        tokens: &serde_json::value::RawValue,
+        sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        Self::run_rule_with_parts(
+        // Deserialize tokens and sentences first
+        // We do this here only once per run_rule call.
+        // For multiple rules, callers should use run_rule_with_parts.
+        let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
+            .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
+
+        let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
+            .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
+
+        self.run_rule_with_parts(name, node, source, &tokens_vec, &sentences_vec, file_path)
+    }
+
+    /// Runs a rule on a node with pre-deserialized analysis data.
+    ///
+    /// This is an optimized version of `run_rule` that avoids repeated
+    /// deserialization of tokens and sentences when running multiple rules.
+    pub fn run_rule_with_parts<T: Serialize>(
+        &mut self,
+        name: &str,
+        node: &T,
+        source: &serde_json::value::RawValue,
+        tokens: &[Token],
+        sentences: &[Sentence],
+        file_path: Option<&str>,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        Self::run_rule_with_parts_internal(
             &mut self.executor,
             &self.configs,
             &self.aliases,
             name,
             node,
             source,
+            tokens,
+            sentences,
             file_path,
         )
     }
 
     /// Internal helper to run a rule with split borrows.
     #[allow(clippy::too_many_arguments)]
-    fn run_rule_with_parts<T: Serialize>(
+    fn run_rule_with_parts_internal<T: Serialize>(
         executor: &mut Executor,
         configs: &HashMap<String, serde_json::Value>,
         aliases: &HashMap<String, String>,
         name: &str,
         node: &T,
         source: &serde_json::value::RawValue,
+        tokens: &[Token],
+        sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let config = configs
@@ -273,6 +309,8 @@ impl PluginHost {
             node,
             config,
             source: source_str,
+            tokens,
+            sentences,
             file_path,
         };
 
@@ -304,6 +342,27 @@ impl PluginHost {
         &mut self,
         node: &T,
         source: &serde_json::value::RawValue,
+        tokens: &serde_json::value::RawValue,
+        sentences: &serde_json::value::RawValue,
+        file_path: Option<&str>,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        // Deserialize tokens and sentences ONCE
+        let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
+            .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
+
+        let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
+            .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
+
+        self.run_all_rules_with_parts(node, source, &tokens_vec, &sentences_vec, file_path)
+    }
+
+    /// Runs all loaded rules on a node with pre-deserialized analysis data.
+    pub fn run_all_rules_with_parts<T: Serialize>(
+        &mut self,
+        node: &T,
+        source: &serde_json::value::RawValue,
+        tokens: &[Token],
+        sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let mut all_diagnostics = Vec::new();
@@ -312,13 +371,15 @@ impl PluginHost {
         // We can do this because run_rule_with_parts takes split borrows,
         // so `self.manifests` (immutable) is not conflicted with `self.executor` (mutable).
         for name in self.manifests.keys() {
-            match Self::run_rule_with_parts(
+            match Self::run_rule_with_parts_internal(
                 &mut self.executor,
                 &self.configs,
                 &self.aliases,
                 name,
                 node,
                 source,
+                tokens,
+                sentences,
                 file_path,
             ) {
                 Ok(diagnostics) => {
@@ -382,7 +443,22 @@ mod tests {
         let source_json = serde_json::to_string("").unwrap();
         let source = serde_json::value::RawValue::from_string(source_json).unwrap();
 
-        let result = host.run_rule("nonexistent", &node, &source, None);
+        let tokens_raw = serde_json::value::RawValue::from_string(
+            serde_json::to_string(&Vec::<Token>::new()).unwrap(),
+        )
+        .unwrap();
+        let sentences_raw = serde_json::value::RawValue::from_string(
+            serde_json::to_string(&Vec::<Sentence>::new()).unwrap(),
+        )
+        .unwrap();
+        let result = host.run_rule(
+            "nonexistent",
+            &node,
+            &source,
+            &tokens_raw,
+            &sentences_raw,
+            None,
+        );
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 
@@ -406,6 +482,8 @@ mod tests {
             pub node: serde_json::Value,
             pub config: serde_json::Value,
             pub source: String,
+            pub tokens: Vec<Token>,
+            pub sentences: Vec<Sentence>,
             pub file_path: Option<String>,
             #[serde(default)]
             pub helpers: Option<serde_json::Value>,
@@ -413,6 +491,8 @@ mod tests {
 
         let node_data = serde_json::json!({"type": "Doc", "children": []});
         let config = serde_json::json!({"option": "value"});
+        let tokens = vec![];
+        let sentences = vec![];
         let source = "test content".to_string();
         let file_path = Some("test.md");
 
@@ -421,6 +501,8 @@ mod tests {
             node: &node_data,
             config: config.clone(),
             source: source.clone(),
+            tokens: &tokens,
+            sentences: &sentences,
             file_path,
         };
 
@@ -433,6 +515,8 @@ mod tests {
 
         // Verify content
         assert_eq!(guest_request.source, source);
+        assert_eq!(guest_request.tokens, tokens);
+        assert_eq!(guest_request.sentences, sentences);
         assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
         assert_eq!(guest_request.config, config);
         assert_eq!(guest_request.node, node_data);
