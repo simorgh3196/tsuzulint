@@ -49,10 +49,10 @@ pub struct Linter {
 impl Linter {
     /// Creates a new linter with the given configuration.
     pub fn new(config: LinterConfig) -> Result<Self, LinterError> {
-        let cache_dir = PathBuf::from(&config.cache_dir);
+        let cache_dir = PathBuf::from(config.cache.path());
         let mut cache = CacheManager::new(cache_dir);
 
-        if !config.cache {
+        if !config.cache.is_enabled() {
             cache.disable();
         }
 
@@ -962,7 +962,10 @@ mod tests {
     fn test_config() -> (LinterConfig, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let mut config = LinterConfig::new();
-        config.cache_dir = temp_dir.path().to_string_lossy().to_string();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: temp_dir.path().to_string_lossy().to_string(),
+        });
         (config, temp_dir)
     }
 
@@ -973,7 +976,10 @@ mod tests {
         let cache_dir = base.join(".cache");
         std::fs::create_dir_all(&cache_dir).unwrap();
         let mut config = LinterConfig::new();
-        config.cache_dir = cache_dir.to_string_lossy().to_string();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: cache_dir.to_string_lossy().to_string(),
+        });
         config
     }
 
@@ -1010,7 +1016,7 @@ mod tests {
     #[test]
     fn test_linter_with_cache_disabled() {
         let (mut config, _temp) = test_config();
-        config.cache = false;
+        config.cache = crate::config::CacheConfig::Boolean(false);
 
         let linter = Linter::new(config).unwrap();
         // Verify linter was created successfully with cache disabled

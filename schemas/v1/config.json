@@ -178,6 +178,11 @@
       },
       "additionalProperties": false
     },
+    "timings": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to enable performance timings"
+    },
     "output": {
       "type": "object",
       "description": "Output formatting settings",
