@@ -554,7 +554,7 @@ mod tests {
         node.data.identifier = Some("id");
         node.data.label = Some("lbl");
 
-        let json = serde_json::to_value(&node).unwrap();
+        let json = serde_json::to_value(node).unwrap();
         let obj = json.as_object().unwrap();
 
         // Expected fields: type, range, value (since it's text), plus 7 data fields
@@ -573,7 +573,7 @@ mod tests {
     #[test]
     fn test_serialization_leaf_no_children() {
         let node = TxtNode::new_leaf(NodeType::HorizontalRule, Span::new(0, 5));
-        let json = serde_json::to_value(&node).unwrap();
+        let json = serde_json::to_value(node).unwrap();
         let obj = json.as_object().unwrap();
 
         // Expected fields: type, range
