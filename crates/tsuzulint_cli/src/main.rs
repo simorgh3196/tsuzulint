@@ -334,7 +334,7 @@ fn run_lint(
 
     // Disable caching if requested
     if cli.no_cache {
-        config.cache = tsuzulint_core::config::CacheConfig::Boolean(false);
+        config.cache = tsuzulint_core::CacheConfig::Boolean(false);
     }
 
     // Capture timings flag before config is moved
