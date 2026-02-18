@@ -316,7 +316,7 @@ mod tests {
         // Check for specific error related to fuel limit
         // The error message typically contains "fuel"
         assert!(
-            err_msg.to_lowercase().contains("fuel") || err_msg.to_lowercase().contains("limit"),
+            err_msg.to_lowercase().contains("fuel"),
             "Expected fuel limit error, got: {}",
             err_msg
         );
