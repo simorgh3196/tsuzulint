@@ -514,8 +514,10 @@ impl Linter {
     ) -> Result<LintResult, LinterError> {
         debug!("Linting {}", path.display());
 
-        // Check file size limit to prevent DoS
-        let metadata = fs::metadata(path).map_err(|e| {
+        // Open file once to avoid TOCTOU between metadata check and read
+        let file = fs::File::open(path)
+            .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
+        let metadata = file.metadata().map_err(|e| {
             LinterError::file(format!(
                 "Failed to read metadata for {}: {}",
                 path.display(),
@@ -531,9 +533,16 @@ impl Linter {
             )));
         }
 
-        // Read file content
-        let content = fs::read_to_string(path)
-            .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
+        // Read file content from the already-opened handle
+        let mut content = String::new();
+        {
+            use std::io::Read;
+            std::io::BufReader::new(file)
+                .read_to_string(&mut content)
+                .map_err(|e| {
+                    LinterError::file(format!("Failed to read {}: {}", path.display(), e))
+                })?;
+        }
 
         let content_hash = CacheManager::hash_content(&content);
         let config_hash = self.config_hash.clone();
@@ -1951,9 +1960,11 @@ mod tests {
         let linter = Linter::new(config).unwrap();
 
         let large_file = temp_dir.path().join("large.txt");
-        let file = fs::File::create(&large_file).unwrap();
-        // Set size to MAX_FILE_SIZE + 1
-        file.set_len(MAX_FILE_SIZE + 1).unwrap();
+        {
+            let file = fs::File::create(&large_file).unwrap();
+            // Extend to MAX_FILE_SIZE + 1 via sparse allocation (ftruncate on Unix)
+            file.set_len(MAX_FILE_SIZE + 1).unwrap();
+        } // file handle dropped here before lint_file is called
 
         let result = linter.lint_file(&large_file);
         assert!(result.is_err());
