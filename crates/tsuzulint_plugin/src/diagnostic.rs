@@ -293,4 +293,43 @@ mod tests {
         assert_eq!(warning.severity, Severity::Warning);
         assert_eq!(info.severity, Severity::Info);
     }
+
+    #[test]
+    fn test_diagnostic_sorting_and_deduplication() {
+        let diag1 = Diagnostic::new("rule1", "msg1", Span::new(10, 20));
+        let diag2 = Diagnostic::new("rule1", "msg1", Span::new(10, 20)); // Exact duplicate of diag1
+        let diag3 = Diagnostic::new("rule1", "msg1", Span::new(10, 20))
+            .with_severity(Severity::Warning); // Different severity
+        let diag4 = Diagnostic::new("rule1", "msg1", Span::new(5, 15)); // Earlier span
+        let diag5 = Diagnostic::new("rule2", "msg1", Span::new(10, 20)); // Different rule
+
+        let mut diagnostics = vec![diag1.clone(), diag2, diag3.clone(), diag4.clone(), diag5.clone()];
+
+        // 1. Sort (using derived Ord)
+        diagnostics.sort();
+
+        // 2. Dedup
+        diagnostics.dedup();
+
+        // Should have 4 unique diagnostics (diag2 removed)
+        assert_eq!(diagnostics.len(), 4);
+
+        // Verify content
+        assert!(diagnostics.contains(&diag1));
+        assert!(diagnostics.contains(&diag3));
+        assert!(diagnostics.contains(&diag4));
+        assert!(diagnostics.contains(&diag5));
+
+        // 3. Sort by span (simulating linter logic)
+        diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start));
+
+        // diag4 should be first (starts at 5)
+        assert_eq!(diagnostics[0], diag4);
+
+        // The others start at 10, their relative order depends on other fields
+        // But they should follow diag4
+        assert_eq!(diagnostics[1].span.start, 10);
+        assert_eq!(diagnostics[2].span.start, 10);
+        assert_eq!(diagnostics[3].span.start, 10);
+    }
 }
