@@ -84,9 +84,9 @@ impl Ord for Diagnostic {
         self.span
             .start
             .cmp(&other.span.start)
-            .then(self.span.end.cmp(&other.span.end))
-            .then(self.message.cmp(&other.message))
-            .then(self.rule_id.cmp(&other.rule_id))
+            .then_with(|| self.span.end.cmp(&other.span.end))
+            .then_with(|| self.message.cmp(&other.message))
+            .then_with(|| self.rule_id.cmp(&other.rule_id))
     }
 }
 
@@ -378,6 +378,21 @@ mod tests {
         assert_eq!(v.len(), 2);
         assert_eq!(v[0], d3); // span.start=0 comes first
         assert_eq!(v[1], d1); // span.start=10 comes after
+    }
+
+    #[test]
+    fn test_diagnostic_dedup_keeps_first_when_severity_differs() {
+        let base = Diagnostic::new("rule", "msg", Span::new(0, 5));
+        let with_warning = base.clone().with_severity(Severity::Warning);
+
+        // base (Error) comes first; after sort+dedup one should remain
+        let mut v = vec![base.clone(), with_warning];
+        v.sort();
+        v.dedup();
+
+        assert_eq!(v.len(), 1);
+        // stable sort keeps the first (Error) when keys are equal
+        assert_eq!(v[0].severity, Severity::Error);
     }
 
     #[test]

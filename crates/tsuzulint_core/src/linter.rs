@@ -699,7 +699,7 @@ impl Linter {
             global_keys.insert(d);
         }
 
-        all_diagnostics.sort();
+        all_diagnostics.sort_unstable();
         all_diagnostics.dedup();
         let final_diagnostics = all_diagnostics;
 
