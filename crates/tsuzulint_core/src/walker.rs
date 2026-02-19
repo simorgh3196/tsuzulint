@@ -4,13 +4,14 @@
 //! - Automatic `.gitignore` support
 //! - Hidden file filtering
 //! - Parallel traversal using `ignore::WalkBuilder`
-//! - Thread-safe result collection via mpsc channels
+//! - Thread-safe result collection via crossbeam bounded channel
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::thread;
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use ignore::{DirEntry, Error, ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState};
 use tracing::{debug, info};
 
@@ -155,28 +156,29 @@ impl ParallelWalker {
         }
 
         // Build glob matcher for include/exclude filtering
-        let glob_matcher = Arc::new(Mutex::new(GlobMatcher::new(
+        // GlobMatcher is immutable after construction, no Mutex needed
+        let glob_matcher = Arc::new(GlobMatcher::new(
             &self.config.include_patterns,
             &self.config.exclude_patterns,
-        )));
+        ));
+
+        // Spawn receiver thread to avoid deadlock
+        // With bounded channel, if we collect after visit() completes,
+        // workers would block when channel is full (1024+ files)
+        let receiver_handle = Self::spawn_receiver(rx, file_count.clone(), error_count.clone());
 
         // Create visitor builder
-        let mut visitor_builder = FileVisitorBuilder {
-            tx,
-            file_count: Arc::clone(&file_count),
-            error_count: Arc::clone(&error_count),
-            glob_matcher: Arc::clone(&glob_matcher),
-        };
+        let mut visitor_builder = FileVisitorBuilder { tx, glob_matcher };
 
         // Create the parallel walker and run
         let walker = builder.build_parallel();
         walker.visit(&mut visitor_builder);
 
-        // Drop the sender in visitor_builder to close the channel
+        // Drop the sender to close the channel
         drop(visitor_builder);
 
-        // Collect results
-        let results: Vec<PathBuf> = rx.iter().collect();
+        // Wait for receiver thread and get results
+        let results = receiver_handle.join().unwrap_or_default();
 
         let count = file_count.load(Ordering::Relaxed);
         let errors = error_count.load(Ordering::Relaxed);
@@ -189,6 +191,22 @@ impl ParallelWalker {
         results
     }
 
+    /// Spawns a receiver thread to collect results concurrently.
+    /// This prevents deadlock when the bounded channel fills up.
+    fn spawn_receiver(
+        rx: Receiver<PathBuf>,
+        file_count: Arc<AtomicUsize>,
+        error_count: Arc<AtomicUsize>,
+    ) -> thread::JoinHandle<Vec<PathBuf>> {
+        thread::spawn(move || {
+            let results: Vec<PathBuf> = rx.iter().collect();
+            let count = file_count.load(Ordering::Relaxed);
+            let errors = error_count.load(Ordering::Relaxed);
+            debug!("Receiver collected {} files ({} errors)", count, errors);
+            results
+        })
+    }
+
     /// Walks a single path in parallel.
     pub fn walk_path(&self, path: impl AsRef<Path>) -> Vec<PathBuf> {
         self.walk(&[path.as_ref().to_path_buf()])
@@ -198,17 +216,13 @@ impl ParallelWalker {
 /// Visitor builder for parallel walking.
 struct FileVisitorBuilder {
     tx: Sender<PathBuf>,
-    file_count: Arc<AtomicUsize>,
-    error_count: Arc<AtomicUsize>,
-    glob_matcher: Arc<Mutex<GlobMatcher>>,
+    glob_matcher: Arc<GlobMatcher>,
 }
 
 impl<'s> ParallelVisitorBuilder<'s> for FileVisitorBuilder {
     fn build(&mut self) -> Box<dyn ParallelVisitor + 's> {
         Box::new(FileVisitor {
             tx: self.tx.clone(),
-            file_count: Arc::clone(&self.file_count),
-            error_count: Arc::clone(&self.error_count),
             glob_matcher: Arc::clone(&self.glob_matcher),
         })
     }
@@ -217,9 +231,7 @@ impl<'s> ParallelVisitorBuilder<'s> for FileVisitorBuilder {
 /// Per-thread visitor for parallel walking.
 struct FileVisitor {
     tx: Sender<PathBuf>,
-    file_count: Arc<AtomicUsize>,
-    error_count: Arc<AtomicUsize>,
-    glob_matcher: Arc<Mutex<GlobMatcher>>,
+    glob_matcher: Arc<GlobMatcher>,
 }
 
 impl ParallelVisitor for FileVisitor {
@@ -229,20 +241,15 @@ impl ParallelVisitor for FileVisitor {
                 if dir_entry.file_type().is_some_and(|ft| ft.is_file()) {
                     let path = dir_entry.path();
 
-                    // Apply glob filtering
-                    let should_include = {
-                        let matcher = self.glob_matcher.lock().unwrap();
-                        matcher.should_include(path)
-                    };
-
-                    if should_include && self.tx.send(path.to_path_buf()).is_ok() {
-                        self.file_count.fetch_add(1, Ordering::Relaxed);
+                    if self.glob_matcher.should_include(path)
+                        && self.tx.send(path.to_path_buf()).is_ok()
+                    {
+                        // File sent successfully
                     }
                 }
             }
             Err(e) => {
                 debug!("Walk error: {}", e);
-                self.error_count.fetch_add(1, Ordering::Relaxed);
             }
         }
         WalkState::Continue
@@ -458,11 +465,11 @@ mod tests {
         let temp = create_test_tree();
         let root = temp.path();
 
-        let walker = ParallelWalker::new(WalkConfig::new().max_depth(0));
+        let walker = ParallelWalker::new(WalkConfig::new().max_depth(1));
 
         let files = walker.walk_path(root);
 
-        // Only top-level files should be found
+        // Only top-level files should be found (max_depth(1) = root + direct children)
         for file in &files {
             assert!(
                 file.parent() == Some(root)
