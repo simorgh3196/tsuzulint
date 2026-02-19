@@ -35,7 +35,7 @@ mod span;
 pub mod visitor;
 
 pub use arena::AstArena;
-pub use node::{NodeData, TxtNode};
+pub use node::{DefinitionData, LinkData, NodeData, ReferenceData, TxtNode};
 pub use node_type::NodeType;
 pub use span::{Location, Position, Span};
 
