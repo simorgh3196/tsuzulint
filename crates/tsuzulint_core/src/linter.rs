@@ -710,31 +710,15 @@ impl Linter {
         all_diagnostics.extend(global_diagnostics.iter().cloned());
         all_diagnostics.extend(block_diagnostics);
 
-        let mut final_diagnostics = Vec::new();
-        let mut seen_diagnostics = HashSet::new();
-
         // Also track which diagnostics are "global" so we don't stick them into block cache
         let mut global_keys = HashSet::new();
         for d in &global_diagnostics {
-            global_keys.insert((
-                d.span.start,
-                d.span.end,
-                d.message.as_str(),
-                d.rule_id.as_str(),
-            ));
+            global_keys.insert(d);
         }
 
-        for diag in all_diagnostics {
-            let key = (
-                diag.span.start,
-                diag.span.end,
-                diag.message.clone(),
-                diag.rule_id.clone(),
-            );
-            if seen_diagnostics.insert(key) {
-                final_diagnostics.push(diag);
-            }
-        }
+        all_diagnostics.sort_unstable();
+        all_diagnostics.dedup();
+        let final_diagnostics = all_diagnostics;
 
         // Update cache
         // We need to associate diagnostics with blocks for NEXT time.
@@ -859,10 +843,10 @@ impl Linter {
     ///
     /// This optimization reduces complexity from O(Blocks * Diagnostics) to O(Blocks + Diagnostics)
     /// (plus sorting cost O(B log B + D log D)), which is significant for large files with many blocks.
-    fn distribute_diagnostics<'a>(
+    fn distribute_diagnostics(
         mut blocks: Vec<BlockCacheEntry>,
         diagnostics: &[tsuzulint_plugin::Diagnostic],
-        global_keys: &HashSet<(u32, u32, &'a str, &'a str)>,
+        global_keys: &HashSet<&tsuzulint_plugin::Diagnostic>,
     ) -> Vec<BlockCacheEntry> {
         // Ensure blocks are sorted by start position for the sweep-line algorithm to work correctly
         blocks.sort_by_key(|b| b.span.start);
@@ -871,15 +855,7 @@ impl Linter {
         // We use references to avoid cloning diagnostics during the sort/scan phase
         let mut local_diagnostics: Vec<&tsuzulint_plugin::Diagnostic> = diagnostics
             .iter()
-            .filter(|d| {
-                let key = (
-                    d.span.start,
-                    d.span.end,
-                    d.message.as_str(),
-                    d.rule_id.as_str(),
-                );
-                !global_keys.contains(&key)
-            })
+            .filter(|d| !global_keys.contains(d))
             .collect();
 
         // 2. Sort diagnostics by start position
@@ -2028,12 +2004,7 @@ mod tests {
         // Case 2: Filter global diagnostics
         let mut global_keys_filtered = HashSet::new();
         // Mark diag1 as global
-        global_keys_filtered.insert((
-            diag1.span.start,
-            diag1.span.end,
-            diag1.message.as_str(),
-            diag1.rule_id.as_str(),
-        ));
+        global_keys_filtered.insert(&diag1);
 
         let result_filtered =
             Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys_filtered);
