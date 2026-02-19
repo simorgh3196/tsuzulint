@@ -2035,4 +2035,45 @@ mod tests {
         // Neither diagnostic should be assigned (half-open: block.end is exclusive)
         assert!(result_boundary[0].diagnostics.is_empty());
     }
+
+    #[test]
+    fn test_lint_content_with_special_characters() {
+        // This test ensures that special characters (quotes, newlines) are passed correctly
+        // to the plugin without double-escaping issues, now that we pass &str directly.
+
+        // Build the test rule WASM if available
+        let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() else {
+            println!("Skipping test: WASM build failed");
+            return;
+        };
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+        linter.load_rule(&wasm_path).expect("Failed to load test rule");
+
+        // "error" inside quotes. JSON-escaping logic might mess this up if not careful.
+        // Original: "This contains \"error\"."
+        // If double escaped: "This contains \\\"error\\\"." -> rule might not match "error" if it looks for word boundaries
+        // Or if unescaped incorrectly: might crash or parse error.
+
+        let content = "This contains \"error\".";
+        let path = Path::new("special.md");
+
+        let diagnostics = linter.lint_content(content, path).unwrap();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule_id, "test-rule");
+        assert_eq!(diagnostics[0].message, "Found error keyword");
+
+        // Verify span is correct (should point to `error`, not `\"error\"`)
+        // content: This contains "error".
+        // indices: 0123456789012345678901
+        // "error" starts at 15, ends at 20.
+        // 123456789012345
+        // T h i s   c o n t a i n s   " e r r o r " .
+        // 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+        // start: 15 ("e"), end: 20 ("r" + 1)
+        assert_eq!(diagnostics[0].span.start, 15);
+        assert_eq!(diagnostics[0].span.end, 20);
+    }
 }

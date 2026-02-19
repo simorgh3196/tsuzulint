@@ -50,7 +50,7 @@ impl TextLinter {
         self.host.configure_rule(name, config).map_err(to_js_error)
     }
 
-    /// Prepares text analysis data (source, tokens, sentences).
+    /// Prepares text analysis data (tokens, sentences).
     fn prepare_text_analysis(&self, content: &str) -> Result<AnalysisData, JsError> {
         let tokens = self.tokenizer.tokenize(content).map_err(to_js_error)?;
 
