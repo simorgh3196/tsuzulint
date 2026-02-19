@@ -154,12 +154,7 @@ impl ParallelWalker {
             builder.max_depth(Some(depth));
         }
 
-        // Add include patterns
-        for pattern in &self.config.include_patterns {
-            let _ = builder.add_ignore(pattern);
-        }
-
-        // Build glob matcher for filtering
+        // Build glob matcher for include/exclude filtering
         let glob_matcher = Arc::new(Mutex::new(GlobMatcher::new(
             &self.config.include_patterns,
             &self.config.exclude_patterns,
