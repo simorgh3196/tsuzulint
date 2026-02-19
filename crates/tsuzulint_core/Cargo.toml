@@ -26,6 +26,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 walkdir = { workspace = true }
 globset = { workspace = true }
+ignore = { workspace = true }
+crossbeam-channel = "0.5"
 jsonschema.workspace = true
 tsuzulint_manifest.workspace = true
 dirs = "6.0"
