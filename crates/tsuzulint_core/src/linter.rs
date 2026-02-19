@@ -2029,7 +2029,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< bolt/optimize-deduplication-9069069481737244594
     fn test_lint_file_output_sorted() {
         // This test verifies that the linter output is consistently sorted by span start.
         use std::fs;
@@ -2074,7 +2073,9 @@ mod tests {
         // Verify sorting
         assert!(diags[0].span.start < diags[1].span.start);
         assert!(diags[1].span.start < diags[2].span.start);
-=======
+    }
+
+    #[test]
     fn test_lint_content_with_special_characters() {
         // This test ensures that special characters (quotes, newlines) are passed correctly
         // to the plugin without double-escaping issues, now that we pass &str directly.
@@ -2115,6 +2116,5 @@ mod tests {
         // start: 15 ("e"), end: 20 ("r" + 1)
         assert_eq!(diagnostics[0].span.start, 15);
         assert_eq!(diagnostics[0].span.end, 20);
->>>>>>> main
     }
 }
