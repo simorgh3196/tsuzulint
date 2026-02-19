@@ -716,8 +716,11 @@ impl Linter {
             global_keys.insert(d);
         }
 
+        // Sort by derived order (RuleId first) to bring duplicates together
         all_diagnostics.sort_unstable();
         all_diagnostics.dedup();
+        // Re-sort by position for consistent output and downstream processing
+        all_diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start));
         let final_diagnostics = all_diagnostics;
 
         // Update cache
@@ -2045,6 +2048,53 @@ mod tests {
         );
         // Neither diagnostic should be assigned (half-open: block.end is exclusive)
         assert!(result_boundary[0].diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_lint_file_output_sorted() {
+        // This test verifies that the linter output is consistently sorted by span start.
+        use std::fs;
+
+        let (mut config, temp_dir) = test_config();
+
+        // Enable test-rule
+        config.rules.push(crate::config::RuleDefinition::Simple(
+            "test-rule".to_string(),
+        ));
+        config.options.insert(
+            "test-rule".to_string(),
+            crate::config::RuleOption::Enabled(true),
+        );
+
+        let linter = Linter::new(config).unwrap();
+
+        // Build the test rule WASM if available
+        if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
+            linter
+                .load_rule(&wasm_path)
+                .expect("Failed to load test rule");
+        } else {
+            println!("WASM build failed, skipping sort test");
+            return;
+        }
+
+        // Create a file with multiple error occurrences in random order
+        let file_path = temp_dir.path().join("test_sort.md");
+        // "error" at byte offsets 10, 25, 40
+        // The rule detects "error".
+        // The current implementation of the simple rule finds matches linearly, so they might come out sorted naturally.
+        // However, we rely on `lint_file` sorting them at the end regardless of discovery order or parallelism.
+        let content = "0123456789error0123456789error0123456789error";
+        fs::write(&file_path, content).unwrap();
+
+        let result = linter.lint_file(&file_path).unwrap();
+
+        let diags = result.diagnostics;
+        assert_eq!(diags.len(), 3);
+
+        // Verify sorting
+        assert!(diags[0].span.start < diags[1].span.start);
+        assert!(diags[1].span.start < diags[2].span.start);
     }
 
     #[test]
