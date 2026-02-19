@@ -78,9 +78,8 @@ impl MarkdownParser {
             Node::Code(code) => {
                 let mut node =
                     self.create_text_node(arena, node, &code.value, source, NodeType::CodeBlock);
-                if let Some(lang) = &code.lang {
-                    node.data = NodeData::code_block(Some(arena.alloc_str(lang)));
-                }
+                let lang = code.lang.as_ref().map(|l| arena.alloc_str(l));
+                node.data = NodeData::code_block(lang);
                 node
             }
 
@@ -417,7 +416,7 @@ mod tests {
 
         let code_block = &ast.children[0];
         assert_eq!(code_block.node_type, NodeType::CodeBlock);
-        assert!(matches!(code_block.data, NodeData::None));
+        assert!(matches!(code_block.data, NodeData::CodeBlock(None)));
     }
 
     #[test]
