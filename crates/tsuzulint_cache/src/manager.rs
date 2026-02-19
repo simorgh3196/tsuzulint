@@ -158,7 +158,12 @@ impl CacheManager {
             if let Some(candidates) = cached_blocks_map.get_mut(&current_block.hash)
                 && let Some(best_match_idx) = Self::find_best_match(current_block, candidates)
             {
-                let matched_block = candidates.remove(best_match_idx);
+                // Optimization: swap_remove is O(1) while remove is O(N).
+                // Although swap_remove changes candidate order (affecting tie-breaking in
+                // find_best_match), correctness is preserved: all candidates share the same
+                // hash (identical content), so their relative diagnostic positions are also
+                // identical and any matched candidate produces the same shifted diagnostics.
+                let matched_block = candidates.swap_remove(best_match_idx);
                 matched_mask[i] = true;
 
                 // Calculate offset shift
@@ -192,31 +197,18 @@ impl CacheManager {
     }
 
     /// Finds the best match among candidates for a current block.
-    /// Ideally, we want the one strictly matching in order or closest in position.
-    /// For now, we take the first one (simple approach), or maybe closest span start.
+    /// Selects the candidate whose start position is closest to the current block's start.
     fn find_best_match(
         current_block: &BlockCacheEntry,
         candidates: &[&BlockCacheEntry],
     ) -> Option<usize> {
-        if candidates.is_empty() {
-            return None;
-        }
-
-        // Heuristic: Pick the candidate closest in position to current block
-        // This helps when there are duplicate blocks (e.g. empty lines or recurring headers)
-        let mut best_idx = 0;
-        let mut min_dist =
-            (current_block.span.start as i64 - candidates[0].span.start as i64).abs();
-
-        for (i, candidate) in candidates.iter().enumerate().skip(1) {
-            let dist = (current_block.span.start as i64 - candidate.span.start as i64).abs();
-            if dist < min_dist {
-                min_dist = dist;
-                best_idx = i;
-            }
-        }
-
-        Some(best_idx)
+        candidates
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, candidate)| {
+                (current_block.span.start as i64 - candidate.span.start as i64).abs()
+            })
+            .map(|(index, _)| index)
     }
 
     /// Stores a cache entry for a file.
@@ -539,5 +531,179 @@ mod tests {
         assert!(manager.is_valid(&PathBuf::from("/path/a.md"), "hash_a", "config", &versions));
         assert!(manager.is_valid(&PathBuf::from("/path/b.md"), "hash_b", "config", &versions));
         assert!(manager.is_valid(&PathBuf::from("/path/c.txt"), "hash_c", "config", &versions));
+    }
+
+    #[test]
+    fn test_reconcile_blocks_with_multiple_candidates_and_order() {
+        use tsuzulint_ast::Span;
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+
+        // Create 3 identical blocks at different positions in the cache
+        // Hash "A" at 0-10, 20-30, 40-50
+        let block1 = BlockCacheEntry {
+            hash: "A".to_string(),
+            span: Span::new(0, 10),
+            diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(1, 5))],
+        };
+        let block2 = BlockCacheEntry {
+            hash: "A".to_string(),
+            span: Span::new(20, 30),
+            diagnostics: vec![Diagnostic::new("rule1", "Err2", Span::new(21, 25))],
+        };
+        let block3 = BlockCacheEntry {
+            hash: "A".to_string(),
+            span: Span::new(40, 50),
+            diagnostics: vec![Diagnostic::new("rule1", "Err3", Span::new(41, 45))],
+        };
+
+        let cached_blocks = vec![block1, block2, block3];
+        let versions = HashMap::new();
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+            cached_blocks,
+        );
+        manager.set(path.clone(), entry);
+
+        // Current blocks:
+        // 1. "A" at 0-10 (should match cached block1)
+        // 2. "A" at 40-50 (should match cached block3)
+        // 3. "A" at 20-30 (should match cached block2)
+        // Note: We process them in an order that might trigger swap_remove behavior if we are not careful,
+        // but here we just want to ensure that "best match" (closest distance) is respected.
+
+        // Let's mix up the order in current_blocks to test robustness
+        let current_blocks = vec![
+            BlockCacheEntry {
+                hash: "A".to_string(),
+                span: Span::new(0, 10), // Matches cached block1 (dist 0)
+                diagnostics: vec![],
+            },
+            BlockCacheEntry {
+                hash: "A".to_string(),
+                span: Span::new(40, 50), // Matches cached block3 (dist 0)
+                diagnostics: vec![],
+            },
+            BlockCacheEntry {
+                hash: "A".to_string(),
+                span: Span::new(20, 30), // Matches cached block2 (dist 0)
+                diagnostics: vec![],
+            },
+        ];
+
+        let (diagnostics, matched) =
+            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+
+        // All 3 should match
+        assert!(matched.iter().all(|&m| m));
+        assert_eq!(diagnostics.len(), 3);
+
+        // Verify that we got the correct diagnostics back (meaning correct blocks were matched)
+        // Since we didn't shift positions (current == cached), spans should be identical to cached diagnostics.
+        let messages: Vec<String> = diagnostics.iter().map(|d| d.message.clone()).collect();
+        assert!(messages.contains(&"Err1".to_string()));
+        assert!(messages.contains(&"Err2".to_string()));
+        assert!(messages.contains(&"Err3".to_string()));
+    }
+
+    #[test]
+    fn test_reconcile_blocks_span_shift() {
+        use tsuzulint_ast::Span;
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+
+        // Cached block "B" at 0-10 with diagnostic at 2-5
+        let block = BlockCacheEntry {
+            hash: "B".to_string(),
+            span: Span::new(0, 10),
+            diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(2, 5))],
+        };
+
+        let versions = HashMap::new();
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+            vec![block],
+        );
+        manager.set(path.clone(), entry);
+
+        // Current block "B" at 20-30 (shifted by +20)
+        let current_blocks = vec![BlockCacheEntry {
+            hash: "B".to_string(),
+            span: Span::new(20, 30),
+            diagnostics: vec![],
+        }];
+
+        let (diagnostics, matched) =
+            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+
+        // Assert matched
+        assert_eq!(matched, vec![true]);
+        assert_eq!(diagnostics.len(), 1);
+
+        // Assert diagnostic span is shifted: (2+20, 5+20) = (22, 25)
+        assert_eq!(diagnostics[0].span, Span::new(22, 25));
+        assert_eq!(diagnostics[0].message, "Err1");
+    }
+
+    #[test]
+    fn test_reconcile_blocks_tie_breaker() {
+        use tsuzulint_ast::Span;
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/file.md");
+
+        // Two identical cached blocks with same hash "C"
+        // Block 1: 5-10
+        // Block 2: 15-20
+        let block1 = BlockCacheEntry {
+            hash: "C".to_string(),
+            span: Span::new(5, 10),
+            diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(6, 8))],
+        };
+        let block2 = BlockCacheEntry {
+            hash: "C".to_string(),
+            span: Span::new(15, 20),
+            diagnostics: vec![Diagnostic::new("rule1", "Err2", Span::new(16, 18))],
+        };
+
+        let versions = HashMap::new();
+        let entry = CacheEntry::new(
+            "hash".to_string(),
+            "config".to_string(),
+            versions.clone(),
+            vec![],
+            vec![block1, block2],
+        );
+        manager.set(path.clone(), entry);
+
+        // Current block "C" at 10-15
+        // Distance to block1 (5-10): |10-5| = 5
+        // Distance to block2 (15-20): |10-15| = 5
+        // This is a tie-breaker case for find_best_match.
+        // It should pick one (the first one) and the other should remain unmatched.
+        let current_blocks = vec![BlockCacheEntry {
+            hash: "C".to_string(),
+            span: Span::new(10, 15),
+            diagnostics: vec![],
+        }];
+
+        let (diagnostics, matched) =
+            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+
+        // Exactly one should match
+        assert_eq!(matched, vec![true]);
+        assert_eq!(diagnostics.len(), 1);
+
+        // If block1 was picked (start 5, current 10, shift +5):
+        // Span (6,8) -> (11,13)
+        // If block2 was picked (start 15, current 10, shift -5):
+        // Span (16,18) -> (11,13)
+        // In both cases, the span should be (11,13) because they are identical blocks.
+        assert_eq!(diagnostics[0].span, Span::new(11, 13));
     }
 }
