@@ -52,8 +52,8 @@ fn default_cache() -> bool {
     true
 }
 
-fn default_cache_dir() -> String {
-    ".tsuzulint-cache".to_string()
+fn default_cache_dir() -> &'static str {
+    ".tsuzulint-cache"
 }
 
 /// Cache configuration.
@@ -76,10 +76,10 @@ impl CacheConfig {
     }
 
     /// Returns the cache directory path.
-    pub fn path(&self) -> String {
+    pub fn path(&self) -> &str {
         match self {
             CacheConfig::Boolean(_) => default_cache_dir(),
-            CacheConfig::Detail(detail) => detail.path.clone(),
+            CacheConfig::Detail(detail) => &detail.path,
         }
     }
 }
@@ -97,8 +97,12 @@ pub struct CacheConfigDetail {
     #[serde(default = "default_cache")]
     pub enabled: bool,
     /// Cache directory path.
-    #[serde(default = "default_cache_dir")]
+    #[serde(default = "default_cache_dir_string")]
     pub path: String,
+}
+
+fn default_cache_dir_string() -> String {
+    default_cache_dir().to_string()
 }
 
 /// Definition of a rule to load.
