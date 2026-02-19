@@ -5,10 +5,13 @@
 use serde::{Deserialize, Serialize};
 
 /// Request sent to a rule's lint function.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintRequest {
-    /// The AST node to check (serialized JSON).
+    /// The AST node to check (serialized JSON) - first node for backward compatibility.
     pub node: serde_json::Value,
+    /// All nodes to check in batch mode.
+    #[serde(default)]
+    pub nodes: Vec<serde_json::Value>,
     /// Rule configuration.
     pub config: serde_json::Value,
     /// Full source text.
@@ -18,6 +21,54 @@ pub struct LintRequest {
     /// Pre-computed helper information for easier rule development.
     #[serde(default)]
     pub helpers: Option<LintHelpers>,
+}
+
+impl LintRequest {
+    /// Creates a single-node request (backward compatible).
+    pub fn single(node: serde_json::Value, config: serde_json::Value, source: String) -> Self {
+        Self {
+            node: node.clone(),
+            nodes: vec![node],
+            config,
+            source,
+            file_path: None,
+            helpers: None,
+        }
+    }
+
+    /// Creates a batch request with multiple nodes.
+    pub fn batch(nodes: Vec<serde_json::Value>, config: serde_json::Value, source: String) -> Self {
+        Self {
+            node: nodes.first().cloned().unwrap_or(serde_json::Value::Null),
+            nodes,
+            config,
+            source,
+            file_path: None,
+            helpers: None,
+        }
+    }
+
+    /// Returns all nodes (works for both single and batch mode).
+    pub fn all_nodes(&self) -> &[serde_json::Value] {
+        &self.nodes
+    }
+
+    /// Returns true if this is a batch request with multiple nodes.
+    pub fn is_batch(&self) -> bool {
+        self.nodes.len() > 1
+    }
+
+    /// Sets the file path.
+    pub fn with_file_path(mut self, path: Option<impl Into<String>>) -> Self {
+        self.file_path = path.map(|p| p.into());
+        self
+    }
+
+    /// Sets the helpers.
+    pub fn with_helpers(mut self, helpers: LintHelpers) -> Self {
+        self.helpers = Some(helpers);
+        self
+    }
 }
 
 /// Pre-computed helper information for lint rules.

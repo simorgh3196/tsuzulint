@@ -100,6 +100,86 @@ pub struct CodeBlockInfo {
     pub is_inline: bool,
 }
 
+/// Pre-analyzed content characteristics for early rule filtering.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ContentCharacteristics {
+    pub has_headings: bool,
+    pub has_links: bool,
+    pub has_images: bool,
+    pub has_code_blocks: bool,
+    pub has_fenced_code: bool,
+    pub has_lists: bool,
+    pub has_tables: bool,
+    pub has_blockquotes: bool,
+    pub has_html: bool,
+}
+
+impl ContentCharacteristics {
+    /// Analyze content in a single pass.
+    pub fn analyze(source: &str) -> Self {
+        let mut chars = Self::default();
+
+        for line in source.lines() {
+            let trimmed = line.trim();
+
+            if trimmed.starts_with('#') {
+                chars.has_headings = true;
+            }
+            if trimmed.contains('[') && trimmed.contains(']') {
+                chars.has_links = true;
+            }
+            if trimmed.contains("![") {
+                chars.has_images = true;
+            }
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                chars.has_fenced_code = true;
+            }
+            if line.starts_with("    ") || line.starts_with('\t') {
+                chars.has_code_blocks = true;
+            }
+            if trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+') {
+                chars.has_lists = true;
+            }
+            if trimmed.contains('|') && trimmed.contains("---") {
+                chars.has_tables = true;
+            }
+            if trimmed.starts_with('>') {
+                chars.has_blockquotes = true;
+            }
+            if trimmed.starts_with('<') {
+                chars.has_html = true;
+            }
+        }
+
+        chars
+    }
+
+    /// Check if rule should be skipped based on characteristics.
+    pub fn should_skip_rule(&self, node_types: &[String]) -> bool {
+        if node_types.is_empty() {
+            return false;
+        }
+
+        for node_type in node_types {
+            match node_type.as_str() {
+                "Heading" | "heading" if !self.has_headings => return true,
+                "Link" | "link" if !self.has_links => return true,
+                "Image" | "image" if !self.has_images => return true,
+                "CodeBlock" | "code" if !self.has_code_blocks && !self.has_fenced_code => {
+                    return true;
+                }
+                "List" | "list" if !self.has_lists => return true,
+                "Table" | "table" if !self.has_tables => return true,
+                "Blockquote" | "blockquote" if !self.has_blockquotes => return true,
+                "Html" | "html" if !self.has_html => return true,
+                _ => {}
+            }
+        }
+
+        false
+    }
+}
+
 /// Context for linting a document.
 ///
 /// Provides cached access to line information and document structure,
@@ -111,16 +191,20 @@ pub struct LintContext<'a> {
     lines: Vec<LineInfo>,
     /// Lazily constructed document structure.
     structure: OnceCell<DocumentStructure>,
+    /// Pre-analyzed content characteristics for early filtering.
+    characteristics: ContentCharacteristics,
 }
 
 impl<'a> LintContext<'a> {
     /// Creates a new LintContext from source text.
     pub fn new(source: &'a str) -> Self {
         let lines = Self::compute_lines(source);
+        let characteristics = ContentCharacteristics::analyze(source);
         Self {
             source,
             lines,
             structure: OnceCell::new(),
+            characteristics,
         }
     }
 
@@ -291,6 +375,16 @@ impl<'a> LintContext<'a> {
             .iter()
             .any(|cb| !cb.is_inline && cb.span.start <= offset && offset < cb.span.end)
     }
+
+    /// Returns the pre-analyzed content characteristics.
+    pub fn characteristics(&self) -> &ContentCharacteristics {
+        &self.characteristics
+    }
+
+    /// Check if rule should be skipped (early filtering).
+    pub fn should_skip_rule(&self, node_types: &[String]) -> bool {
+        self.characteristics.should_skip_rule(node_types)
+    }
 }
 
 #[cfg(test)]
@@ -438,5 +532,93 @@ mod tests {
         let ctx = LintContext::new("hello\n");
         assert_eq!(ctx.line_count(), 2);
         assert_eq!(ctx.line_info(1).unwrap().end, 5);
+    }
+}
+
+#[cfg(test)]
+mod tests_content_characteristics {
+    use super::*;
+
+    #[test]
+    fn test_detect_headings() {
+        let chars = ContentCharacteristics::analyze("# Heading\n## Sub");
+        assert!(chars.has_headings);
+        assert!(!chars.has_lists);
+    }
+
+    #[test]
+    fn test_detect_multiple() {
+        let chars = ContentCharacteristics::analyze("# Title\n\n- item 1\n- item 2\n\n[link](url)");
+        assert!(chars.has_headings);
+        assert!(chars.has_lists);
+        assert!(chars.has_links);
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let chars = ContentCharacteristics::analyze("");
+        assert!(!chars.has_headings);
+        assert!(!chars.has_lists);
+    }
+
+    #[test]
+    fn test_should_skip_rule() {
+        let chars = ContentCharacteristics::analyze("Just plain text");
+        assert!(chars.should_skip_rule(&["Heading".to_string()]));
+        assert!(!chars.should_skip_rule(&["Str".to_string()]));
+    }
+
+    #[test]
+    fn test_detect_images() {
+        let chars = ContentCharacteristics::analyze("![alt](image.png)");
+        assert!(chars.has_images);
+        assert!(chars.has_links);
+    }
+
+    #[test]
+    fn test_detect_code_blocks() {
+        let chars = ContentCharacteristics::analyze("```\ncode\n```");
+        assert!(chars.has_fenced_code);
+        assert!(!chars.has_code_blocks);
+    }
+
+    #[test]
+    fn test_detect_indented_code() {
+        let chars = ContentCharacteristics::analyze("    code here");
+        assert!(chars.has_code_blocks);
+    }
+
+    #[test]
+    fn test_detect_tables() {
+        let chars = ContentCharacteristics::analyze("| a | b |\n|---|---|");
+        assert!(chars.has_tables);
+    }
+
+    #[test]
+    fn test_detect_blockquotes() {
+        let chars = ContentCharacteristics::analyze("> quote");
+        assert!(chars.has_blockquotes);
+    }
+
+    #[test]
+    fn test_detect_html() {
+        let chars = ContentCharacteristics::analyze("<div>content</div>");
+        assert!(chars.has_html);
+    }
+
+    #[test]
+    fn test_lint_context_characteristics() {
+        let ctx = LintContext::new("# Title\n\n- item");
+        assert!(ctx.characteristics().has_headings);
+        assert!(ctx.characteristics().has_lists);
+        assert!(!ctx.characteristics().has_code_blocks);
+    }
+
+    #[test]
+    fn test_lint_context_should_skip_rule() {
+        let ctx = LintContext::new("plain text only");
+        assert!(ctx.should_skip_rule(&["Heading".to_string()]));
+        assert!(ctx.should_skip_rule(&["CodeBlock".to_string()]));
+        assert!(!ctx.should_skip_rule(&[]));
     }
 }
