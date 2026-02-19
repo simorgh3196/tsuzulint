@@ -707,6 +707,8 @@ impl Linter {
         // Deduplicate diagnostics
         // We combine reused (unchanged blocks), global (fresh), and block (changed blocks) diagnostics.
         let mut all_diagnostics = reused_diagnostics;
+        // Optimization: Pre-allocate memory to avoid reallocations
+        all_diagnostics.reserve(global_diagnostics.len() + block_diagnostics.len());
         all_diagnostics.extend(global_diagnostics.iter().cloned());
         all_diagnostics.extend(block_diagnostics);
 
@@ -716,11 +718,12 @@ impl Linter {
             global_keys.insert(d);
         }
 
-        // Sort by derived order (RuleId first) to bring duplicates together
+        // Sort by derived order to bring duplicates together.
+        // Diagnostic::Ord compares span.start first, so this also sorts by position.
         all_diagnostics.sort_unstable();
         all_diagnostics.dedup();
-        // Re-sort by position for consistent output and downstream processing
-        all_diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start));
+        // Note: all_diagnostics is already sorted by span.start due to sort_unstable() and Diagnostic::Ord.
+
         let final_diagnostics = all_diagnostics;
 
         // Update cache
@@ -856,14 +859,14 @@ impl Linter {
 
         // 1. Filter out global diagnostics and create a list of references we can sort
         // We use references to avoid cloning diagnostics during the sort/scan phase
-        let mut local_diagnostics: Vec<&tsuzulint_plugin::Diagnostic> = diagnostics
+        let local_diagnostics: Vec<&tsuzulint_plugin::Diagnostic> = diagnostics
             .iter()
             .filter(|d| !global_keys.contains(d))
             .collect();
 
-        // 2. Sort diagnostics by start position
-        // This allows us to scan through them linearly as we iterate through blocks
-        local_diagnostics.sort_by_key(|d| d.span.start);
+        // 2. Diagnostics are already sorted by start position (contract with caller).
+        // This allows us to scan through them linearly as we iterate through blocks.
+        // (Removed redundant sort_by_key)
 
         let mut diag_idx = 0;
 
@@ -1984,13 +1987,14 @@ mod tests {
             loc: None,
         };
 
-        // Note: Diagnostics can be unsorted initially
-        let diagnostics = vec![
+        // Note: Diagnostics can be unsorted initially, but distribute_diagnostics expects them sorted.
+        let mut diagnostics = vec![
             diag2.clone(),
             diag1.clone(),
             diag_outside.clone(),
             diag_overlap,
         ];
+        diagnostics.sort_by_key(|d| d.span.start);
 
         let result = Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys);
 
