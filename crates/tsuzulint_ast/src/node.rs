@@ -296,6 +296,28 @@ impl<'a> NodeData<'a> {
     pub const fn list(ordered: bool) -> Self {
         Self::List(ordered)
     }
+
+    /// Creates node data for a reference (LinkReference, ImageReference, FootnoteReference).
+    #[inline]
+    pub const fn reference(identifier: &'a str, label: Option<&'a str>) -> Self {
+        Self::Reference(ReferenceData { identifier, label })
+    }
+
+    /// Creates node data for a definition.
+    #[inline]
+    pub const fn definition(
+        identifier: &'a str,
+        url: &'a str,
+        title: Option<&'a str>,
+        label: Option<&'a str>,
+    ) -> Self {
+        Self::Definition(DefinitionData {
+            identifier,
+            url,
+            title,
+            label,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -377,6 +399,63 @@ mod tests {
     fn test_node_data_list_unordered() {
         let data = NodeData::list(false);
         assert!(matches!(data, NodeData::List(false)));
+    }
+
+    #[test]
+    fn test_node_data_reference() {
+        let data = NodeData::reference("ref-id", Some("Reference Label"));
+        match data {
+            NodeData::Reference(ref_data) => {
+                assert_eq!(ref_data.identifier, "ref-id");
+                assert_eq!(ref_data.label, Some("Reference Label"));
+            }
+            _ => panic!("Expected Reference variant"),
+        }
+    }
+
+    #[test]
+    fn test_node_data_reference_without_label() {
+        let data = NodeData::reference("ref-id", None);
+        match data {
+            NodeData::Reference(ref_data) => {
+                assert_eq!(ref_data.identifier, "ref-id");
+                assert!(ref_data.label.is_none());
+            }
+            _ => panic!("Expected Reference variant"),
+        }
+    }
+
+    #[test]
+    fn test_node_data_definition() {
+        let data = NodeData::definition(
+            "def-id",
+            "https://example.com",
+            Some("Definition Title"),
+            Some("Definition Label"),
+        );
+        match data {
+            NodeData::Definition(def_data) => {
+                assert_eq!(def_data.identifier, "def-id");
+                assert_eq!(def_data.url, "https://example.com");
+                assert_eq!(def_data.title, Some("Definition Title"));
+                assert_eq!(def_data.label, Some("Definition Label"));
+            }
+            _ => panic!("Expected Definition variant"),
+        }
+    }
+
+    #[test]
+    fn test_node_data_definition_minimal() {
+        let data = NodeData::definition("def-id", "https://example.com", None, None);
+        match data {
+            NodeData::Definition(def_data) => {
+                assert_eq!(def_data.identifier, "def-id");
+                assert_eq!(def_data.url, "https://example.com");
+                assert!(def_data.title.is_none());
+                assert!(def_data.label.is_none());
+            }
+            _ => panic!("Expected Definition variant"),
+        }
     }
 
     #[test]
