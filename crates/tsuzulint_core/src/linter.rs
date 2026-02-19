@@ -20,6 +20,10 @@ use tsuzulint_plugin::{IsolationLevel, PluginHost};
 use crate::resolver::PluginResolver;
 use crate::{LintResult, LinterConfig, LinterError};
 
+/// Maximum file size to lint (10 MB).
+/// Files larger than this will be skipped to prevent DoS via memory exhaustion.
+const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
 /// Result type for lint_files and lint_patterns methods.
 ///
 /// Contains a tuple of:
@@ -509,6 +513,23 @@ impl Linter {
         host: &mut PluginHost,
     ) -> Result<LintResult, LinterError> {
         debug!("Linting {}", path.display());
+
+        // Check file size limit to prevent DoS
+        let metadata = fs::metadata(path).map_err(|e| {
+            LinterError::file(format!(
+                "Failed to read metadata for {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
+
+        if metadata.len() > MAX_FILE_SIZE {
+            return Err(LinterError::file(format!(
+                "File size exceeds limit of {} bytes: {}",
+                MAX_FILE_SIZE,
+                path.display()
+            )));
+        }
 
         // Read file content
         let content = fs::read_to_string(path)
@@ -1909,6 +1930,25 @@ mod tests {
 
         let inline_text = &content[inline.clone()];
         assert_eq!(inline_text, "`code.`", "Second range should be inline code");
+    }
+
+    #[test]
+    fn test_lint_file_too_large() {
+        use std::fs;
+
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let large_file = temp_dir.path().join("large.txt");
+        let file = fs::File::create(&large_file).unwrap();
+        // Set size to MAX_FILE_SIZE + 1
+        file.set_len(MAX_FILE_SIZE + 1).unwrap();
+
+        let result = linter.lint_file(&large_file);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("File size exceeds limit"));
+        assert!(err.contains(&MAX_FILE_SIZE.to_string()));
     }
 
     #[test]
