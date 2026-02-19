@@ -150,19 +150,19 @@ impl MarkdownParser {
                     source,
                     NodeType::FootnoteDefinition,
                 );
-                node.data.identifier = Some(arena.alloc_str(&def.identifier));
-                if let Some(label) = &def.label {
-                    node.data.label = Some(arena.alloc_str(label));
-                }
+                node.data = NodeData::reference(
+                    arena.alloc_str(&def.identifier),
+                    def.label.as_ref().map(|l| arena.alloc_str(l)),
+                );
                 node
             }
 
             Node::FootnoteReference(ref_node) => {
                 let mut node = self.create_leaf_node(node, source, NodeType::FootnoteReference);
-                node.data.identifier = Some(arena.alloc_str(&ref_node.identifier));
-                if let Some(label) = &ref_node.label {
-                    node.data.label = Some(arena.alloc_str(label));
-                }
+                node.data = NodeData::reference(
+                    arena.alloc_str(&ref_node.identifier),
+                    ref_node.label.as_ref().map(|l| arena.alloc_str(l)),
+                );
                 node
             }
 
@@ -175,32 +175,30 @@ impl MarkdownParser {
                     source,
                     NodeType::LinkReference,
                 );
-                node.data.identifier = Some(arena.alloc_str(&ref_node.identifier));
-                if let Some(label) = &ref_node.label {
-                    node.data.label = Some(arena.alloc_str(label));
-                }
+                node.data = NodeData::reference(
+                    arena.alloc_str(&ref_node.identifier),
+                    ref_node.label.as_ref().map(|l| arena.alloc_str(l)),
+                );
                 node
             }
 
             Node::ImageReference(ref_node) => {
                 let mut node = self.create_leaf_node(node, source, NodeType::ImageReference);
-                node.data.identifier = Some(arena.alloc_str(&ref_node.identifier));
-                if let Some(label) = &ref_node.label {
-                    node.data.label = Some(arena.alloc_str(label));
-                }
+                node.data = NodeData::reference(
+                    arena.alloc_str(&ref_node.identifier),
+                    ref_node.label.as_ref().map(|l| arena.alloc_str(l)),
+                );
                 node
             }
 
             Node::Definition(def) => {
                 let mut node = self.create_leaf_node(node, source, NodeType::Definition);
-                node.data.identifier = Some(arena.alloc_str(&def.identifier));
-                node.data.url = Some(arena.alloc_str(&def.url));
-                if let Some(title) = &def.title {
-                    node.data.title = Some(arena.alloc_str(title));
-                }
-                if let Some(label) = &def.label {
-                    node.data.label = Some(arena.alloc_str(label));
-                }
+                node.data = NodeData::definition(
+                    arena.alloc_str(&def.identifier),
+                    arena.alloc_str(&def.url),
+                    def.title.as_ref().map(|t| arena.alloc_str(t)),
+                    def.label.as_ref().map(|l| arena.alloc_str(l)),
+                );
                 node
             }
 
@@ -322,9 +320,9 @@ mod tests {
 
         assert_eq!(ast.children.len(), 2);
         assert_eq!(ast.children[0].node_type, NodeType::Header);
-        assert_eq!(ast.children[0].data.depth, Some(1));
+        assert!(matches!(ast.children[0].data, NodeData::Header(1)));
         assert_eq!(ast.children[1].node_type, NodeType::Header);
-        assert_eq!(ast.children[1].data.depth, Some(2));
+        assert!(matches!(ast.children[1].data, NodeData::Header(2)));
     }
 
     #[test]
@@ -340,7 +338,12 @@ mod tests {
         let link = &paragraph.children[0];
 
         assert_eq!(link.node_type, NodeType::Link);
-        assert_eq!(link.data.url, Some("https://example.com"));
+        match link.data {
+            NodeData::Link(link_data) => {
+                assert_eq!(link_data.url, "https://example.com");
+            }
+            _ => panic!("Expected Link variant"),
+        }
     }
 
     #[test]
@@ -400,7 +403,7 @@ mod tests {
 
         let code_block = &ast.children[0];
         assert_eq!(code_block.node_type, NodeType::CodeBlock);
-        assert_eq!(code_block.data.lang, Some("rust"));
+        assert!(matches!(code_block.data, NodeData::CodeBlock(Some("rust"))));
         assert!(code_block.value.is_some());
     }
 
@@ -414,7 +417,7 @@ mod tests {
 
         let code_block = &ast.children[0];
         assert_eq!(code_block.node_type, NodeType::CodeBlock);
-        assert!(code_block.data.lang.is_none());
+        assert!(matches!(code_block.data, NodeData::None));
     }
 
     #[test]
@@ -455,7 +458,7 @@ mod tests {
 
         let list = &ast.children[0];
         assert_eq!(list.node_type, NodeType::List);
-        assert_eq!(list.data.ordered, Some(false));
+        assert!(matches!(list.data, NodeData::List(false)));
         assert_eq!(list.children.len(), 3);
 
         for item in list.children.iter() {
@@ -473,7 +476,7 @@ mod tests {
 
         let list = &ast.children[0];
         assert_eq!(list.node_type, NodeType::List);
-        assert_eq!(list.data.ordered, Some(true));
+        assert!(matches!(list.data, NodeData::List(true)));
     }
 
     #[test]
@@ -499,8 +502,13 @@ mod tests {
         let image = &paragraph.children[0];
 
         assert_eq!(image.node_type, NodeType::Image);
-        assert_eq!(image.data.url, Some("image.png"));
-        assert_eq!(image.data.title, Some("Title"));
+        match image.data {
+            NodeData::Link(link_data) => {
+                assert_eq!(link_data.url, "image.png");
+                assert_eq!(link_data.title, Some("Title"));
+            }
+            _ => panic!("Expected Link variant"),
+        }
     }
 
     #[test]
@@ -515,8 +523,13 @@ mod tests {
         let link = &paragraph.children[0];
 
         assert_eq!(link.node_type, NodeType::Link);
-        assert_eq!(link.data.url, Some("https://example.com"));
-        assert_eq!(link.data.title, Some("Example Title"));
+        match link.data {
+            NodeData::Link(link_data) => {
+                assert_eq!(link_data.url, "https://example.com");
+                assert_eq!(link_data.title, Some("Example Title"));
+            }
+            _ => panic!("Expected Link variant"),
+        }
     }
 
     #[test]
@@ -576,7 +589,7 @@ mod tests {
 
         for (i, child) in ast.children.iter().enumerate() {
             assert_eq!(child.node_type, NodeType::Header);
-            assert_eq!(child.data.depth, Some((i + 1) as u8));
+            assert!(matches!(child.data, NodeData::Header(d) if d == (i + 1) as u8));
         }
     }
 
