@@ -242,24 +242,30 @@ impl Linter {
 
     /// Lints a list of files in parallel using rayon.
     ///
-    /// Creates a new `PluginHost` instance for each file to ensure thread safety.
-    /// While this incurs some overhead from plugin reloading, it avoids lock
-    /// contention and allows full utilization of multi-core processors.
+    /// Uses `map_init` to create a new `PluginHost` instance once per thread
+    /// rather than once per file. This significantly improves performance by
+    /// avoiding repetitive plugin loading/compilation while maintaining thread safety.
     ///
     /// Returns a tuple of (successful results, failed files with errors).
     pub fn lint_files(&self, paths: &[PathBuf]) -> LintFilesResult {
         // Parallel processing using rayon
-        // Each file gets its own PluginHost to avoid shared mutable state
-        // Collect both successes and failures
+        // Use map_init to initialize PluginHost once per thread
         let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
             .par_iter()
-            .map(|path| {
-                // Create PluginHost for this file
-                let mut file_host = self.create_plugin_host().map_err(|e| (path.clone(), e))?;
-
-                self.lint_file_with_host(path, &mut file_host)
-                    .map_err(|e| (path.clone(), e))
-            })
+            .map_init(
+                // Initialization function: runs once per thread
+                || self.create_plugin_host(),
+                // Fold function: runs for each item
+                |host_result, path| match host_result {
+                    Ok(file_host) => self
+                        .lint_file_with_host(path, file_host)
+                        .map_err(|e| (path.clone(), e)),
+                    Err(e) => Err((
+                        path.clone(),
+                        LinterError::Internal(format!("Failed to initialize plugin host: {}", e)),
+                    )),
+                },
+            )
             .collect();
 
         // Separate successes and failures
