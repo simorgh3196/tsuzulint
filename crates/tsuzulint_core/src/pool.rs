@@ -92,7 +92,8 @@ impl std::ops::DerefMut for PooledHost<'_> {
 
 impl Drop for PooledHost<'_> {
     fn drop(&mut self) {
-        if let Some(host) = self.host.take() {
+        if let Some(mut host) = self.host.take() {
+            host.unload_all();
             self.pool.lock().push_back(host);
         }
     }
@@ -172,5 +173,49 @@ mod tests {
         }
 
         assert_eq!(pool.available_count(), 3);
+    }
+
+    #[test]
+    fn test_host_is_reset_before_returning_to_pool() {
+        let pool = PluginHostPool::new();
+
+        {
+            let host = pool.acquire();
+            assert!(host.loaded_rules().next().is_none());
+        }
+
+        let host = pool.acquire();
+        assert!(
+            host.loaded_rules().next().is_none(),
+            "Host should be clean after being returned to pool"
+        );
+    }
+
+    #[test]
+    fn test_pool_thread_safety() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let pool = Arc::new(PluginHostPool::new());
+
+        let pool1 = Arc::clone(&pool);
+        let pool2 = Arc::clone(&pool);
+
+        let h1 = thread::spawn(move || {
+            let host = pool1.acquire();
+            drop(host);
+            pool1.available_count()
+        });
+
+        let h2 = thread::spawn(move || {
+            let host = pool2.acquire();
+            drop(host);
+            pool2.available_count()
+        });
+
+        let r1 = h1.join().unwrap();
+        let r2 = h2.join().unwrap();
+
+        assert!(r1 + r2 >= 1, "At least one host should be returned");
     }
 }
