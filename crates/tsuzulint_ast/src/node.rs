@@ -593,8 +593,8 @@ mod tests {
         let new_size = size_of::<NodeData>();
 
         assert!(
-            new_size < old_size,
-            "NodeData should be smaller: was {} bytes, now {} bytes",
+            new_size <= old_size * 65 / 100,
+            "NodeData should be at least 35% smaller: was {} bytes, now {} bytes",
             old_size,
             new_size
         );
