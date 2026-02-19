@@ -29,7 +29,7 @@
 //! let mut host = PluginHost::new();
 //! host.load_rule("./rules/no-todo.wasm")?;
 //!
-//! let diagnostics = host.run_rule("no-todo", &ast, &source)?;
+//! let diagnostics = host.run_rule("no-todo", &ast, "source", &tokens, &sentences, None)?;
 //! ```
 
 mod diagnostic;
