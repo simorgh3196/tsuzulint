@@ -2049,7 +2049,9 @@ mod tests {
 
         let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
-        linter.load_rule(&wasm_path).expect("Failed to load test rule");
+        linter
+            .load_rule(&wasm_path)
+            .expect("Failed to load test rule");
 
         // "error" inside quotes. JSON-escaping logic might mess this up if not careful.
         // Original: "This contains \"error\"."
