@@ -1876,7 +1876,7 @@ mod tests {
 
         // Create a file with multiple error occurrences in random order
         let file_path = temp_dir.path().join("test_sort.md");
-        // "error" at 10, "error" at 30, "error" at 50
+        // "error" at byte offsets 10, 25, 40
         // The rule detects "error".
         // The current implementation of the simple rule finds matches linearly, so they might come out sorted naturally.
         // However, we rely on `lint_file` sorting them at the end regardless of discovery order or parallelism.
