@@ -298,12 +298,18 @@ mod tests {
     fn test_diagnostic_sorting_and_deduplication() {
         let diag1 = Diagnostic::new("rule1", "msg1", Span::new(10, 20));
         let diag2 = Diagnostic::new("rule1", "msg1", Span::new(10, 20)); // Exact duplicate of diag1
-        let diag3 = Diagnostic::new("rule1", "msg1", Span::new(10, 20))
-            .with_severity(Severity::Warning); // Different severity
+        let diag3 =
+            Diagnostic::new("rule1", "msg1", Span::new(10, 20)).with_severity(Severity::Warning); // Different severity
         let diag4 = Diagnostic::new("rule1", "msg1", Span::new(5, 15)); // Earlier span
         let diag5 = Diagnostic::new("rule2", "msg1", Span::new(10, 20)); // Different rule
 
-        let mut diagnostics = vec![diag1.clone(), diag2, diag3.clone(), diag4.clone(), diag5.clone()];
+        let mut diagnostics = vec![
+            diag1.clone(),
+            diag2,
+            diag3.clone(),
+            diag4.clone(),
+            diag5.clone(),
+        ];
 
         // 1. Sort (using derived Ord)
         diagnostics.sort();
