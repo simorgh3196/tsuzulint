@@ -180,6 +180,73 @@ impl<'a> TxtNode<'a> {
     pub const fn text(&self) -> Option<&'a str> {
         self.value
     }
+
+    /// Returns the header depth if this is a Header node.
+    #[inline]
+    pub fn depth(&self) -> Option<u8> {
+        match self.data {
+            NodeData::Header(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Returns the URL if this is a Link, Image, or Definition node.
+    #[inline]
+    pub fn url(&self) -> Option<&'a str> {
+        match &self.data {
+            NodeData::Link(link) => Some(link.url),
+            NodeData::Definition(def) => Some(def.url),
+            _ => None,
+        }
+    }
+
+    /// Returns the title if this is a Link, Image, or Definition node.
+    #[inline]
+    pub fn title(&self) -> Option<&'a str> {
+        match &self.data {
+            NodeData::Link(link) => link.title,
+            NodeData::Definition(def) => def.title,
+            _ => None,
+        }
+    }
+
+    /// Returns the ordered flag if this is a List node.
+    #[inline]
+    pub fn ordered(&self) -> Option<bool> {
+        match self.data {
+            NodeData::List(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    /// Returns the language if this is a CodeBlock node.
+    #[inline]
+    pub fn lang(&self) -> Option<&'a str> {
+        match self.data {
+            NodeData::CodeBlock(lang) => lang,
+            _ => None,
+        }
+    }
+
+    /// Returns the identifier if this is a Reference or Definition node.
+    #[inline]
+    pub fn identifier(&self) -> Option<&'a str> {
+        match &self.data {
+            NodeData::Reference(ref_data) => Some(ref_data.identifier),
+            NodeData::Definition(def) => Some(def.identifier),
+            _ => None,
+        }
+    }
+
+    /// Returns the label if this is a Reference or Definition node.
+    #[inline]
+    pub fn label(&self) -> Option<&'a str> {
+        match &self.data {
+            NodeData::Reference(ref_data) => ref_data.label,
+            NodeData::Definition(def) => def.label,
+            _ => None,
+        }
+    }
 }
 
 impl<'a> NodeData<'a> {
@@ -574,6 +641,84 @@ mod tests {
         assert_eq!(node.node_type, NodeType::CodeBlock);
         assert!(matches!(node.data, NodeData::CodeBlock(Some("rust"))));
         assert_eq!(node.value, Some(code));
+    }
+
+    #[test]
+    fn test_accessors_depth() {
+        let mut header = TxtNode::new_parent(NodeType::Header, Span::new(0, 10), &[]);
+        header.data = NodeData::header(2);
+        assert_eq!(header.depth(), Some(2));
+
+        let para = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 10), &[]);
+        assert_eq!(para.depth(), None);
+    }
+
+    #[test]
+    fn test_accessors_url_and_title() {
+        let arena = AstArena::new();
+        let mut link = TxtNode::new_parent(NodeType::Link, Span::new(0, 10), &[]);
+        link.data = NodeData::link(
+            arena.alloc_str("https://example.com"),
+            Some(arena.alloc_str("Example")),
+        );
+        assert_eq!(link.url(), Some("https://example.com"));
+        assert_eq!(link.title(), Some("Example"));
+
+        let mut def = TxtNode::new_leaf(NodeType::Definition, Span::new(0, 10));
+        def.data = NodeData::definition(
+            arena.alloc_str("id"),
+            arena.alloc_str("https://def.com"),
+            None,
+            None,
+        );
+        assert_eq!(def.url(), Some("https://def.com"));
+        assert_eq!(def.title(), None);
+    }
+
+    #[test]
+    fn test_accessors_ordered() {
+        let mut list = TxtNode::new_parent(NodeType::List, Span::new(0, 10), &[]);
+        list.data = NodeData::list(true);
+        assert_eq!(list.ordered(), Some(true));
+
+        list.data = NodeData::list(false);
+        assert_eq!(list.ordered(), Some(false));
+
+        let para = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 10), &[]);
+        assert_eq!(para.ordered(), None);
+    }
+
+    #[test]
+    fn test_accessors_lang() {
+        let mut code_block = TxtNode::new_text(NodeType::CodeBlock, Span::new(0, 10), "code");
+        code_block.data = NodeData::code_block(Some("rust"));
+        assert_eq!(code_block.lang(), Some("rust"));
+
+        code_block.data = NodeData::code_block(None);
+        assert_eq!(code_block.lang(), None);
+
+        let para = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 10), &[]);
+        assert_eq!(para.lang(), None);
+    }
+
+    #[test]
+    fn test_accessors_identifier_and_label() {
+        let arena = AstArena::new();
+        let mut ref_node = TxtNode::new_leaf(NodeType::FootnoteReference, Span::new(0, 10));
+        ref_node.data =
+            NodeData::reference(arena.alloc_str("fn-1"), Some(arena.alloc_str("Footnote")));
+        assert_eq!(ref_node.identifier(), Some("fn-1"));
+        assert_eq!(ref_node.label(), Some("Footnote"));
+
+        let mut def_node = TxtNode::new_leaf(NodeType::Definition, Span::new(0, 10));
+        def_node.data = NodeData::definition(
+            arena.alloc_str("def-id"),
+            arena.alloc_str("https://example.com"),
+            None,
+            Some(arena.alloc_str("Def Label")),
+        );
+        assert_eq!(def_node.identifier(), Some("def-id"));
+        assert_eq!(def_node.label(), Some("Def Label"));
     }
 
     #[test]
