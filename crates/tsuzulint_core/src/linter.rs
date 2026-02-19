@@ -523,6 +523,13 @@ impl Linter {
             ))
         })?;
 
+        if !metadata.is_file() {
+            return Err(LinterError::file(format!(
+                "Not a regular file: {}",
+                path.display()
+            )));
+        }
+
         if metadata.len() > MAX_FILE_SIZE {
             return Err(LinterError::file(format!(
                 "File size exceeds limit of {} bytes: {}",
@@ -1928,6 +1935,24 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("File size exceeds limit"));
         assert!(err.contains(&MAX_FILE_SIZE.to_string()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_lint_file_rejects_special_files() {
+        use std::path::Path;
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        // /dev/null is a character device on Unix
+        let path = Path::new("/dev/null");
+        if path.exists() {
+            let result = linter.lint_file(path);
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(err.contains("Not a regular file"));
+        }
     }
 
     #[test]
