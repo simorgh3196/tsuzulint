@@ -23,7 +23,7 @@ pub enum Severity {
 }
 
 /// A diagnostic message from a lint rule.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "rkyv",
     derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
@@ -49,6 +49,45 @@ pub struct Diagnostic {
     /// Optional fix for this diagnostic.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fix: Option<Fix>,
+}
+
+// Two diagnostics are considered equal if they share the same identity fields
+// (span, message, rule_id). Severity, location metadata, and fix suggestions
+// are intentionally excluded so that duplicate findings from incremental or
+// parallel rule runs are collapsed to a single entry during dedup().
+// This means diagnostics with the same span/message/rule_id but differing
+// severity or fix are treated as equal and only one is kept.
+impl PartialEq for Diagnostic {
+    fn eq(&self, other: &Self) -> bool {
+        self.span == other.span && self.message == other.message && self.rule_id == other.rule_id
+    }
+}
+
+impl Eq for Diagnostic {}
+
+impl std::hash::Hash for Diagnostic {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.span.hash(state);
+        self.message.hash(state);
+        self.rule_id.hash(state);
+    }
+}
+
+impl PartialOrd for Diagnostic {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Diagnostic {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.span
+            .start
+            .cmp(&other.span.start)
+            .then_with(|| self.span.end.cmp(&other.span.end))
+            .then_with(|| self.message.cmp(&other.message))
+            .then_with(|| self.rule_id.cmp(&other.rule_id))
+    }
 }
 
 impl Diagnostic {
@@ -281,6 +320,22 @@ mod tests {
     }
 
     #[test]
+    fn test_diagnostic_equality_and_hash() {
+        use std::collections::HashSet;
+        let d1 = Diagnostic::new("rule1", "msg1", Span::new(0, 5));
+        let d2 = Diagnostic::new("rule1", "msg1", Span::new(0, 5));
+        let d3 = Diagnostic::new("rule2", "msg1", Span::new(0, 5));
+
+        assert_eq!(d1, d2);
+        assert_ne!(d1, d3);
+
+        let mut set = HashSet::new();
+        set.insert(d1.clone());
+        assert!(set.contains(&d2));
+        assert!(!set.contains(&d3));
+    }
+
+    #[test]
     fn test_all_severity_levels() {
         let error = Diagnostic::new("r", "m", Span::new(0, 1)).with_severity(Severity::Error);
         let warning = Diagnostic::new("r", "m", Span::new(0, 1)).with_severity(Severity::Warning);
@@ -292,47 +347,73 @@ mod tests {
     }
 
     #[test]
-    fn test_diagnostic_sorting_and_deduplication() {
-        let diag1 = Diagnostic::new("rule1", "msg1", Span::new(10, 20));
-        let diag2 = Diagnostic::new("rule1", "msg1", Span::new(10, 20)); // Exact duplicate of diag1
-        let diag3 =
-            Diagnostic::new("rule1", "msg1", Span::new(10, 20)).with_severity(Severity::Warning); // Different severity
-        let diag4 = Diagnostic::new("rule1", "msg1", Span::new(5, 15)); // Earlier span
-        let diag5 = Diagnostic::new("rule2", "msg1", Span::new(10, 20)); // Different rule
+    fn test_diagnostic_equality_ignores_severity_and_fix() {
+        use std::collections::HashSet;
+        let base = Diagnostic::new("rule", "msg", Span::new(0, 5));
+        let with_warning = base.clone().with_severity(Severity::Warning);
+        let with_fix = base.clone().with_fix(Fix::new(Span::new(0, 5), "fix"));
 
-        let mut diagnostics = vec![
-            diag1.clone(),
-            diag2,
-            diag3.clone(),
-            diag4.clone(),
-            diag5.clone(),
-        ];
+        // severity and fix being different doesn't affect equality (span, message, rule_id are same)
+        assert_eq!(base, with_warning);
+        assert_eq!(base, with_fix);
 
-        // 1. Sort (using derived Ord)
-        diagnostics.sort();
+        // They should also hash to the same value
+        let mut set = HashSet::new();
+        set.insert(base.clone());
+        assert!(set.contains(&with_warning));
+        assert!(set.contains(&with_fix));
+    }
 
-        // 2. Dedup
-        diagnostics.dedup();
+    #[test]
+    fn test_diagnostic_sort_and_dedup() {
+        let d1 = Diagnostic::new("rule", "msg", Span::new(10, 20));
+        let d2 = Diagnostic::new("rule", "msg", Span::new(10, 20)); // duplicate
+        let d3 = Diagnostic::new("rule", "msg", Span::new(0, 5));
 
-        // Should have 4 unique diagnostics (diag2 removed)
-        assert_eq!(diagnostics.len(), 4);
+        let mut v = vec![d1.clone(), d2, d3.clone()];
+        v.sort();
+        v.dedup();
 
-        // Verify content
-        assert!(diagnostics.contains(&diag1));
-        assert!(diagnostics.contains(&diag3));
-        assert!(diagnostics.contains(&diag4));
-        assert!(diagnostics.contains(&diag5));
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0], d3); // span.start=0 comes first
+        assert_eq!(v[1], d1); // span.start=10 comes after
+    }
 
-        // 3. Sort by span (simulating linter logic)
-        diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start));
+    #[test]
+    fn test_diagnostic_dedup_keeps_first_when_severity_differs() {
+        let base = Diagnostic::new("rule", "msg", Span::new(0, 5));
+        let with_warning = base.clone().with_severity(Severity::Warning);
 
-        // diag4 should be first (starts at 5)
-        assert_eq!(diagnostics[0], diag4);
+        // base (Error) comes first; after sort+dedup one should remain
+        let mut v = vec![base.clone(), with_warning];
+        v.sort();
+        v.dedup();
 
-        // The others start at 10, their relative order depends on other fields
-        // But they should follow diag4
-        assert_eq!(diagnostics[1].span.start, 10);
-        assert_eq!(diagnostics[2].span.start, 10);
-        assert_eq!(diagnostics[3].span.start, 10);
+        assert_eq!(v.len(), 1);
+        // stable sort keeps the first (Error) when keys are equal
+        assert_eq!(v[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn test_diagnostic_ord_ordering() {
+        // Test ordering by span.start
+        let d1 = Diagnostic::new("rule", "msg", Span::new(0, 10));
+        let d2 = Diagnostic::new("rule", "msg", Span::new(5, 15));
+        assert!(d1 < d2);
+
+        // Test ordering by span.end when start is equal
+        let d3 = Diagnostic::new("rule", "msg", Span::new(0, 5));
+        let d4 = Diagnostic::new("rule", "msg", Span::new(0, 10));
+        assert!(d3 < d4);
+
+        // Test ordering by message when span is equal
+        let d5 = Diagnostic::new("rule", "apple", Span::new(0, 10));
+        let d6 = Diagnostic::new("rule", "banana", Span::new(0, 10));
+        assert!(d5 < d6);
+
+        // Test ordering by rule_id when span and message are equal
+        let d7 = Diagnostic::new("rule-a", "msg", Span::new(0, 10));
+        let d8 = Diagnostic::new("rule-b", "msg", Span::new(0, 10));
+        assert!(d7 < d8);
     }
 }

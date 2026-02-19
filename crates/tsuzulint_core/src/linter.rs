@@ -20,6 +20,10 @@ use tsuzulint_plugin::{IsolationLevel, PluginHost};
 use crate::resolver::PluginResolver;
 use crate::{LintResult, LinterConfig, LinterError};
 
+/// Maximum file size to lint (10 MB).
+/// Files larger than this will be skipped to prevent DoS via memory exhaustion.
+const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
 /// Result type for lint_files and lint_patterns methods.
 ///
 /// Contains a tuple of:
@@ -510,6 +514,23 @@ impl Linter {
     ) -> Result<LintResult, LinterError> {
         debug!("Linting {}", path.display());
 
+        // Check file size limit to prevent DoS
+        let metadata = fs::metadata(path).map_err(|e| {
+            LinterError::file(format!(
+                "Failed to read metadata for {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
+
+        if metadata.len() > MAX_FILE_SIZE {
+            return Err(LinterError::file(format!(
+                "File size exceeds limit of {} bytes: {}",
+                MAX_FILE_SIZE,
+                path.display()
+            )));
+        }
+
         // Read file content
         let content = fs::read_to_string(path)
             .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
@@ -692,16 +713,11 @@ impl Linter {
         // Also track which diagnostics are "global" so we don't stick them into block cache
         let mut global_keys = HashSet::new();
         for d in &global_diagnostics {
-            global_keys.insert((
-                d.span.start,
-                d.span.end,
-                d.message.as_str(),
-                d.rule_id.as_str(),
-            ));
+            global_keys.insert(d);
         }
 
         // Sort by derived order (RuleId first) to bring duplicates together
-        all_diagnostics.sort();
+        all_diagnostics.sort_unstable();
         all_diagnostics.dedup();
         // Re-sort by position for consistent output and downstream processing
         all_diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start));
@@ -830,10 +846,10 @@ impl Linter {
     ///
     /// This optimization reduces complexity from O(Blocks * Diagnostics) to O(Blocks + Diagnostics)
     /// (plus sorting cost O(B log B + D log D)), which is significant for large files with many blocks.
-    fn distribute_diagnostics<'a>(
+    fn distribute_diagnostics(
         mut blocks: Vec<BlockCacheEntry>,
         diagnostics: &[tsuzulint_plugin::Diagnostic],
-        global_keys: &HashSet<(u32, u32, &'a str, &'a str)>,
+        global_keys: &HashSet<&tsuzulint_plugin::Diagnostic>,
     ) -> Vec<BlockCacheEntry> {
         // Ensure blocks are sorted by start position for the sweep-line algorithm to work correctly
         blocks.sort_by_key(|b| b.span.start);
@@ -842,15 +858,7 @@ impl Linter {
         // We use references to avoid cloning diagnostics during the sort/scan phase
         let mut local_diagnostics: Vec<&tsuzulint_plugin::Diagnostic> = diagnostics
             .iter()
-            .filter(|d| {
-                let key = (
-                    d.span.start,
-                    d.span.end,
-                    d.message.as_str(),
-                    d.rule_id.as_str(),
-                );
-                !global_keys.contains(&key)
-            })
+            .filter(|d| !global_keys.contains(d))
             .collect();
 
         // 2. Sort diagnostics by start position
@@ -1904,6 +1912,25 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_file_too_large() {
+        use std::fs;
+
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let large_file = temp_dir.path().join("large.txt");
+        let file = fs::File::create(&large_file).unwrap();
+        // Set size to MAX_FILE_SIZE + 1
+        file.set_len(MAX_FILE_SIZE + 1).unwrap();
+
+        let result = linter.lint_file(&large_file);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("File size exceeds limit"));
+        assert!(err.contains(&MAX_FILE_SIZE.to_string()));
+    }
+
+    #[test]
     fn test_distribute_diagnostics() {
         use tsuzulint_ast::Span;
         use tsuzulint_plugin::Diagnostic;
@@ -1980,12 +2007,7 @@ mod tests {
         // Case 2: Filter global diagnostics
         let mut global_keys_filtered = HashSet::new();
         // Mark diag1 as global
-        global_keys_filtered.insert((
-            diag1.span.start,
-            diag1.span.end,
-            diag1.message.as_str(),
-            diag1.rule_id.as_str(),
-        ));
+        global_keys_filtered.insert(&diag1);
 
         let result_filtered =
             Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys_filtered);
