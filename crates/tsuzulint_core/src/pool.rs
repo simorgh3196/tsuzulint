@@ -45,8 +45,8 @@ impl PluginHostPool {
     /// If no hosts are available, a new one is created.
     /// The host is returned to the pool when the `PooledHost` is dropped.
     pub fn acquire(&self) -> PooledHost<'_> {
-        let mut pool = self.available.lock();
-        let host = pool.pop_front().unwrap_or_default();
+        let existing = self.available.lock().pop_front();
+        let host = existing.unwrap_or_default();
         PooledHost {
             host: Some(host),
             pool: &self.available,
