@@ -44,7 +44,7 @@
 //! ## Early Termination
 //!
 //! ```rust
-//! use tsuzulint_ast::{TxtNode, NodeType, Span, AstArena};
+//! use tsuzulint_ast::{TxtNode, NodeType, Span, AstArena, NodeData};
 //! use tsuzulint_ast::visitor::{Visitor, VisitResult, walk_node};
 //! use std::ops::ControlFlow;
 //!
@@ -54,7 +54,9 @@
 //!
 //! impl<'a> Visitor<'a> for FirstHeaderFinder {
 //!     fn visit_header(&mut self, node: &TxtNode<'a>) -> VisitResult {
-//!         self.found_depth = node.data.depth;
+//!         if let NodeData::Header(depth) = node.data {
+//!             self.found_depth = Some(depth);
+//!         }
 //!         ControlFlow::Break(()) // Stop traversal
 //!     }
 //! }
