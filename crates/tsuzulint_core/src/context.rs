@@ -16,6 +16,8 @@ pub struct LineInfo {
     pub end: u32,
     /// Indentation level in spaces (tabs count as 4 spaces).
     pub indent: u32,
+    /// Byte length of leading whitespace.
+    pub indent_bytes: u32,
     /// Whether this line contains only whitespace.
     pub is_blank: bool,
 }
@@ -26,31 +28,33 @@ impl LineInfo {
         let end = start + line_text.len() as u32;
         let trimmed = line_text.trim_end();
         let is_blank = trimmed.is_empty();
-        let indent = if is_blank {
-            0
+        let (indent, indent_bytes) = if is_blank {
+            (0, 0)
         } else {
             let leading_len = line_text.len() - line_text.trim_start().len();
             let leading_text = &line_text[..leading_len];
-            leading_text.chars().fold(0u32, |acc, c| {
+            let visual = leading_text.chars().fold(0u32, |acc, c| {
                 if c == '\t' {
                     (acc + 4) / 4 * 4
                 } else {
                     acc + 1
                 }
-            })
+            });
+            (visual, leading_len as u32)
         };
 
         Self {
             start,
             end,
             indent,
+            indent_bytes,
             is_blank,
         }
     }
 
     /// Returns the byte offset of the first non-whitespace character.
     pub fn content_start(&self) -> u32 {
-        self.start + self.indent
+        self.start + self.indent_bytes
     }
 }
 
@@ -155,28 +159,25 @@ impl ContentCharacteristics {
     }
 
     /// Check if rule should be skipped based on characteristics.
+    ///
+    /// Returns true only if ALL specified node types are absent from the document.
+    /// This allows rules that handle multiple node types to run if ANY type exists.
     pub fn should_skip_rule(&self, node_types: &[String]) -> bool {
         if node_types.is_empty() {
             return false;
         }
 
-        for node_type in node_types {
-            match node_type.as_str() {
-                "Heading" | "heading" if !self.has_headings => return true,
-                "Link" | "link" if !self.has_links => return true,
-                "Image" | "image" if !self.has_images => return true,
-                "CodeBlock" | "code" if !self.has_code_blocks && !self.has_fenced_code => {
-                    return true;
-                }
-                "List" | "list" if !self.has_lists => return true,
-                "Table" | "table" if !self.has_tables => return true,
-                "Blockquote" | "blockquote" if !self.has_blockquotes => return true,
-                "Html" | "html" if !self.has_html => return true,
-                _ => {}
-            }
-        }
-
-        false
+        node_types.iter().all(|node_type| match node_type.as_str() {
+            "Heading" | "heading" => !self.has_headings,
+            "Link" | "link" => !self.has_links,
+            "Image" | "image" => !self.has_images,
+            "CodeBlock" | "code" => !self.has_code_blocks && !self.has_fenced_code,
+            "List" | "list" => !self.has_lists,
+            "Table" | "table" => !self.has_tables,
+            "Blockquote" | "blockquote" => !self.has_blockquotes,
+            "Html" | "html" => !self.has_html,
+            _ => false,
+        })
     }
 }
 
@@ -217,8 +218,13 @@ impl<'a> LintContext<'a> {
             let info = LineInfo::from_line(offset, line);
             lines.push(info);
             offset = info.end;
-            if offset < source.len() as u32 {
-                offset += 1;
+            if (offset as usize) < source.len() {
+                let remaining = &source.as_bytes()[offset as usize..];
+                if remaining.starts_with(b"\r\n") {
+                    offset += 2;
+                } else {
+                    offset += 1;
+                }
             }
         }
 
@@ -229,6 +235,7 @@ impl<'a> LintContext<'a> {
                     start: source.len() as u32,
                     end: source.len() as u32,
                     indent: 0,
+                    indent_bytes: 0,
                     is_blank: true,
                 });
             }
@@ -286,9 +293,8 @@ impl<'a> LintContext<'a> {
     /// Returns the text of a specific line (1-indexed).
     pub fn line_text(&self, line: u32) -> Option<&'a str> {
         let info = self.line_info(line)?;
-        let end = if info.end > info.start && info.end <= self.source.len() as u32 {
-            let end_char = self.source.chars().nth((info.end - 1) as usize)?;
-            if end_char == '\r' {
+        let end = if info.end > info.start && (info.end as usize) <= self.source.len() {
+            if self.source.as_bytes()[(info.end as usize) - 1] == b'\r' {
                 info.end - 1
             } else {
                 info.end
