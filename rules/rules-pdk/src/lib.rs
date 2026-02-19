@@ -1038,4 +1038,109 @@ mod tests {
         assert_eq!(decoded.diagnostics.len(), 1);
         assert_eq!(decoded.diagnostics[0].rule_id, "test");
     }
+
+    #[test]
+    fn lint_request_single() {
+        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
+        let config = serde_json::json!({"option": "value"});
+        let source = "test source".to_string();
+
+        let request = LintRequest::single(node.clone(), config.clone(), source.clone());
+
+        assert_eq!(request.node, node);
+        assert_eq!(request.nodes.len(), 1);
+        assert_eq!(request.nodes[0], node);
+        assert!(!request.is_batch());
+        assert_eq!(request.all_nodes().len(), 1);
+    }
+
+    #[test]
+    fn lint_request_batch() {
+        let nodes = vec![
+            serde_json::json!({"type": "Str", "range": [0, 5]}),
+            serde_json::json!({"type": "Str", "range": [10, 15]}),
+            serde_json::json!({"type": "Str", "range": [20, 25]}),
+        ];
+        let config = serde_json::json!({"option": "value"});
+        let source = "test source".to_string();
+
+        let request = LintRequest::batch(nodes.clone(), config.clone(), source.clone());
+
+        assert_eq!(request.node, nodes[0]);
+        assert_eq!(request.nodes.len(), 3);
+        assert!(request.is_batch());
+        assert_eq!(request.all_nodes().len(), 3);
+    }
+
+    #[test]
+    fn lint_request_with_file_path() {
+        let node = serde_json::json!({"type": "Str"});
+        let request = LintRequest::single(node, serde_json::json!({}), "source".to_string())
+            .with_file_path(Some("test.md"));
+
+        assert_eq!(request.file_path, Some("test.md".to_string()));
+    }
+
+    #[test]
+    fn lint_request_with_helpers() {
+        let node = serde_json::json!({"type": "Str"});
+        let helpers = LintHelpers {
+            text: Some("sample text".to_string()),
+            ..Default::default()
+        };
+        let request = LintRequest::single(node, serde_json::json!({}), "source".to_string())
+            .with_helpers(helpers);
+
+        assert!(request.helpers.is_some());
+        assert_eq!(
+            request.helpers.as_ref().unwrap().text,
+            Some("sample text".to_string())
+        );
+    }
+
+    #[test]
+    fn lint_request_batch_empty() {
+        let request = LintRequest::batch(vec![], serde_json::json!({}), "source".to_string());
+
+        assert!(!request.is_batch());
+        assert_eq!(request.node, serde_json::Value::Null);
+        assert_eq!(request.nodes.len(), 0);
+    }
+
+    #[test]
+    fn lint_request_msgpack_roundtrip_single() {
+        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
+        let request = LintRequest::single(
+            node.clone(),
+            serde_json::json!({"opt": 42}),
+            "test".to_string(),
+        );
+
+        let bytes = rmp_serde::to_vec_named(&request).unwrap();
+        let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
+
+        assert_eq!(decoded.node, node);
+        assert_eq!(decoded.nodes.len(), 1);
+        assert_eq!(decoded.source, "test");
+    }
+
+    #[test]
+    fn lint_request_msgpack_roundtrip_batch() {
+        let nodes = vec![
+            serde_json::json!({"type": "Str", "range": [0, 5]}),
+            serde_json::json!({"type": "Str", "range": [10, 15]}),
+        ];
+        let request = LintRequest::batch(
+            nodes.clone(),
+            serde_json::json!({"opt": 42}),
+            "test".to_string(),
+        );
+
+        let bytes = rmp_serde::to_vec_named(&request).unwrap();
+        let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
+
+        assert_eq!(decoded.node, nodes[0]);
+        assert_eq!(decoded.nodes.len(), 2);
+        assert!(decoded.is_batch());
+    }
 }
