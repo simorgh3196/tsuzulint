@@ -608,7 +608,7 @@ mod tests {
         let str_node = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 3), "alt"));
         let children = arena.alloc_slice_copy(&[*str_node]);
         let mut img = TxtNode::new_parent(NodeType::Image, Span::new(0, 20), children);
-        img.data = NodeData::link("img.png", None);
+        img.data = NodeData::image("img.png", None);
         let img_ref = arena.alloc(img);
         let doc_children = arena.alloc_slice_copy(&[*img_ref]);
         let doc = arena.alloc(TxtNode::new_parent(
