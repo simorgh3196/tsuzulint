@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_config_cache_object_path_only() {
-        // enabled はデフォルト (true) になるべき
+        // enabled should default to true
         let json = r#"{ "cache": { "path": ".custom-cache" } }"#;
         let config = LinterConfig::from_json(json).unwrap();
         assert!(config.cache.is_enabled());
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn test_config_cache_object_empty() {
-        // 両フィールドともデフォルト値になるべき
+        // Both fields should use their default values
         let json = r#"{ "cache": {} }"#;
         let config = LinterConfig::from_json(json).unwrap();
         assert!(config.cache.is_enabled());
