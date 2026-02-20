@@ -381,8 +381,8 @@ impl PluginHost {
 
             match self.executor.call_lint(real_name, &request_bytes) {
                 Ok(response_bytes) => {
-                    let response: LintResponse = rmp_serde::from_slice(&response_bytes)
-                        .map_err(|e| {
+                    let response: LintResponse =
+                        rmp_serde::from_slice(&response_bytes).map_err(|e| {
                             PluginError::call(format!("Invalid response from '{}': {}", name, e))
                         })?;
                     all_diagnostics.extend(response.diagnostics);
