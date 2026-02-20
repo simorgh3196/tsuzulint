@@ -112,6 +112,7 @@ pub struct ContentCharacteristics {
     pub has_images: bool,
     pub has_code_blocks: bool,
     pub has_fenced_code: bool,
+    pub has_inline_code: bool,
     pub has_lists: bool,
     pub has_tables: bool,
     pub has_blockquotes: bool,
@@ -137,6 +138,8 @@ impl ContentCharacteristics {
             }
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 chars.has_fenced_code = true;
+            } else if trimmed.contains('`') {
+                chars.has_inline_code = true;
             }
             if line.starts_with("    ") || line.starts_with('\t') {
                 chars.has_code_blocks = true;
@@ -171,7 +174,8 @@ impl ContentCharacteristics {
             "Heading" | "heading" => !self.has_headings,
             "Link" | "link" => !self.has_links,
             "Image" | "image" => !self.has_images,
-            "CodeBlock" | "code" => !self.has_code_blocks && !self.has_fenced_code,
+            "CodeBlock" => !self.has_code_blocks && !self.has_fenced_code,
+            "code" => !self.has_inline_code,
             "List" | "list" => !self.has_lists,
             "Table" | "table" => !self.has_tables,
             "Blockquote" | "blockquote" => !self.has_blockquotes,
@@ -228,18 +232,18 @@ impl<'a> LintContext<'a> {
             }
         }
 
-        if source.ends_with('\n') && !lines.is_empty() {
-            if let Some(last) = lines.last() {
-                if last.end == source.len() as u32 - 1 {
-                    lines.push(LineInfo {
-                        start: source.len() as u32,
-                        end: source.len() as u32,
-                        indent: 0,
-                        indent_bytes: 0,
-                        is_blank: true,
-                    });
-                }
-            }
+        if source.ends_with('\n')
+            && !lines.is_empty()
+            && let Some(last) = lines.last()
+            && last.end == source.len() as u32 - 1
+        {
+            lines.push(LineInfo {
+                start: source.len() as u32,
+                end: source.len() as u32,
+                indent: 0,
+                indent_bytes: 0,
+                is_blank: true,
+            });
         }
 
         lines
@@ -630,5 +634,31 @@ mod tests_content_characteristics {
         assert!(ctx.should_skip_rule(&["Heading".to_string()]));
         assert!(ctx.should_skip_rule(&["CodeBlock".to_string()]));
         assert!(!ctx.should_skip_rule(&[]));
+    }
+
+    #[test]
+    fn test_detect_inline_code() {
+        let chars = ContentCharacteristics::analyze("This has `inline code` here");
+        assert!(chars.has_inline_code);
+        assert!(!chars.has_fenced_code);
+        assert!(!chars.has_code_blocks);
+    }
+
+    #[test]
+    fn test_should_skip_rule_code_vs_codeblock() {
+        // Inline code only - should NOT skip "code" rules
+        let chars = ContentCharacteristics::analyze("`inline`");
+        assert!(!chars.should_skip_rule(&["code".to_string()]));
+        assert!(chars.should_skip_rule(&["CodeBlock".to_string()]));
+
+        // Fenced code only - should NOT skip "CodeBlock" rules
+        let chars = ContentCharacteristics::analyze("```\ncode\n```");
+        assert!(chars.should_skip_rule(&["code".to_string()]));
+        assert!(!chars.should_skip_rule(&["CodeBlock".to_string()]));
+
+        // Both - neither should be skipped
+        let chars = ContentCharacteristics::analyze("`inline`\n\n```\ncode\n```");
+        assert!(!chars.should_skip_rule(&["code".to_string()]));
+        assert!(!chars.should_skip_rule(&["CodeBlock".to_string()]));
     }
 }
