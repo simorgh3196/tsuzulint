@@ -402,7 +402,8 @@ mod tests {
         for (i, b) in json.bytes().enumerate() {
             store_instrs.push_str(&format!(
                 "(call $store_u8 (i64.const {}) (i32.const {}))\n",
-                1024 + i, b
+                1024 + i,
+                b
             ));
         }
 
