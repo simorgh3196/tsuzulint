@@ -2,7 +2,7 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A sentence unit.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Sentence {
     /// The text content of the sentence.
     pub text: String,

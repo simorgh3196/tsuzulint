@@ -16,6 +16,7 @@ default = ["console_error_panic_hook"]
 tsuzulint_ast = { workspace = true }
 tsuzulint_parser = { workspace = true }
 tsuzulint_plugin = { workspace = true, default-features = false, features = ["browser"] }
+tsuzulint_text = { workspace = true }
 
 wasm-bindgen = { workspace = true }
 serde-wasm-bindgen = { workspace = true }

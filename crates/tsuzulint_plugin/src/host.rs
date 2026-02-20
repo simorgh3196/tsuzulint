@@ -14,6 +14,7 @@ use tracing::warn;
 #[allow(unused_imports)]
 use crate::executor::RuleExecutor;
 use crate::{Diagnostic, PluginError, RuleManifest};
+use tsuzulint_text::{Sentence, Token};
 
 #[cfg(feature = "native")]
 use crate::executor_extism::ExtismExecutor;
@@ -35,36 +36,21 @@ type Executor = WasmiExecutor;
 #[cfg(not(any(feature = "native", feature = "browser")))]
 compile_error!("Either 'native' or 'browser' feature must be enabled.");
 
-/// Request sent to a rule's lint function (single node).
+/// Request sent to a rule's lint function.
 #[derive(Debug, Serialize)]
 struct LintRequest<'a, T: Serialize> {
+    /// Tokens in the text.
+    tokens: &'a [Token],
+    /// Sentences in the text.
+    sentences: &'a [Sentence],
     /// The node to lint (serialized).
     node: &'a T,
-    /// All nodes (for batch mode, empty for single node).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    nodes: Vec<serde_json::Value>,
     /// Rule configuration.
     config: serde_json::Value,
     /// Source text.
-    source: String,
+    source: &'a str,
     /// File path (if available).
     file_path: Option<&'a str>,
-}
-
-/// Request for batch linting (multiple nodes).
-#[allow(dead_code)]
-#[derive(Debug, Serialize)]
-struct BatchLintRequest {
-    /// First node (for backward compatibility).
-    node: serde_json::Value,
-    /// All nodes to lint.
-    nodes: Vec<serde_json::Value>,
-    /// Rule configuration.
-    config: serde_json::Value,
-    /// Source text.
-    source: String,
-    /// File path (if available).
-    file_path: Option<String>,
 }
 
 /// Response from a rule's lint function.
@@ -87,7 +73,7 @@ struct LintResponse {
 /// host.load_rule("./rules/no-todo.wasm")?;
 ///
 /// // Run the rule on an AST node
-/// let diagnostics = host.run_rule("no-todo", &node, &source, Some("example.md"))?;
+/// let diagnostics = host.run_rule("no-todo", &node, "source content", &tokens, &sentences, Some("example.md"))?;
 /// ```
 pub struct PluginHost {
     /// The WASM executor.
@@ -245,7 +231,7 @@ impl PluginHost {
     ///
     /// * `name` - Rule name
     /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
-    /// * `source` - The source text (serialized as JSON string)
+    /// * `source` - The source text
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -255,85 +241,60 @@ impl PluginHost {
         &mut self,
         name: &str,
         node: &T,
-        source: &serde_json::value::RawValue,
+        source: &str,
+        tokens: &serde_json::value::RawValue,
+        sentences: &serde_json::value::RawValue,
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        Self::run_rule_with_parts(
+        // Deserialize tokens and sentences first
+        // We do this here only once per run_rule call.
+        // For multiple rules, callers should use run_rule_with_parts.
+        let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
+            .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
+
+        let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
+            .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
+
+        self.run_rule_with_parts(name, node, source, &tokens_vec, &sentences_vec, file_path)
+    }
+
+    /// Runs a rule on a node with pre-deserialized analysis data.
+    ///
+    /// This is an optimized version of `run_rule` that avoids repeated
+    /// deserialization of tokens and sentences when running multiple rules.
+    pub fn run_rule_with_parts<T: Serialize>(
+        &mut self,
+        name: &str,
+        node: &T,
+        source: &str,
+        tokens: &[Token],
+        sentences: &[Sentence],
+        file_path: Option<&str>,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        Self::run_rule_with_parts_internal(
             &mut self.executor,
             &self.configs,
             &self.aliases,
             name,
             node,
             source,
+            tokens,
+            sentences,
             file_path,
         )
     }
 
-    /// Runs a rule on multiple nodes in a single WASM call (batch mode).
-    ///
-    /// This is more efficient than calling `run_rule` multiple times
-    /// when you have many nodes to process.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Rule name
-    /// * `nodes` - The AST nodes (serialized as JSON values)
-    /// * `source` - The source text (serialized as JSON string)
-    /// * `file_path` - Optional file path
-    ///
-    /// # Returns
-    ///
-    /// Diagnostics reported by the rule.
-    pub fn run_rule_batch(
-        &mut self,
-        name: &str,
-        nodes: Vec<serde_json::Value>,
-        source: &serde_json::value::RawValue,
-        file_path: Option<&str>,
-    ) -> Result<Vec<Diagnostic>, PluginError> {
-        if nodes.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let config = self
-            .configs
-            .get(name)
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-
-        let source_str: String = serde_json::from_str(source.get())
-            .map_err(|e| PluginError::call(format!("Invalid source JSON: {}", e)))?;
-
-        let request = BatchLintRequest {
-            node: nodes.first().cloned().unwrap_or(serde_json::Value::Null),
-            nodes,
-            config,
-            source: source_str,
-            file_path: file_path.map(|s| s.to_string()),
-        };
-
-        let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
-
-        let request_bytes = rmp_serde::to_vec_named(&request)
-            .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
-
-        let response_bytes = self.executor.call_lint(real_name, &request_bytes)?;
-
-        let response: LintResponse = rmp_serde::from_slice(&response_bytes)
-            .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
-
-        Ok(response.diagnostics)
-    }
-
     /// Internal helper to run a rule with split borrows.
     #[allow(clippy::too_many_arguments)]
-    fn run_rule_with_parts<T: Serialize>(
+    fn run_rule_with_parts_internal<T: Serialize>(
         executor: &mut Executor,
         configs: &HashMap<String, serde_json::Value>,
         aliases: &HashMap<String, String>,
         name: &str,
         node: &T,
-        source: &serde_json::value::RawValue,
+        source: &str,
+        tokens: &[Token],
+        sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let config = configs
@@ -341,17 +302,12 @@ impl PluginHost {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
-        let source_str: String = serde_json::from_str(source.get())
-            .map_err(|e| PluginError::call(format!("Invalid source JSON: {}", e)))?;
-
-        let node_json = serde_json::to_value(node)
-            .map_err(|e| PluginError::call(format!("Failed to serialize node: {}", e)))?;
-
         let request = LintRequest {
             node,
-            nodes: vec![node_json],
             config,
-            source: source_str,
+            source,
+            tokens,
+            sentences,
             file_path,
         };
 
@@ -373,7 +329,7 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `node` - The AST node (serialized as Msgpack or a Serializable struct)
-    /// * `source` - The source text (serialized as JSON string)
+    /// * `source` - The source text
     /// * `file_path` - Optional file path
     ///
     /// # Returns
@@ -382,7 +338,28 @@ impl PluginHost {
     pub fn run_all_rules<T: Serialize>(
         &mut self,
         node: &T,
-        source: &serde_json::value::RawValue,
+        source: &str,
+        tokens: &serde_json::value::RawValue,
+        sentences: &serde_json::value::RawValue,
+        file_path: Option<&str>,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        // Deserialize tokens and sentences ONCE
+        let tokens_vec: Vec<Token> = serde_json::from_str(tokens.get())
+            .map_err(|e| PluginError::call(format!("Invalid tokens JSON: {}", e)))?;
+
+        let sentences_vec: Vec<Sentence> = serde_json::from_str(sentences.get())
+            .map_err(|e| PluginError::call(format!("Invalid sentences JSON: {}", e)))?;
+
+        self.run_all_rules_with_parts(node, source, &tokens_vec, &sentences_vec, file_path)
+    }
+
+    /// Runs all loaded rules on a node with pre-deserialized analysis data.
+    pub fn run_all_rules_with_parts<T: Serialize>(
+        &mut self,
+        node: &T,
+        source: &str,
+        tokens: &[Token],
+        sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let mut all_diagnostics = Vec::new();
@@ -391,13 +368,15 @@ impl PluginHost {
         // We can do this because run_rule_with_parts takes split borrows,
         // so `self.manifests` (immutable) is not conflicted with `self.executor` (mutable).
         for name in self.manifests.keys() {
-            match Self::run_rule_with_parts(
+            match Self::run_rule_with_parts_internal(
                 &mut self.executor,
                 &self.configs,
                 &self.aliases,
                 name,
                 node,
                 source,
+                tokens,
+                sentences,
                 file_path,
             ) {
                 Ok(diagnostics) => {
@@ -458,10 +437,16 @@ mod tests {
         let mut host = PluginHost::new();
         let node_bytes = serde_json::to_string(&serde_json::json!({})).unwrap();
         let node = serde_json::value::RawValue::from_string(node_bytes).unwrap();
-        let source_json = serde_json::to_string("").unwrap();
-        let source = serde_json::value::RawValue::from_string(source_json).unwrap();
 
-        let result = host.run_rule("nonexistent", &node, &source, None);
+        let tokens_raw = serde_json::value::RawValue::from_string(
+            serde_json::to_string(&Vec::<Token>::new()).unwrap(),
+        )
+        .unwrap();
+        let sentences_raw = serde_json::value::RawValue::from_string(
+            serde_json::to_string(&Vec::<Sentence>::new()).unwrap(),
+        )
+        .unwrap();
+        let result = host.run_rule("nonexistent", &node, "", &tokens_raw, &sentences_raw, None);
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 
@@ -483,10 +468,10 @@ mod tests {
         #[derive(Debug, Clone, Deserialize)]
         struct PdkLintRequest {
             pub node: serde_json::Value,
-            #[serde(default)]
-            pub nodes: Vec<serde_json::Value>,
             pub config: serde_json::Value,
             pub source: String,
+            pub tokens: Vec<Token>,
+            pub sentences: Vec<Sentence>,
             pub file_path: Option<String>,
             #[serde(default)]
             pub helpers: Option<serde_json::Value>,
@@ -494,15 +479,18 @@ mod tests {
 
         let node_data = serde_json::json!({"type": "Doc", "children": []});
         let config = serde_json::json!({"option": "value"});
-        let source = "test content".to_string();
+        let tokens = vec![];
+        let sentences = vec![];
+        let source = "test content";
         let file_path = Some("test.md");
 
         // Host side
         let host_request = LintRequest {
             node: &node_data,
-            nodes: vec![node_data.clone()],
             config: config.clone(),
-            source: source.clone(),
+            source,
+            tokens: &tokens,
+            sentences: &sentences,
             file_path,
         };
 
@@ -515,73 +503,11 @@ mod tests {
 
         // Verify content
         assert_eq!(guest_request.source, source);
+        assert_eq!(guest_request.tokens, tokens);
+        assert_eq!(guest_request.sentences, sentences);
         assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
         assert_eq!(guest_request.config, config);
         assert_eq!(guest_request.node, node_data);
-        assert_eq!(guest_request.nodes, vec![node_data]);
         assert_eq!(guest_request.helpers, None);
-    }
-
-    #[test]
-    fn test_serialization_compat_with_pdk_batch() {
-        // Test batch mode serialization
-        use serde::Deserialize;
-
-        #[derive(Debug, Clone, Deserialize)]
-        struct PdkLintRequest {
-            pub node: serde_json::Value,
-            #[serde(default)]
-            pub nodes: Vec<serde_json::Value>,
-            pub config: serde_json::Value,
-            pub source: String,
-            pub file_path: Option<String>,
-            #[serde(default)]
-            pub helpers: Option<serde_json::Value>,
-        }
-
-        let nodes = vec![
-            serde_json::json!({"type": "Str", "range": [0, 5]}),
-            serde_json::json!({"type": "Str", "range": [10, 15]}),
-            serde_json::json!({"type": "Str", "range": [20, 25]}),
-        ];
-        let config = serde_json::json!({"option": "value"});
-        let source = "test content".to_string();
-        let file_path = Some("test.md");
-
-        // Host side (batch request)
-        let host_request = BatchLintRequest {
-            node: nodes[0].clone(),
-            nodes: nodes.clone(),
-            config: config.clone(),
-            source: source.clone(),
-            file_path: file_path.map(|s| s.to_string()),
-        };
-
-        // Serialize using rmp_serde
-        let bytes = rmp_serde::to_vec_named(&host_request).expect("Serialization failed");
-
-        // Guest side (deserialize)
-        let guest_request: PdkLintRequest =
-            rmp_serde::from_slice(&bytes).expect("Deserialization failed");
-
-        // Verify content
-        assert_eq!(guest_request.source, source);
-        assert_eq!(guest_request.file_path, Some("test.md".to_string()));
-        assert_eq!(guest_request.config, config);
-        assert_eq!(guest_request.node, nodes[0]);
-        assert_eq!(guest_request.nodes.len(), 3);
-        assert_eq!(guest_request.helpers, None);
-    }
-
-    #[test]
-    fn test_run_rule_batch_empty_nodes() {
-        let mut host = PluginHost::new();
-        let source_json = serde_json::to_string("test").unwrap();
-        let source = serde_json::value::RawValue::from_string(source_json).unwrap();
-
-        // Empty nodes should return empty diagnostics without error
-        let result = host.run_rule_batch("any-rule", vec![], &source, None);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
     }
 }
