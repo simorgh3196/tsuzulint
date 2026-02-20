@@ -133,7 +133,7 @@ impl std::ops::Deref for PooledHost<'_> {
     type Target = PluginHost;
 
     fn deref(&self) -> &Self::Target {
-        // SAFETY: `host` is only taken in `Drop`, so it is always `Some` while
+        // Invariant: `host` is only taken in `Drop`, so it is always `Some` while
         // this value is accessible.
         self.host
             .as_ref()
@@ -143,7 +143,7 @@ impl std::ops::Deref for PooledHost<'_> {
 
 impl std::ops::DerefMut for PooledHost<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        // SAFETY: `host` is only taken in `Drop`, so it is always `Some` while
+        // Invariant: `host` is only taken in `Drop`, so it is always `Some` while
         // this value is accessible.
         self.host
             .as_mut()
