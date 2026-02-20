@@ -3,8 +3,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tsuzulint_text::{SentenceSplitter, Tokenizer};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
@@ -19,6 +20,10 @@ use tsuzulint_plugin::{IsolationLevel, PluginHost};
 use crate::resolver::PluginResolver;
 use crate::{LintResult, LinterConfig, LinterError};
 
+/// Maximum file size to lint (10 MB).
+/// Files larger than this will be skipped to prevent DoS via memory exhaustion.
+const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
 /// Result type for lint_files and lint_patterns methods.
 ///
 /// Contains a tuple of:
@@ -30,6 +35,8 @@ pub type LintFilesResult = Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>)
 ///
 /// Orchestrates file discovery, parsing, rule execution, and caching.
 pub struct Linter {
+    /// Tokenizer for text analysis.
+    tokenizer: Arc<Tokenizer>,
     /// Linter configuration.
     config: LinterConfig,
     /// Pre-computed hash of the configuration.
@@ -61,6 +68,11 @@ impl Linter {
             warn!("Failed to load cache: {}", e);
         }
 
+        // Initialize tokenizer
+        let tokenizer = Arc::new(Tokenizer::new().map_err(|e| {
+            LinterError::Internal(format!("Failed to initialize tokenizer: {}", e))
+        })?);
+
         // Build glob patterns
         let include_globs = Self::build_globset(&config.include)?;
         let exclude_globs = Self::build_globset(&config.exclude)?;
@@ -72,9 +84,10 @@ impl Linter {
         Self::load_configured_rules(&config, &mut host);
 
         // Pre-compute config hash
-        let config_hash = config.hash();
+        let config_hash = config.hash()?;
 
         Ok(Self {
+            tokenizer,
             config,
             config_hash,
             plugin_host: Mutex::new(host),
@@ -147,7 +160,8 @@ impl Linter {
     ///
     /// Returns a tuple of (successful results, failed files with errors).
     pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
-        let files = self.discover_files(patterns, Path::new("."))?;
+        let base_dir = self.config.base_dir.as_deref().unwrap_or(Path::new("."));
+        let files = self.discover_files(patterns, base_dir)?;
         self.lint_files(&files)
     }
 
@@ -483,6 +497,15 @@ impl Linter {
         self.lint_file_internal(path, host)
     }
 
+    /// Serializes a value to a RawValue, mapping errors to LinterError.
+    fn to_raw_value<T: serde::Serialize>(
+        value: &T,
+        label: &str,
+    ) -> Result<Box<serde_json::value::RawValue>, LinterError> {
+        serde_json::value::to_raw_value(value)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize {}: {}", label, e)))
+    }
+
     /// Internal implementation for linting a single file.
     fn lint_file_internal(
         &self,
@@ -490,6 +513,23 @@ impl Linter {
         host: &mut PluginHost,
     ) -> Result<LintResult, LinterError> {
         debug!("Linting {}", path.display());
+
+        // Check file size limit to prevent DoS
+        let metadata = fs::metadata(path).map_err(|e| {
+            LinterError::file(format!(
+                "Failed to read metadata for {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
+
+        if metadata.len() > MAX_FILE_SIZE {
+            return Err(LinterError::file(format!(
+                "File size exceeds limit of {} bytes: {}",
+                MAX_FILE_SIZE,
+                path.display()
+            )));
+        }
 
         // Read file content
         let content = fs::read_to_string(path)
@@ -526,6 +566,16 @@ impl Linter {
             .parse(&arena, &content)
             .map_err(|e| LinterError::parse(e.to_string()))?;
 
+        // Extract ignore ranges (CodeBlock and Code)
+        let ignore_ranges = self.extract_ignore_ranges(&ast);
+
+        // Tokenize content
+        let tokens = self
+            .tokenizer
+            .tokenize(&content)
+            .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
+        let sentences = SentenceSplitter::split(&content, &ignore_ranges);
+
         // Extract blocks for incremental analysis
         let current_blocks = self.extract_blocks(&ast, &content);
 
@@ -547,14 +597,6 @@ impl Linter {
 
         // Run rules
         {
-            // Pre-serialize source content (escape string once)
-            // This avoids re-escaping the source string for every rule execution
-            let source_json = serde_json::to_string(&content).map_err(|e| {
-                LinterError::Internal(format!("Failed to serialize content: {}", e))
-            })?;
-            let source_raw = serde_json::value::RawValue::from_string(source_json)
-                .map_err(|e| LinterError::Internal(format!("Failed to create RawValue: {}", e)))?;
-
             // A. Run Global Rules
             // Global rules must always run on the full document if anything changed
             // because they depend on the full context.
@@ -564,7 +606,14 @@ impl Linter {
                     // Optimized path for single rule: avoid RawValue
                     let rule = &global_rule_names[0];
                     let start = Instant::now();
-                    match host.run_rule(rule, &ast, &source_raw, path.to_str()) {
+                    match host.run_rule_with_parts(
+                        rule,
+                        &ast,
+                        &content,
+                        &tokens,
+                        &sentences,
+                        path.to_str(),
+                    ) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
@@ -573,17 +622,18 @@ impl Linter {
                     }
                 } else {
                     // Standard path: Serialize AST once for all global rules
-                    let ast_json = serde_json::to_string(&ast).map_err(|e| {
-                        LinterError::Internal(format!("Failed to serialize AST: {}", e))
-                    })?;
-                    let ast_raw =
-                        serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
-                            LinterError::Internal(format!("Failed to create RawValue: {}", e))
-                        })?;
+                    let ast_raw = Self::to_raw_value(&ast, "AST")?;
 
                     for rule in global_rule_names {
                         let start = Instant::now();
-                        match host.run_rule(&rule, &ast_raw, &source_raw, path.to_str()) {
+                        match host.run_rule_with_parts(
+                            &rule,
+                            &ast_raw,
+                            &content,
+                            &tokens,
+                            &sentences,
+                            path.to_str(),
+                        ) {
                             Ok(diags) => global_diagnostics.extend(diags),
                             Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                         }
@@ -609,7 +659,14 @@ impl Linter {
                                 // Optimized path for single rule
                                 let rule = &block_rule_names[0];
                                 let start = Instant::now();
-                                match host.run_rule(rule, node, &source_raw, path.to_str()) {
+                                match host.run_rule_with_parts(
+                                    rule,
+                                    node,
+                                    &content,
+                                    &tokens,
+                                    &sentences,
+                                    path.to_str(),
+                                ) {
                                     Ok(diags) => block_diagnostics.extend(diags),
                                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                 }
@@ -617,32 +674,28 @@ impl Linter {
                                     *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
                                         start.elapsed();
                                 }
-                            } else if let Ok(node_json) = serde_json::to_string(node) {
-                                if let Ok(node_raw) =
-                                    serde_json::value::RawValue::from_string(node_json)
-                                {
-                                    for rule in &block_rule_names {
-                                        let start = Instant::now();
-                                        match host.run_rule(
-                                            rule,
-                                            &node_raw,
-                                            &source_raw,
-                                            path.to_str(),
-                                        ) {
-                                            Ok(diags) => block_diagnostics.extend(diags),
-                                            Err(e) => warn!("Rule '{}' failed: {}", rule, e),
-                                        }
-                                        if self.config.timings {
-                                            *timings
-                                                .entry(rule.clone())
-                                                .or_insert(Duration::new(0, 0)) += start.elapsed();
-                                        }
+                            } else if let Ok(node_raw) = Self::to_raw_value(node, "block node") {
+                                for rule in &block_rule_names {
+                                    let start = Instant::now();
+                                    match host.run_rule_with_parts(
+                                        rule,
+                                        &node_raw,
+                                        &content,
+                                        &tokens,
+                                        &sentences,
+                                        path.to_str(),
+                                    ) {
+                                        Ok(diags) => block_diagnostics.extend(diags),
+                                        Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                     }
-                                } else {
-                                    warn!("Failed to create RawValue for block node");
+                                    if self.config.timings {
+                                        *timings
+                                            .entry(rule.clone())
+                                            .or_insert(Duration::new(0, 0)) += start.elapsed();
+                                    }
                                 }
                             } else {
-                                warn!("Failed to serialize block node");
+                                warn!("Failed to serialize/create RawValue for block node");
                             }
                         }
                         block_index += 1;
@@ -657,31 +710,18 @@ impl Linter {
         all_diagnostics.extend(global_diagnostics.iter().cloned());
         all_diagnostics.extend(block_diagnostics);
 
-        let mut final_diagnostics = Vec::new();
-        let mut seen_diagnostics = HashSet::new();
-
         // Also track which diagnostics are "global" so we don't stick them into block cache
         let mut global_keys = HashSet::new();
         for d in &global_diagnostics {
-            global_keys.insert((
-                d.span.start,
-                d.span.end,
-                d.message.as_str(),
-                d.rule_id.as_str(),
-            ));
+            global_keys.insert(d);
         }
 
-        for diag in all_diagnostics {
-            let key = (
-                diag.span.start,
-                diag.span.end,
-                diag.message.clone(),
-                diag.rule_id.clone(),
-            );
-            if seen_diagnostics.insert(key) {
-                final_diagnostics.push(diag);
-            }
-        }
+        // Sort by derived order (RuleId first) to bring duplicates together
+        all_diagnostics.sort_unstable();
+        all_diagnostics.dedup();
+        // Re-sort by position for consistent output and downstream processing
+        all_diagnostics.sort_by(|a, b| a.span.start.cmp(&b.span.start));
+        let final_diagnostics = all_diagnostics;
 
         // Update cache
         // We need to associate diagnostics with blocks for NEXT time.
@@ -774,14 +814,42 @@ impl Linter {
         }
     }
 
+    /// Extracts ignore ranges (CodeBlock and Code) from AST.
+    fn extract_ignore_ranges(&self, ast: &TxtNode) -> Vec<std::ops::Range<usize>> {
+        use std::ops::ControlFlow;
+        use tsuzulint_ast::visitor::{VisitResult, Visitor, walk_node};
+
+        struct CodeRangeCollector {
+            ranges: Vec<std::ops::Range<usize>>,
+        }
+
+        impl<'a> Visitor<'a> for CodeRangeCollector {
+            fn visit_code_block(&mut self, node: &TxtNode<'a>) -> VisitResult {
+                self.ranges
+                    .push(node.span.start as usize..node.span.end as usize);
+                ControlFlow::Continue(())
+            }
+
+            fn visit_code(&mut self, node: &TxtNode<'a>) -> VisitResult {
+                self.ranges
+                    .push(node.span.start as usize..node.span.end as usize);
+                ControlFlow::Continue(())
+            }
+        }
+
+        let mut collector = CodeRangeCollector { ranges: Vec::new() };
+        let _ = walk_node(&mut collector, ast);
+        collector.ranges
+    }
+
     /// Distributes diagnostics to blocks efficiently using a sorted cursor approach.
     ///
     /// This optimization reduces complexity from O(Blocks * Diagnostics) to O(Blocks + Diagnostics)
     /// (plus sorting cost O(B log B + D log D)), which is significant for large files with many blocks.
-    fn distribute_diagnostics<'a>(
+    fn distribute_diagnostics(
         mut blocks: Vec<BlockCacheEntry>,
         diagnostics: &[tsuzulint_plugin::Diagnostic],
-        global_keys: &HashSet<(u32, u32, &'a str, &'a str)>,
+        global_keys: &HashSet<&tsuzulint_plugin::Diagnostic>,
     ) -> Vec<BlockCacheEntry> {
         // Ensure blocks are sorted by start position for the sweep-line algorithm to work correctly
         blocks.sort_by_key(|b| b.span.start);
@@ -790,15 +858,7 @@ impl Linter {
         // We use references to avoid cloning diagnostics during the sort/scan phase
         let mut local_diagnostics: Vec<&tsuzulint_plugin::Diagnostic> = diagnostics
             .iter()
-            .filter(|d| {
-                let key = (
-                    d.span.start,
-                    d.span.end,
-                    d.message.as_str(),
-                    d.rule_id.as_str(),
-                );
-                !global_keys.contains(&key)
-            })
+            .filter(|d| !global_keys.contains(d))
             .collect();
 
         // 2. Sort diagnostics by start position
@@ -894,18 +954,17 @@ impl Linter {
 
         // Convert AST to JSON for plugin system
         // Serialize to string + RawValue to avoid serialization overhead in rules
-        let ast_json = serde_json::to_string(&ast)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize AST: {}", e)))?;
-        let ast_raw = serde_json::value::RawValue::from_string(ast_json).map_err(|e| {
-            LinterError::Internal(format!("Failed to create RawValue for AST: {}", e))
-        })?;
+        let ast_raw = Self::to_raw_value(&ast, "AST")?;
 
-        // Pre-serialize source
-        let source_json = serde_json::to_string(&content)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize content: {}", e)))?;
-        let source_raw = serde_json::value::RawValue::from_string(source_json).map_err(|e| {
-            LinterError::Internal(format!("Failed to create RawValue for content: {}", e))
-        })?;
+        // Extract ignore ranges (CodeBlock and Code)
+        let ignore_ranges = self.extract_ignore_ranges(&ast);
+
+        // Tokenize content
+        let tokens = self
+            .tokenizer
+            .tokenize(content)
+            .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
+        let sentences = SentenceSplitter::split(content, &ignore_ranges);
 
         // Run rules
         let diagnostics = {
@@ -913,7 +972,7 @@ impl Linter {
                 .plugin_host
                 .lock()
                 .map_err(|_| LinterError::Internal("Plugin host lock poisoned".to_string()))?;
-            host.run_all_rules(&ast_raw, &source_raw, path.to_str())?
+            host.run_all_rules_with_parts(&ast_raw, content, &tokens, &sentences, path.to_str())?
         };
 
         Ok(diagnostics)
@@ -1231,7 +1290,7 @@ mod tests {
     #[test]
     fn test_linter_config_hash_caching() {
         let (config, _temp) = test_config();
-        let expected_hash = config.hash();
+        let expected_hash = config.hash().unwrap();
         let linter = Linter::new(config).unwrap();
 
         // Verify that the hash stored in Linter matches the one computed from config
@@ -1736,9 +1795,153 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_files_partial_failure() {
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        // Create a temporary file
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.md");
+        std::fs::write(&file_path, "content").unwrap();
+
+        // One valid file, one invalid file
+        let paths = vec![file_path, PathBuf::from("/nonexistent/file.md")];
+
+        let result = linter.lint_files(&paths);
+        assert!(result.is_ok());
+
+        let (successes, failures) = result.unwrap();
+        assert_eq!(successes.len(), 1);
+        assert_eq!(failures.len(), 1);
+
+        assert!(failures[0].0.to_string_lossy().contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_lint_caching() {
+        // Build the test rule WASM if available
+        let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() else {
+            println!("Skipping test_lint_caching: WASM build failed");
+            return;
+        };
+
+        let (mut config, temp_dir) = test_config();
+        // Enable caching
+        config.cache = true;
+
+        // Setup rule
+        config.rules.push(crate::config::RuleDefinition::Simple(
+            "test-rule".to_string(),
+        ));
+        config.options.insert(
+            "test-rule".to_string(),
+            crate::config::RuleOption::Enabled(true),
+        );
+
+        let linter = Linter::new(config).unwrap();
+        linter.load_rule(&wasm_path).expect("Failed to load rule");
+
+        let file_path = temp_dir.path().join("test.md");
+        std::fs::write(&file_path, "Clean content").unwrap();
+
+        // First run - should not be cached
+        let result1 = linter.lint_file(&file_path).unwrap();
+        assert!(!result1.from_cache);
+
+        // Second run - should be cached
+        let result2 = linter.lint_file(&file_path).unwrap();
+        assert!(result2.from_cache);
+    }
+
+    #[test]
+    fn test_lint_patterns_expansion() {
+        use std::fs;
+        let (mut config, temp_dir) = test_config();
+
+        // Set base_dir so lint_patterns searches in temp_dir
+        config.base_dir = Some(temp_dir.path().to_path_buf());
+
+        let linter = Linter::new(config).unwrap();
+
+        let dir = temp_dir.path();
+        fs::write(dir.join("a.md"), "").unwrap();
+        fs::write(dir.join("b.md"), "").unwrap();
+        fs::write(dir.join("c.txt"), "").unwrap();
+
+        // Pattern matching .md files in the temp dir
+        // We use relative pattern now that base_dir is set
+        let pattern = "*.md".to_string();
+
+        let (successes, _failures) = linter.lint_patterns(&[pattern]).unwrap();
+        // We expect 2 .md files
+        assert_eq!(successes.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_ignore_ranges() {
+        use tsuzulint_ast::AstArena;
+        use tsuzulint_parser::{MarkdownParser, Parser};
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let content = "Text.\n```rust\ncode.\n```\nInline `code.` here.";
+        let arena = AstArena::new();
+        let parser = MarkdownParser::new();
+        let ast = parser.parse(&arena, content).unwrap();
+
+        let ranges = linter.extract_ignore_ranges(&ast);
+
+        // CodeBlock: "```rust\ncode.\n```" (span 6..23)
+        // Inline: "`code.`" (span 31..38)
+
+        assert_eq!(ranges.len(), 2, "Expected 2 ignored ranges");
+
+        // Ranges might come in any order depending on traversal, but usually document order.
+        let r1 = &ranges[0];
+        let r2 = &ranges[1];
+
+        let (block, inline) = if r1.start < r2.start {
+            (r1, r2)
+        } else {
+            (r2, r1)
+        };
+
+        let block_text = &content[block.clone()];
+        assert!(
+            block_text.starts_with("```"),
+            "First range should be code block"
+        );
+
+        let inline_text = &content[inline.clone()];
+        assert_eq!(inline_text, "`code.`", "Second range should be inline code");
+    }
+
+    #[test]
+    fn test_lint_file_too_large() {
+        use std::fs;
+
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let large_file = temp_dir.path().join("large.txt");
+        let file = fs::File::create(&large_file).unwrap();
+        // Set size to MAX_FILE_SIZE + 1
+        file.set_len(MAX_FILE_SIZE + 1).unwrap();
+
+        let result = linter.lint_file(&large_file);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("File size exceeds limit"));
+        assert!(err.contains(&MAX_FILE_SIZE.to_string()));
+    }
+
+    #[test]
     fn test_distribute_diagnostics() {
         use tsuzulint_ast::Span;
         use tsuzulint_plugin::Diagnostic;
+
+        let global_keys = HashSet::new();
 
         // Create 2 disjoint blocks
         let block1 = BlockCacheEntry {
@@ -1795,8 +1998,6 @@ mod tests {
             diag_overlap,
         ];
 
-        // Case 1: Empty global keys
-        let global_keys: HashSet<(u32, u32, &str, &str)> = HashSet::new();
         let result = Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys);
 
         assert_eq!(result.len(), 2);
@@ -1812,15 +2013,10 @@ mod tests {
         // Case 2: Filter global diagnostics
         let mut global_keys_filtered = HashSet::new();
         // Mark diag1 as global
-        global_keys_filtered.insert((
-            diag1.span.start,
-            diag1.span.end,
-            diag1.message.as_str(),
-            diag1.rule_id.as_str(),
-        ));
+        global_keys_filtered.insert(&diag1);
 
         let result_filtered =
-            Linter::distribute_diagnostics(blocks, &diagnostics, &global_keys_filtered);
+            Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys_filtered);
 
         // Block 1 should NOT contain diag1 anymore (filtered out)
         assert!(result_filtered[0].diagnostics.is_empty());
@@ -1858,5 +2054,95 @@ mod tests {
         );
         // Neither diagnostic should be assigned (half-open: block.end is exclusive)
         assert!(result_boundary[0].diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_lint_file_output_sorted() {
+        // This test verifies that the linter output is consistently sorted by span start.
+        use std::fs;
+
+        let (mut config, temp_dir) = test_config();
+
+        // Enable test-rule
+        config.rules.push(crate::config::RuleDefinition::Simple(
+            "test-rule".to_string(),
+        ));
+        config.options.insert(
+            "test-rule".to_string(),
+            crate::config::RuleOption::Enabled(true),
+        );
+
+        let linter = Linter::new(config).unwrap();
+
+        // Build the test rule WASM if available
+        if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
+            linter
+                .load_rule(&wasm_path)
+                .expect("Failed to load test rule");
+        } else {
+            println!("WASM build failed, skipping sort test");
+            return;
+        }
+
+        // Create a file with multiple error occurrences in random order
+        let file_path = temp_dir.path().join("test_sort.md");
+        // "error" at byte offsets 10, 25, 40
+        // The rule detects "error".
+        // The current implementation of the simple rule finds matches linearly, so they might come out sorted naturally.
+        // However, we rely on `lint_file` sorting them at the end regardless of discovery order or parallelism.
+        let content = "0123456789error0123456789error0123456789error";
+        fs::write(&file_path, content).unwrap();
+
+        let result = linter.lint_file(&file_path).unwrap();
+
+        let diags = result.diagnostics;
+        assert_eq!(diags.len(), 3);
+
+        // Verify sorting
+        assert!(diags[0].span.start < diags[1].span.start);
+        assert!(diags[1].span.start < diags[2].span.start);
+    }
+
+    #[test]
+    fn test_lint_content_with_special_characters() {
+        // This test ensures that special characters (quotes, newlines) are passed correctly
+        // to the plugin without double-escaping issues, now that we pass &str directly.
+
+        // Build the test rule WASM if available
+        let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() else {
+            println!("Skipping test: WASM build failed");
+            return;
+        };
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+        linter
+            .load_rule(&wasm_path)
+            .expect("Failed to load test rule");
+
+        // "error" inside quotes. JSON-escaping logic might mess this up if not careful.
+        // Original: "This contains \"error\"."
+        // If double escaped: "This contains \\\"error\\\"." -> rule might not match "error" if it looks for word boundaries
+        // Or if unescaped incorrectly: might crash or parse error.
+
+        let content = "This contains \"error\".";
+        let path = Path::new("special.md");
+
+        let diagnostics = linter.lint_content(content, path).unwrap();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule_id, "test-rule");
+        assert_eq!(diagnostics[0].message, "Found error keyword");
+
+        // Verify span is correct (should point to `error`, not `\"error\"`)
+        // content: This contains "error".
+        // indices: 0123456789012345678901
+        // "error" starts at 15, ends at 20.
+        // 123456789012345
+        // T h i s   c o n t a i n s   " e r r o r " .
+        // 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+        // start: 15 ("e"), end: 20 ("r" + 1)
+        assert_eq!(diagnostics[0].span.start, 15);
+        assert_eq!(diagnostics[0].span.end, 20);
     }
 }
