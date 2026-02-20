@@ -91,7 +91,7 @@ impl PluginHostPool {
     /// the `PooledHost` is dropped, retaining any loaded rules.
     pub fn acquire(&self) -> PooledHost<'_> {
         let host = {
-            let existing = self.available.lock().pop_front();
+            let existing = self.available.lock().pop_back();
             existing.unwrap_or_else(|| {
                 let mut host = PluginHost::default();
                 if let Some(ref init) = self.initializer {
@@ -157,7 +157,13 @@ impl Drop for PooledHost<'_> {
             // Note: We intentionally do NOT call `unload_all()` here.
             // Hosts retain their loaded rules so they can be reused by the
             // next caller, which is the key performance benefit of pooling.
-            self.pool.lock().push_back(host);
+            //
+            // However, if the thread is panicking, the host may be in an
+            // inconsistent state (e.g., mid-WASM execution). Discard it
+            // instead of returning it to the pool.
+            if !std::thread::panicking() {
+                self.pool.lock().push_back(host);
+            }
         }
     }
 }
@@ -325,6 +331,54 @@ mod tests {
         assert!(
             pool.available_count() >= 1,
             "At least one host should be available after both threads finish"
+        );
+    }
+
+    #[test]
+    fn test_lifo_semantics_most_recently_returned_is_reused() {
+        let pool = PluginHostPool::new();
+
+        // Acquire two hosts
+        let host1 = pool.acquire();
+        let host2 = pool.acquire();
+
+        // Return them in order: host1 first, then host2
+        drop(host1);
+        drop(host2);
+
+        // With LIFO, the next acquire should return host2 (most recently returned)
+        // which is more likely to have warm CPU/WASM caches
+        assert_eq!(pool.available_count(), 2);
+
+        let _host = pool.acquire();
+        assert_eq!(pool.available_count(), 1);
+    }
+
+    #[test]
+    fn test_panic_discards_host() {
+        use std::panic;
+
+        let pool = PluginHostPool::new();
+
+        // Acquire a host and return it normally
+        {
+            let _host = pool.acquire();
+        }
+        assert_eq!(pool.available_count(), 1);
+
+        // Acquire a host and panic while holding it
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let _host = pool.acquire();
+            panic!("intentional panic for testing");
+        }));
+
+        assert!(result.is_err());
+
+        // The host should NOT be returned to the pool due to panic
+        assert_eq!(
+            pool.available_count(),
+            0,
+            "Host should be discarded when thread is panicking"
         );
     }
 }
