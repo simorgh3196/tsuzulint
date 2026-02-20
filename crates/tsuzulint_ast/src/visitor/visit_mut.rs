@@ -284,7 +284,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Span;
+    use crate::{NodeData, Span};
 
     /// A visitor that transforms text to uppercase.
     struct UppercaseTransformer<'a> {
@@ -389,9 +389,9 @@ mod tests {
             let mut new_node = base.unwrap_or(*node);
 
             // Adjust depth
-            if let Some(depth) = new_node.data.depth {
+            if let NodeData::Header(depth) = new_node.data {
                 let new_depth = (depth as i8 + self.offset).clamp(1, 6) as u8;
-                new_node.data.depth = Some(new_depth);
+                new_node.data = NodeData::Header(new_depth);
             }
 
             Some(new_node)
@@ -405,7 +405,7 @@ mod tests {
         let text = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "Title"));
         let children = arena.alloc_slice_copy(&[*text]);
         let mut header = TxtNode::new_parent(NodeType::Header, Span::new(0, 7), children);
-        header.data.depth = Some(1);
+        header.data = NodeData::header(1);
         let header = arena.alloc(header);
 
         let mut adjuster = HeaderDepthAdjuster {
@@ -416,7 +416,7 @@ mod tests {
 
         assert!(result.is_some());
         let new_header = result.unwrap();
-        assert_eq!(new_header.data.depth, Some(2));
+        assert!(matches!(new_header.data, NodeData::Header(2)));
     }
 
     #[test]
@@ -426,7 +426,7 @@ mod tests {
         let text = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "Title"));
         let children = arena.alloc_slice_copy(&[*text]);
         let mut header = TxtNode::new_parent(NodeType::Header, Span::new(0, 7), children);
-        header.data.depth = Some(6);
+        header.data = NodeData::header(6);
         let header = arena.alloc(header);
 
         let mut adjuster = HeaderDepthAdjuster {
@@ -437,6 +437,6 @@ mod tests {
 
         assert!(result.is_some());
         let new_header = result.unwrap();
-        assert_eq!(new_header.data.depth, Some(6));
+        assert!(matches!(new_header.data, NodeData::Header(6)));
     }
 }
