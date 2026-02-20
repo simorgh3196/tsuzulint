@@ -14,6 +14,7 @@ browser = ["tsuzulint_plugin/browser"]
 
 [dependencies]
 tsuzulint_ast = { workspace = true }
+tsuzulint_text = { workspace = true }
 tsuzulint_parser = { workspace = true }
 tsuzulint_plugin = { workspace = true, default-features = false }
 tsuzulint_cache = { workspace = true }
@@ -26,6 +27,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 walkdir = { workspace = true }
 globset = { workspace = true }
+ignore = { workspace = true }
+crossbeam-channel = "0.5"
 jsonschema.workspace = true
 tsuzulint_manifest.workspace = true
 dirs = "6.0"

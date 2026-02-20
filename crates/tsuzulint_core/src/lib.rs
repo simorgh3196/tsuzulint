@@ -31,8 +31,11 @@ mod linter;
 pub mod resolver;
 mod result;
 pub mod rule_manifest;
+pub mod walker;
 
-pub use config::{LinterConfig, RuleDefinition, RuleDefinitionDetail};
+pub use config::{
+    CacheConfig, CacheConfigDetail, LinterConfig, RuleDefinition, RuleDefinitionDetail,
+};
 pub use context::{CodeBlockInfo, DocumentStructure, HeadingInfo, LineInfo, LinkInfo, LintContext};
 pub use error::LinterError;
 pub use fixer::{FixerResult, apply_fixes_to_content, apply_fixes_to_file};

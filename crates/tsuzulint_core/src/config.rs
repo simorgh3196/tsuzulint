@@ -34,13 +34,9 @@ pub struct LinterConfig {
     #[serde(default)]
     pub exclude: Vec<String>,
 
-    /// Whether to enable caching.
-    #[serde(default = "default_cache")]
-    pub cache: bool,
-
-    /// Cache directory.
-    #[serde(default = "default_cache_dir")]
-    pub cache_dir: String,
+    /// Cache settings.
+    #[serde(default)]
+    pub cache: CacheConfig,
 
     /// Whether to enable performance timings.
     #[serde(default)]
@@ -56,8 +52,57 @@ fn default_cache() -> bool {
     true
 }
 
-fn default_cache_dir() -> String {
-    ".tsuzulint-cache".to_string()
+fn default_cache_dir() -> &'static str {
+    ".tsuzulint-cache"
+}
+
+/// Cache configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum CacheConfig {
+    /// Shorthand for enabling/disabling cache.
+    Boolean(bool),
+    /// Detailed cache configuration.
+    Detail(CacheConfigDetail),
+}
+
+impl CacheConfig {
+    /// Returns whether caching is enabled.
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            CacheConfig::Boolean(enabled) => *enabled,
+            CacheConfig::Detail(detail) => detail.enabled,
+        }
+    }
+
+    /// Returns the cache directory path.
+    pub fn path(&self) -> &str {
+        match self {
+            CacheConfig::Boolean(_) => default_cache_dir(),
+            CacheConfig::Detail(detail) => &detail.path,
+        }
+    }
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self::Boolean(default_cache())
+    }
+}
+
+/// Detailed cache configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CacheConfigDetail {
+    /// Whether to enable caching.
+    #[serde(default = "default_cache")]
+    pub enabled: bool,
+    /// Cache directory path.
+    #[serde(default = "default_cache_dir_string")]
+    pub path: String,
+}
+
+fn default_cache_dir_string() -> String {
+    default_cache_dir().to_string()
 }
 
 /// Definition of a rule to load.
@@ -137,8 +182,7 @@ impl LinterConfig {
             options: HashMap::new(),
             include: Vec::new(),
             exclude: Vec::new(),
-            cache: true,
-            cache_dir: default_cache_dir(),
+            cache: CacheConfig::default(),
             timings: false,
             base_dir: None,
         }
@@ -202,9 +246,10 @@ impl LinterConfig {
     }
 
     /// Computes a hash of the configuration for cache invalidation.
-    pub fn hash(&self) -> String {
-        let json = serde_json::to_string(self).unwrap_or_default();
-        blake3::hash(json.as_bytes()).to_hex().to_string()
+    pub fn hash(&self) -> Result<String, LinterError> {
+        let json = serde_json::to_string(self)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize config: {}", e)))?;
+        Ok(blake3::hash(json.as_bytes()).to_hex().to_string())
     }
 }
 
@@ -223,7 +268,7 @@ mod tests {
         let config = LinterConfig::new();
         assert!(config.rules.is_empty());
         assert!(config.options.is_empty());
-        assert!(config.cache);
+        assert!(config.cache.is_enabled());
     }
 
     #[test]
@@ -321,7 +366,7 @@ mod tests {
         assert!(config.options.is_empty());
         assert!(config.include.is_empty());
         assert!(config.exclude.is_empty());
-        assert!(config.cache);
+        assert!(config.cache.is_enabled());
     }
 
     #[test]
@@ -340,13 +385,45 @@ mod tests {
 
     use rstest::rstest;
 
+    #[test]
+    fn test_config_cache_object() {
+        let json = r#"{
+            "cache": {
+                "enabled": true,
+                "path": ".custom-cache"
+            }
+        }"#;
+
+        let config = LinterConfig::from_json(json).unwrap();
+        assert!(config.cache.is_enabled());
+        assert_eq!(config.cache.path(), ".custom-cache");
+    }
+
+    #[test]
+    fn test_config_cache_object_path_only() {
+        // enabled should default to true
+        let json = r#"{ "cache": { "path": ".custom-cache" } }"#;
+        let config = LinterConfig::from_json(json).unwrap();
+        assert!(config.cache.is_enabled());
+        assert_eq!(config.cache.path(), ".custom-cache");
+    }
+
+    #[test]
+    fn test_config_cache_object_empty() {
+        // Both fields should use their default values
+        let json = r#"{ "cache": {} }"#;
+        let config = LinterConfig::from_json(json).unwrap();
+        assert!(config.cache.is_enabled());
+        assert_eq!(config.cache.path(), ".tsuzulint-cache");
+    }
+
     #[rstest]
     #[case::unknown_property(
         r#"{ "ruless": [] }"#,
         "Config validation failed" // Additional properties not allowed
     )]
     #[case::type_mismatch(
-        r#"{ "cache": "not-a-bool" }"#,
+        r#"{ "cache": "not-a-string-or-bool" }"#,
         "Config validation failed" // Type mismatch
     )]
     #[case::invalid_enum_value(
@@ -371,7 +448,7 @@ mod tests {
         let config2 = LinterConfig::new();
 
         // Same configs should produce same hash
-        assert_eq!(config1.hash(), config2.hash());
+        assert_eq!(config1.hash().unwrap(), config2.hash().unwrap());
     }
 
     #[test]
@@ -379,17 +456,17 @@ mod tests {
         let mut config1 = LinterConfig::new();
         let mut config2 = LinterConfig::new();
 
-        config2.cache = false;
+        config2.cache = CacheConfig::Boolean(false);
 
         // Different configs should produce different hashes
-        assert_ne!(config1.hash(), config2.hash());
+        assert_ne!(config1.hash().unwrap(), config2.hash().unwrap());
 
         // Adding rules should change hash
         config1
             .rules
             .push(RuleDefinition::Simple("test-rule".to_string()));
-        let hash_after_rule = config1.hash();
-        assert_ne!(LinterConfig::new().hash(), hash_after_rule);
+        let hash_after_rule = config1.hash().unwrap();
+        assert_ne!(LinterConfig::new().hash().unwrap(), hash_after_rule);
     }
 
     #[test]
@@ -458,7 +535,7 @@ mod tests {
         fs::write(&config_path, content).unwrap();
 
         let config = LinterConfig::from_file(&config_path).unwrap();
-        assert!(!config.cache);
+        assert!(!config.cache.is_enabled());
     }
 
     #[test]
@@ -531,7 +608,7 @@ mod tests {
     #[test]
     fn test_config_cache_dir_default() {
         let config = LinterConfig::new();
-        assert_eq!(config.cache_dir, ".tsuzulint-cache");
+        assert_eq!(config.cache.path(), ".tsuzulint-cache");
     }
 
     #[test]

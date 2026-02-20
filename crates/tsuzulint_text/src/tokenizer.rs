@@ -12,7 +12,7 @@ pub enum TextError {
 }
 
 /// A token representing a morphological unit.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Token {
     /// The surface form of the token (the text itself).
     pub surface: String,

@@ -8,6 +8,7 @@ rust-version.workspace = true
 description = "Text analysis components for TsuzuLint"
 
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
 # Morphological analysis
 lindera = { version = "2.2.0", features = ["embed-ipadic"] }
 

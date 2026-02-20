@@ -788,6 +788,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4448,6 +4457,7 @@ dependencies = [
  "assert_fs",
  "clap",
  "jsonc-parser",
+ "libc",
  "miette",
  "predicates",
  "regex",
@@ -4497,8 +4507,10 @@ name = "tsuzulint_core"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "crossbeam-channel",
  "dirs",
  "globset",
+ "ignore",
  "insta",
  "jsonc-parser",
  "jsonschema",
@@ -4515,6 +4527,7 @@ dependencies = [
  "tsuzulint_manifest",
  "tsuzulint_parser",
  "tsuzulint_plugin",
+ "tsuzulint_text",
  "walkdir",
 ]
 
@@ -4571,6 +4584,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "tsuzulint_ast",
+ "tsuzulint_text",
  "wasmi",
  "wat",
 ]
@@ -4601,6 +4615,7 @@ version = "0.1.0"
 dependencies = [
  "lindera",
  "miette",
+ "serde",
  "thiserror 2.0.18",
  "unicode-segmentation",
 ]
@@ -4617,6 +4632,7 @@ dependencies = [
  "tsuzulint_ast",
  "tsuzulint_parser",
  "tsuzulint_plugin",
+ "tsuzulint_text",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]
