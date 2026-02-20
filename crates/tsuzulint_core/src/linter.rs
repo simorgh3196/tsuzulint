@@ -1945,14 +1945,12 @@ mod tests {
         let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
-        // /dev/null is a character device on Unix
+        // /dev/null is a character device on Unix and always exists
         let path = Path::new("/dev/null");
-        if path.exists() {
-            let result = linter.lint_file(path);
-            assert!(result.is_err());
-            let err = result.unwrap_err().to_string();
-            assert!(err.contains("Not a regular file"));
-        }
+        let result = linter.lint_file(path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Not a regular file"));
     }
 
     #[test]
