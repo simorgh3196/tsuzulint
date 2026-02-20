@@ -1826,8 +1826,6 @@ mod tests {
         };
 
         let (mut config, temp_dir) = test_config();
-        // Enable caching
-        config.cache = true;
 
         // Setup rule
         config.rules.push(crate::config::RuleDefinition::Simple(
