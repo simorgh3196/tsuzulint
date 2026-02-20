@@ -88,6 +88,7 @@ unicode-segmentation = "1.12.0"
 # File system
 walkdir = "2.5"
 globset = "0.4"
+ignore = "0.4"
 
 # WASM browser bindings
 wasm-bindgen = "0.2"

@@ -145,17 +145,17 @@ impl CacheManager {
 
         // Map of hash -> Vec<BlockCacheEntry> from cache
         // We use a Vec because multiple blocks might have same content (and thus same hash)
-        let mut cached_blocks_map: HashMap<String, Vec<&BlockCacheEntry>> = HashMap::new();
+        let mut cached_blocks_map: HashMap<&str, Vec<&BlockCacheEntry>> = HashMap::new();
         for block in &cached_entry.blocks {
             cached_blocks_map
-                .entry(block.hash.clone())
+                .entry(&block.hash)
                 .or_default()
                 .push(block);
         }
 
         // Iterate current blocks and try to find match
         for (i, current_block) in current_blocks.iter().enumerate() {
-            if let Some(candidates) = cached_blocks_map.get_mut(&current_block.hash)
+            if let Some(candidates) = cached_blocks_map.get_mut(current_block.hash.as_str())
                 && let Some(best_match_idx) = Self::find_best_match(current_block, candidates)
             {
                 // Optimization: swap_remove is O(1) while remove is O(N).
