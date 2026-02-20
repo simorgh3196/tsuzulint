@@ -56,10 +56,10 @@ pub struct Linter {
 impl Linter {
     /// Creates a new linter with the given configuration.
     pub fn new(config: LinterConfig) -> Result<Self, LinterError> {
-        let cache_dir = PathBuf::from(&config.cache_dir);
+        let cache_dir = PathBuf::from(config.cache.path());
         let mut cache = CacheManager::new(cache_dir);
 
-        if !config.cache {
+        if !config.cache.is_enabled() {
             cache.disable();
         }
 
@@ -1021,7 +1021,10 @@ mod tests {
     fn test_config() -> (LinterConfig, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let mut config = LinterConfig::new();
-        config.cache_dir = temp_dir.path().to_string_lossy().to_string();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: temp_dir.path().to_string_lossy().to_string(),
+        });
         (config, temp_dir)
     }
 
@@ -1032,7 +1035,10 @@ mod tests {
         let cache_dir = base.join(".cache");
         std::fs::create_dir_all(&cache_dir).unwrap();
         let mut config = LinterConfig::new();
-        config.cache_dir = cache_dir.to_string_lossy().to_string();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: cache_dir.to_string_lossy().to_string(),
+        });
         config
     }
 
@@ -1069,11 +1075,22 @@ mod tests {
     #[test]
     fn test_linter_with_cache_disabled() {
         let (mut config, _temp) = test_config();
-        config.cache = false;
+        config.cache = crate::config::CacheConfig::Boolean(false);
 
         let linter = Linter::new(config).unwrap();
-        // Verify linter was created successfully with cache disabled
-        assert!(linter.include_globs.is_none());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.md");
+        std::fs::write(&file_path, "content").unwrap();
+        let result1 = linter.lint_file(&file_path).unwrap();
+        let result2 = linter.lint_file(&file_path).unwrap();
+        assert!(
+            !result1.from_cache,
+            "cache disabled: first lint should not be from cache"
+        );
+        assert!(
+            !result2.from_cache,
+            "cache disabled: second lint should not be from cache"
+        );
     }
 
     #[test]
@@ -1820,8 +1837,6 @@ mod tests {
         };
 
         let (mut config, temp_dir) = test_config();
-        // Enable caching
-        config.cache = true;
 
         // Setup rule
         config.rules.push(crate::config::RuleDefinition::Simple(
