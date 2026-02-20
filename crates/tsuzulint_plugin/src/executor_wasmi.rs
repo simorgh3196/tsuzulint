@@ -227,39 +227,33 @@ impl RuleExecutor for WasmiExecutor {
 
         // extism:host/user.tsuzulint_get_config
         linker
-            .func_wrap(
-                "extism:host/user",
-                "tsuzulint_get_config",
-                {
-                    |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
-                        // Get config from host state
-                        let config = caller.data().config.clone();
-                        let bytes = config.as_bytes();
-                        let total_len = bytes.len() as i64;
+            .func_wrap("extism:host/user", "tsuzulint_get_config", {
+                |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
+                    // Get config from host state
+                    let config = caller.data().config.clone();
+                    let bytes = config.as_bytes();
+                    let total_len = bytes.len() as i64;
 
-                        if len == 0 {
+                    if len == 0 {
+                        return total_len;
+                    }
+
+                    if let Some(memory) = caller.data().memory {
+                        if memory
+                            .write(
+                                &mut caller,
+                                ptr as usize,
+                                &bytes[..std::cmp::min(len as usize, bytes.len())],
+                            )
+                            .is_ok()
+                        {
                             return total_len;
                         }
-
-                        if let Some(memory) = caller.data().memory {
-                            if memory
-                                .write(
-                                    &mut caller,
-                                    ptr as usize,
-                                    &bytes[..std::cmp::min(len as usize, bytes.len())],
-                                )
-                                .is_ok()
-                            {
-                                return total_len;
-                            }
-                        }
-                        0
                     }
-                },
-            )
-            .map_err(|e| {
-                PluginError::load(format!("Failed to add tsuzulint_get_config: {}", e))
-            })?;
+                    0
+                }
+            })
+            .map_err(|e| PluginError::load(format!("Failed to add tsuzulint_get_config: {}", e)))?;
 
         // Instantiate the module
         let instance = linker

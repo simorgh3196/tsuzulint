@@ -396,7 +396,15 @@ mod tests {
         let mut executor = ExtismExecutor::new();
 
         let json = r#"{"name":"config-rule","version":"1.0.0"}"#;
-        let len = json.len();
+        // Construct WAT instructions to write the JSON to memory at offset 0
+        // This avoids relying on data segments which seem flaky in some contexts or with Extism
+        let mut store_instrs = String::new();
+        for (i, b) in json.bytes().enumerate() {
+            store_instrs.push_str(&format!(
+                "(call $store_u8 (i64.const {}) (i32.const {}))\n",
+                1024 + i, b
+            ));
+        }
 
         // Extism provides 'config' in the environment which we can access via extism:host/env::config_get
         // We'll write a test rule that reads this config.
@@ -408,18 +416,21 @@ mod tests {
                 (import "extism:host/env" "alloc" (func $alloc (param i64) (result i64)))
                 (import "extism:host/env" "load_u8" (func $load_u8 (param i64) (result i32)))
                 (import "extism:host/env" "store_u8" (func $store_u8 (param i64 i32)))
+                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
 
                 (memory (export "memory") 1)
 
-                (func $get_manifest (export "get_manifest") (result i64)
-                    (i64.const 0) ;; "{}" at offset 0
+                (func $get_manifest (export "get_manifest") (result i32)
+                    {}
+                    (call $output_set (i64.const 1024) (i64.const {}))
+                    (i32.const 0)
                 )
 
                 ;; Helper to read string from Extism memory to local buffer
-                ;; simplified: we just return the offset to the config value
-                (func $lint (export "lint") (result i64)
+                (func $lint (export "lint") (result i32)
                     (local $key_ptr i64)
                     (local $val_ptr i64)
+                    (local $val_len i64)
 
                     ;; Write "config" key to memory
                     (call $alloc (i64.const 6))
@@ -437,14 +448,19 @@ mod tests {
                     (call $config_get (local.get $key_ptr))
                     local.set $val_ptr
 
-                    local.get $val_ptr
-                )
+                    ;; Get config length
+                    (call $length (local.get $val_ptr))
+                    local.set $val_len
 
-                (data (i32.const 0) "{{}}")
+                    ;; Set output
+                    (call $output_set (local.get $val_ptr) (local.get $val_len))
+
+                    (i32.const 0)
+                )
             )
             "#,
-            len,
-            json.replace("\"", "\\\"")
+            store_instrs,
+            json.len()
         );
 
         // NOTE: Writing pure WAT to test Extism config is complex because it involves
@@ -453,15 +469,15 @@ mod tests {
         // the manifest config. The Extism library guarantees this works.
         // We will just verify that `configure` doesn't error and that the rule persists.
 
-        let wasm = wat_to_wasm(&valid_rule_wat());
+        let wasm = wat_to_wasm(&wat);
         executor.load(&wasm).expect("Failed to load rule");
 
         let config = serde_json::json!({"foo": "bar"});
-        let res = executor.configure("test-rule", &config);
+        let res = executor.configure("config-rule", &config);
         assert!(res.is_ok());
 
         // Ensure rule is still loaded/callable
-        let res = executor.call_lint("test-rule", b"{}");
+        let res = executor.call_lint("config-rule", b"{}");
         assert!(res.is_ok());
     }
 }
