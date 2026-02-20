@@ -510,6 +510,34 @@ mod tests {
     }
 
     #[test]
+    fn test_hash_content_bytes_empty() {
+        let hash = CacheManager::hash_content_bytes("");
+        // Empty string should still produce a valid hash
+        assert_eq!(hash.len(), 32);
+        assert_ne!(hash, [0; 32]);
+    }
+
+    #[test]
+    fn test_hash_content_bytes() {
+        let hash1 = CacheManager::hash_content_bytes("hello");
+        let hash2 = CacheManager::hash_content_bytes("hello");
+        let hash3 = CacheManager::hash_content_bytes("world");
+
+        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_hash_content_bytes_unicode() {
+        let hash1 = CacheManager::hash_content_bytes("日本語");
+        let hash2 = CacheManager::hash_content_bytes("日本語");
+        let hash3 = CacheManager::hash_content_bytes("中文");
+
+        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+    }
+
+    #[test]
     fn test_cache_manager_multiple_files() {
         let mut manager = CacheManager::new("/tmp/test-cache");
 
