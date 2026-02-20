@@ -281,8 +281,13 @@ impl GlobMatcher {
         let include_set = if !include_patterns.is_empty() {
             let mut builder = GlobSetBuilder::new();
             for pattern in include_patterns {
-                if let Ok(glob) = Glob::new(pattern) {
-                    builder.add(glob);
+                match Glob::new(pattern) {
+                    Ok(glob) => {
+                        builder.add(glob);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Invalid include glob pattern {:?}: {}", pattern, e);
+                    }
                 }
             }
             builder.build().ok()
