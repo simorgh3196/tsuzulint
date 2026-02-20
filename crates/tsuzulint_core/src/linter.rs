@@ -862,6 +862,13 @@ impl Linter {
         diagnostics: &[tsuzulint_plugin::Diagnostic],
         global_keys: &HashSet<&tsuzulint_plugin::Diagnostic>,
     ) -> Vec<BlockCacheEntry> {
+        debug_assert!(
+            diagnostics
+                .windows(2)
+                .all(|w| w[0].span.start <= w[1].span.start),
+            "distribute_diagnostics: diagnostics must be sorted by span.start"
+        );
+
         // Ensure blocks are sorted by start position for the sweep-line algorithm to work correctly
         blocks.sort_by_key(|b| b.span.start);
 
