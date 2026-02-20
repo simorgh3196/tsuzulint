@@ -130,7 +130,10 @@ impl<'a> LintContext<'a> {
             // Add newline bytes: check if next bytes are \r\n (CRLF) or just \n (LF)
             if offset < source.len() as u32 {
                 let bytes = source.as_bytes();
-                if bytes[offset as usize] == b'\r' && offset + 1 < source.len() as u32 && bytes[offset as usize + 1] == b'\n' {
+                if bytes[offset as usize] == b'\r'
+                    && offset + 1 < source.len() as u32
+                    && bytes[offset as usize + 1] == b'\n'
+                {
                     offset += 2; // CRLF
                 } else if bytes[offset as usize] == b'\n' || bytes[offset as usize] == b'\r' {
                     offset += 1; // LF or CR
@@ -138,16 +141,16 @@ impl<'a> LintContext<'a> {
             }
         }
 
-        if source.ends_with('\n') && !lines.is_empty() {
-            let last = lines.last().unwrap();
-            if last.end == source.len() as u32 - 1 {
-                lines.push(LineInfo {
-                    start: source.len() as u32,
-                    end: source.len() as u32,
-                    indent: 0,
-                    is_blank: true,
-                });
-            }
+        if (source.ends_with('\n') || source.ends_with('\r'))
+            && !lines.is_empty()
+            && offset == source.len() as u32
+        {
+            lines.push(LineInfo {
+                start: source.len() as u32,
+                end: source.len() as u32,
+                indent: 0,
+                is_blank: true,
+            });
         }
 
         lines
