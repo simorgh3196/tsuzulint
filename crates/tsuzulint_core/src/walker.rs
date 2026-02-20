@@ -4,7 +4,7 @@
 //! - Automatic `.gitignore` support
 //! - Hidden file filtering
 //! - Parallel traversal using `ignore::WalkBuilder`
-//! - Thread-safe result collection via crossbeam bounded channel
+//! - Thread-safe result collection via crossbeam channels
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -168,7 +168,12 @@ impl ParallelWalker {
         let receiver_handle = Self::spawn_receiver(rx, file_count.clone(), error_count.clone());
 
         // Create visitor builder
-        let mut visitor_builder = FileVisitorBuilder { tx, glob_matcher };
+        let mut visitor_builder = FileVisitorBuilder {
+            tx,
+            glob_matcher,
+            file_count: file_count.clone(),
+            error_count: error_count.clone(),
+        };
 
         // Create the parallel walker and run
         let walker = builder.build_parallel();
@@ -217,6 +222,8 @@ impl ParallelWalker {
 struct FileVisitorBuilder {
     tx: Sender<PathBuf>,
     glob_matcher: Arc<GlobMatcher>,
+    file_count: Arc<AtomicUsize>,
+    error_count: Arc<AtomicUsize>,
 }
 
 impl<'s> ParallelVisitorBuilder<'s> for FileVisitorBuilder {
@@ -224,6 +231,8 @@ impl<'s> ParallelVisitorBuilder<'s> for FileVisitorBuilder {
         Box::new(FileVisitor {
             tx: self.tx.clone(),
             glob_matcher: Arc::clone(&self.glob_matcher),
+            file_count: self.file_count.clone(),
+            error_count: self.error_count.clone(),
         })
     }
 }
@@ -232,6 +241,8 @@ impl<'s> ParallelVisitorBuilder<'s> for FileVisitorBuilder {
 struct FileVisitor {
     tx: Sender<PathBuf>,
     glob_matcher: Arc<GlobMatcher>,
+    file_count: Arc<AtomicUsize>,
+    error_count: Arc<AtomicUsize>,
 }
 
 impl ParallelVisitor for FileVisitor {
@@ -244,11 +255,12 @@ impl ParallelVisitor for FileVisitor {
                     if self.glob_matcher.should_include(path)
                         && self.tx.send(path.to_path_buf()).is_ok()
                     {
-                        // File sent successfully
+                        self.file_count.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             }
             Err(e) => {
+                self.error_count.fetch_add(1, Ordering::Relaxed);
                 debug!("Walk error: {}", e);
             }
         }
