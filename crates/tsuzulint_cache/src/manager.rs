@@ -8,7 +8,10 @@ use tracing::{debug, info};
 use tsuzulint_ast::Span;
 use tsuzulint_plugin::Diagnostic;
 
-use crate::{CacheEntry, CacheError, entry::{BlockCacheEntry, BlockHash}};
+use crate::{
+    CacheEntry, CacheError,
+    entry::{BlockCacheEntry, BlockHash},
+};
 
 /// Manages the lint cache for all files.
 pub struct CacheManager {
@@ -152,10 +155,7 @@ impl CacheManager {
         // We use a Vec because multiple blocks might have same content (and thus same hash)
         let mut cached_blocks_map: HashMap<BlockHash, Vec<&BlockCacheEntry>> = HashMap::new();
         for block in &cached_entry.blocks {
-            cached_blocks_map
-                .entry(block.hash)
-                .or_default()
-                .push(block);
+            cached_blocks_map.entry(block.hash).or_default().push(block);
         }
 
         // Iterate current blocks and try to find match
