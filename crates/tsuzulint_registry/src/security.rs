@@ -55,12 +55,20 @@ mod tests {
 
     fn assert_valid(url_str: &str) {
         let url = Url::parse(url_str).unwrap();
-        assert!(validate_url(&url, false).is_ok(), "Expected valid: {}", url_str);
+        assert!(
+            validate_url(&url, false).is_ok(),
+            "Expected valid: {}",
+            url_str
+        );
     }
 
     fn assert_invalid(url_str: &str) {
         let url = Url::parse(url_str).unwrap();
-        assert!(validate_url(&url, false).is_err(), "Expected invalid: {}", url_str);
+        assert!(
+            validate_url(&url, false).is_err(),
+            "Expected invalid: {}",
+            url_str
+        );
     }
 
     #[test]
@@ -98,10 +106,10 @@ mod tests {
 
     #[test]
     fn test_private_ipv4() {
-        assert_invalid("http://10.0.0.1/rule.wasm");     // 10.0.0.0/8
-        assert_invalid("http://172.16.0.1/rule.wasm");    // 172.16.0.0/12
+        assert_invalid("http://10.0.0.1/rule.wasm"); // 10.0.0.0/8
+        assert_invalid("http://172.16.0.1/rule.wasm"); // 172.16.0.0/12
         assert_invalid("http://172.31.255.255/rule.wasm");
-        assert_invalid("http://192.168.0.1/rule.wasm");   // 192.168.0.0/16
+        assert_invalid("http://192.168.0.1/rule.wasm"); // 192.168.0.0/16
         assert_invalid("http://192.168.255.255/rule.wasm");
     }
 

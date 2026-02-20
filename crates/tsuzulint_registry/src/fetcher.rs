@@ -125,8 +125,8 @@ impl ManifestFetcher {
 
     /// Fetch manifest from a URL.
     async fn fetch_from_url(&self, url_str: &str) -> Result<ExternalRuleManifest, FetchError> {
-        let url = Url::parse(url_str)
-            .map_err(|e| FetchError::NotFound(format!("Invalid URL: {}", e)))?;
+        let url =
+            Url::parse(url_str).map_err(|e| FetchError::NotFound(format!("Invalid URL: {}", e)))?;
 
         // Security check
         validate_url(&url, self.allow_local)?;
@@ -134,7 +134,9 @@ impl ManifestFetcher {
         let response = self.client.get(url).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(FetchError::NotFound(format!("Manifest not found at {url_str}")));
+            return Err(FetchError::NotFound(format!(
+                "Manifest not found at {url_str}"
+            )));
         }
 
         let text = response.error_for_status()?.text().await?;
