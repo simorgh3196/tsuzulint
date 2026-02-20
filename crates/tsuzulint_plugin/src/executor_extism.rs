@@ -4,9 +4,11 @@
 //! which internally uses wasmtime for JIT compilation.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use extism::{Manifest, Plugin, PluginBuilder, Wasm};
+use extism::{
+    CurrentPlugin, Error, Manifest, Plugin, PluginBuilder, UserData, Val, ValType, Wasm,
+};
 use tracing::{debug, info};
 
 use crate::executor::{LoadResult, RuleExecutor};
@@ -22,13 +24,31 @@ const DEFAULT_TIMEOUT_MS: u64 = 5000;
 /// Default fuel limit for WASM execution (1 billion instructions).
 const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
 
+/// Source of the rule (WASM bytes or file path).
+#[derive(Clone)]
+enum RuleSource {
+    Bytes(Vec<u8>),
+    File(PathBuf),
+}
+
+impl RuleSource {
+    fn to_wasm(&self) -> Wasm {
+        match self {
+            RuleSource::Bytes(bytes) => Wasm::data(bytes.clone()),
+            RuleSource::File(path) => Wasm::file(path),
+        }
+    }
+}
+
 /// A loaded rule using Extism.
 struct LoadedRule {
     /// The Extism plugin instance.
     plugin: Plugin,
-    /// The rule manifest (kept for potential future use).
+    /// The rule manifest.
     #[allow(dead_code)]
     manifest: RuleManifest,
+    /// The source of the rule (for reloading).
+    source: RuleSource,
 }
 
 /// Extism-based executor for native environments.
@@ -93,12 +113,30 @@ impl ExtismExecutor {
         manifest
     }
 
-    /// Loads a plugin from a raw manifest.
-    fn load_from_manifest(&mut self, manifest: Manifest) -> Result<LoadResult, PluginError> {
-        let manifest = self.configure_manifest(manifest);
+    fn create_plugin(
+        &self,
+        source: &RuleSource,
+        config_json: &str,
+    ) -> Result<(Plugin, RuleManifest), PluginError> {
+        let wasm = source.to_wasm();
+        let manifest = Manifest::new([wasm]);
+        let mut manifest = self.configure_manifest(manifest);
 
-        // Create the plugin with WASI support
-        let mut builder = PluginBuilder::new(manifest).with_wasi(true);
+        // Set configuration
+        manifest
+            .config
+            .insert("config".to_string(), config_json.to_string());
+
+        let mut builder = PluginBuilder::new(manifest)
+            .with_wasi(true)
+            .with_function_in_namespace(
+                "extism:host/user",
+                "tsuzulint_get_config",
+                [ValType::I64, ValType::I64],
+                [ValType::I64],
+                UserData::new(()),
+                tsuzulint_get_config_stub,
+            );
 
         if let Some(limit) = self.fuel_limit {
             builder = builder.with_fuel_limit(limit);
@@ -116,6 +154,12 @@ impl ExtismExecutor {
         let rule_manifest: RuleManifest = serde_json::from_str(&manifest_json)
             .map_err(|e| PluginError::invalid_manifest(e.to_string()))?;
 
+        Ok((plugin, rule_manifest))
+    }
+
+    fn load_rule(&mut self, source: RuleSource) -> Result<LoadResult, PluginError> {
+        let (plugin, rule_manifest) = self.create_plugin(&source, "{}")?; // Default config
+
         debug!(
             "Loaded rule: {} v{}",
             rule_manifest.name, rule_manifest.version
@@ -127,6 +171,7 @@ impl ExtismExecutor {
             LoadedRule {
                 plugin,
                 manifest: rule_manifest.clone(),
+                source,
             },
         );
 
@@ -135,6 +180,17 @@ impl ExtismExecutor {
             manifest: rule_manifest,
         })
     }
+}
+
+/// Host function stub (unused in Extism mode).
+fn tsuzulint_get_config_stub(
+    _plugin: &mut CurrentPlugin,
+    _args: &[Val],
+    results: &mut [Val],
+    _user_data: UserData<()>,
+) -> Result<(), Error> {
+    results[0] = Val::I64(0);
+    Ok(())
 }
 
 impl Default for ExtismExecutor {
@@ -146,22 +202,36 @@ impl Default for ExtismExecutor {
 impl RuleExecutor for ExtismExecutor {
     fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
         info!("Loading WASM rule ({} bytes)", wasm_bytes.len());
-
-        // Create the plugin manifest from bytes
-        let wasm = Wasm::data(wasm_bytes.to_vec());
-        let manifest = Manifest::new([wasm]);
-
-        self.load_from_manifest(manifest)
+        self.load_rule(RuleSource::Bytes(wasm_bytes.to_vec()))
     }
 
     fn load_file(&mut self, path: &Path) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
+        self.load_rule(RuleSource::File(path.to_path_buf()))
+    }
 
-        // Create the plugin manifest from file
-        let wasm = Wasm::file(path);
-        let manifest = Manifest::new([wasm]);
+    fn configure(
+        &mut self,
+        rule_name: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), PluginError> {
+        let source = {
+            let rule = self
+                .rules
+                .get(rule_name)
+                .ok_or_else(|| PluginError::not_found(rule_name))?;
+            rule.source.clone()
+        };
 
-        self.load_from_manifest(manifest)
+        let config_json = serde_json::to_string(config)
+            .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
+
+        let (plugin, _manifest) = self.create_plugin(&source, &config_json)?;
+
+        if let Some(rule) = self.rules.get_mut(rule_name) {
+            rule.plugin = plugin;
+        }
+        Ok(())
     }
 
     fn call_lint(&mut self, rule_name: &str, input_bytes: &[u8]) -> Result<Vec<u8>, PluginError> {

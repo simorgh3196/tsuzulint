@@ -93,7 +93,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
     }
 
     // Parse configuration
-    let config: Config = serde_json::from_value(request.config.clone()).unwrap_or_default();
+    let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
 
     // Get patterns to check
     let patterns = config.effective_patterns();
@@ -134,13 +134,14 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn create_request(text: &str, config: serde_json::Value) -> Vec<u8> {
+        tsuzulint_rule_pdk::set_mock_config(config);
+
         let node = serde_json::json!({
             "type": "Str",
             "range": [0, text.len()]
         });
         let request = serde_json::json!({
             "node": node,
-            "config": config,
             "source": text,
             "file_path": null
         });

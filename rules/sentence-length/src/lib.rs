@@ -87,7 +87,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
     }
 
     // Parse configuration
-    let config: Config = serde_json::from_value(request.config.clone()).unwrap_or_default();
+    let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
 
     // Extract text from node
     if let Some((start, _end, text)) = extract_node_text(&request.node, &request.source) {
@@ -126,9 +126,11 @@ mod tests {
             "type": "Str",
             "range": [0, text.len()]
         });
+        let config = serde_json::json!({ "max": 20 });
+        tsuzulint_rule_pdk::set_mock_config(config);
+
         let request = serde_json::json!({
             "node": node,
-            "config": { "max": 20 },
             "source": text,
             "file_path": null
         });

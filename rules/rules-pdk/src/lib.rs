@@ -2,15 +2,67 @@
 //!
 //! This crate provides shared type definitions used across all rule implementations.
 
+use extism_pdk::*;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+#[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "extism:host/user")]
+unsafe extern "C" {
+    fn tsuzulint_get_config(ptr: u64, len: u64) -> u64;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::cell::RefCell;
+
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static MOCK_CONFIG: RefCell<String> = RefCell::new("{}".to_string());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_mock_config(config: serde_json::Value) {
+    MOCK_CONFIG.with(|c| *c.borrow_mut() = config.to_string());
+}
+
+/// Helper to get configuration for the current rule.
+pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
+    #[cfg(target_arch = "wasm32")]
+    unsafe {
+        // Try Extism config first
+        if let Ok(Some(s)) = config::get("config") {
+            return Ok(serde_json::from_str(&s)?);
+        }
+
+        // Fallback to custom host function (for Wasmi)
+        // First get length
+        let len = tsuzulint_get_config(0, 0);
+        if len == 0 {
+            return Ok(serde_json::from_str("{}")?);
+        }
+
+        // Allocate buffer and get content
+        let mut buf = vec![0u8; len as usize];
+        tsuzulint_get_config(buf.as_mut_ptr() as u64, len);
+
+        let json = String::from_utf8(buf).map_err(|e| Error::msg(format!("Invalid UTF-8 config: {}", e)))?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        MOCK_CONFIG.with(|c| {
+            let s = c.borrow();
+            Ok(serde_json::from_str(&s)?)
+        })
+    }
+}
 
 /// Request sent to a rule's lint function.
 #[derive(Debug, Clone, Deserialize)]
 pub struct LintRequest {
     /// The AST node to check (serialized JSON).
     pub node: serde_json::Value,
-    /// Rule configuration.
-    pub config: serde_json::Value,
     /// Full source text.
     pub source: String,
     /// File path (if available).

@@ -33,6 +33,8 @@ struct HostState {
     memory: Option<Memory>,
     /// Resource limits for the store.
     limits: StoreLimits,
+    /// Current rule configuration (JSON string).
+    config: String,
 }
 
 impl HostState {
@@ -44,6 +46,7 @@ impl HostState {
             limits: StoreLimitsBuilder::new()
                 .memory_size(DEFAULT_MEMORY_LIMIT_BYTES)
                 .build(),
+            config: "{}".to_string(),
         }
     }
 }
@@ -213,6 +216,51 @@ impl RuleExecutor for WasmiExecutor {
             )
             .map_err(|e| PluginError::load(format!("Failed to add output_set: {}", e)))?;
 
+        // extism:host/env.config_get (stub)
+        linker
+            .func_wrap(
+                "extism:host/env",
+                "config_get",
+                |_caller: Caller<'_, HostState>, _offset: i64| -> i64 { 0 },
+            )
+            .map_err(|e| PluginError::load(format!("Failed to add config_get: {}", e)))?;
+
+        // extism:host/user.tsuzulint_get_config
+        linker
+            .func_wrap(
+                "extism:host/user",
+                "tsuzulint_get_config",
+                {
+                    |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
+                        // Get config from host state
+                        let config = caller.data().config.clone();
+                        let bytes = config.as_bytes();
+                        let total_len = bytes.len() as i64;
+
+                        if len == 0 {
+                            return total_len;
+                        }
+
+                        if let Some(memory) = caller.data().memory {
+                            if memory
+                                .write(
+                                    &mut caller,
+                                    ptr as usize,
+                                    &bytes[..std::cmp::min(len as usize, bytes.len())],
+                                )
+                                .is_ok()
+                            {
+                                return total_len;
+                            }
+                        }
+                        0
+                    }
+                },
+            )
+            .map_err(|e| {
+                PluginError::load(format!("Failed to add tsuzulint_get_config: {}", e))
+            })?;
+
         // Instantiate the module
         let instance = linker
             .instantiate_and_start(&mut store, &module)
@@ -278,6 +326,23 @@ impl RuleExecutor for WasmiExecutor {
             name,
             manifest: rule_manifest,
         })
+    }
+
+    fn configure(
+        &mut self,
+        rule_name: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), PluginError> {
+        let rule = self
+            .rules
+            .get_mut(rule_name)
+            .ok_or_else(|| PluginError::not_found(rule_name))?;
+
+        let config_json = serde_json::to_string(config)
+            .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
+
+        rule.store.data_mut().config = config_json;
+        Ok(())
     }
 
     fn call_lint(&mut self, rule_name: &str, input_bytes: &[u8]) -> Result<Vec<u8>, PluginError> {
