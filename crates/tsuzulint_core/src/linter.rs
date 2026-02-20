@@ -790,12 +790,12 @@ impl Linter {
                 // Optimize: try to get slice directly to avoid O(N) UTF-8 validation
                 // content.get() checks char boundaries in O(1)
                 let hash = if let Some(slice) = content.get(start..end) {
-                    CacheManager::hash_content(slice)
+                    CacheManager::hash_content_bytes(slice)
                 } else {
                     // Fallback for non-char-boundary spans (should be rare)
                     let bytes = &content_bytes[start..end];
                     let block_content = String::from_utf8_lossy(bytes);
-                    CacheManager::hash_content(&block_content)
+                    CacheManager::hash_content_bytes(&block_content)
                 };
 
                 blocks.push(BlockCacheEntry {
@@ -2051,12 +2051,12 @@ mod tests {
 
         // Create 2 disjoint blocks
         let block1 = BlockCacheEntry {
-            hash: "b1".to_string(),
+            hash: [1; 32],
             span: Span::new(10, 20),
             diagnostics: vec![],
         };
         let block2 = BlockCacheEntry {
-            hash: "b2".to_string(),
+            hash: [2; 32],
             span: Span::new(30, 40),
             diagnostics: vec![],
         };
@@ -2134,7 +2134,7 @@ mod tests {
 
         // Case 3: Boundary condition – diagnostic at exact block boundary (half-open interval)
         let block_boundary = BlockCacheEntry {
-            hash: "bb".to_string(),
+            hash: [3; 32],
             span: Span::new(10, 20),
             diagnostics: vec![],
         };

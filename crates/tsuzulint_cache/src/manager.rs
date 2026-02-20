@@ -8,7 +8,7 @@ use tracing::{debug, info};
 use tsuzulint_ast::Span;
 use tsuzulint_plugin::Diagnostic;
 
-use crate::{CacheEntry, CacheError, entry::BlockCacheEntry};
+use crate::{CacheEntry, CacheError, entry::{BlockCacheEntry, BlockHash}};
 
 /// Manages the lint cache for all files.
 pub struct CacheManager {
@@ -52,6 +52,11 @@ impl CacheManager {
     /// Computes the BLAKE3 hash of content.
     pub fn hash_content(content: &str) -> String {
         blake3::hash(content.as_bytes()).to_hex().to_string()
+    }
+
+    /// Computes the BLAKE3 hash of content as bytes.
+    pub fn hash_content_bytes(content: &str) -> BlockHash {
+        blake3::hash(content.as_bytes()).into()
     }
 
     /// Gets a cached entry for a file.
@@ -145,17 +150,17 @@ impl CacheManager {
 
         // Map of hash -> Vec<BlockCacheEntry> from cache
         // We use a Vec because multiple blocks might have same content (and thus same hash)
-        let mut cached_blocks_map: HashMap<&str, Vec<&BlockCacheEntry>> = HashMap::new();
+        let mut cached_blocks_map: HashMap<BlockHash, Vec<&BlockCacheEntry>> = HashMap::new();
         for block in &cached_entry.blocks {
             cached_blocks_map
-                .entry(&block.hash)
+                .entry(block.hash)
                 .or_default()
                 .push(block);
         }
 
         // Iterate current blocks and try to find match
         for (i, current_block) in current_blocks.iter().enumerate() {
-            if let Some(candidates) = cached_blocks_map.get_mut(current_block.hash.as_str())
+            if let Some(candidates) = cached_blocks_map.get_mut(&current_block.hash)
                 && let Some(best_match_idx) = Self::find_best_match(current_block, candidates)
             {
                 // Optimization: swap_remove is O(1) while remove is O(N).
@@ -539,20 +544,22 @@ mod tests {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
 
+        let hash_a = [b'A'; 32];
+
         // Create 3 identical blocks at different positions in the cache
         // Hash "A" at 0-10, 20-30, 40-50
         let block1 = BlockCacheEntry {
-            hash: "A".to_string(),
+            hash: hash_a,
             span: Span::new(0, 10),
             diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(1, 5))],
         };
         let block2 = BlockCacheEntry {
-            hash: "A".to_string(),
+            hash: hash_a,
             span: Span::new(20, 30),
             diagnostics: vec![Diagnostic::new("rule1", "Err2", Span::new(21, 25))],
         };
         let block3 = BlockCacheEntry {
-            hash: "A".to_string(),
+            hash: hash_a,
             span: Span::new(40, 50),
             diagnostics: vec![Diagnostic::new("rule1", "Err3", Span::new(41, 45))],
         };
@@ -578,17 +585,17 @@ mod tests {
         // Let's mix up the order in current_blocks to test robustness
         let current_blocks = vec![
             BlockCacheEntry {
-                hash: "A".to_string(),
+                hash: hash_a,
                 span: Span::new(0, 10), // Matches cached block1 (dist 0)
                 diagnostics: vec![],
             },
             BlockCacheEntry {
-                hash: "A".to_string(),
+                hash: hash_a,
                 span: Span::new(40, 50), // Matches cached block3 (dist 0)
                 diagnostics: vec![],
             },
             BlockCacheEntry {
-                hash: "A".to_string(),
+                hash: hash_a,
                 span: Span::new(20, 30), // Matches cached block2 (dist 0)
                 diagnostics: vec![],
             },
@@ -615,9 +622,11 @@ mod tests {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
 
+        let hash_b = [b'B'; 32];
+
         // Cached block "B" at 0-10 with diagnostic at 2-5
         let block = BlockCacheEntry {
-            hash: "B".to_string(),
+            hash: hash_b,
             span: Span::new(0, 10),
             diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(2, 5))],
         };
@@ -634,7 +643,7 @@ mod tests {
 
         // Current block "B" at 20-30 (shifted by +20)
         let current_blocks = vec![BlockCacheEntry {
-            hash: "B".to_string(),
+            hash: hash_b,
             span: Span::new(20, 30),
             diagnostics: vec![],
         }];
@@ -657,16 +666,18 @@ mod tests {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
 
+        let hash_c = [b'C'; 32];
+
         // Two identical cached blocks with same hash "C"
         // Block 1: 5-10
         // Block 2: 15-20
         let block1 = BlockCacheEntry {
-            hash: "C".to_string(),
+            hash: hash_c,
             span: Span::new(5, 10),
             diagnostics: vec![Diagnostic::new("rule1", "Err1", Span::new(6, 8))],
         };
         let block2 = BlockCacheEntry {
-            hash: "C".to_string(),
+            hash: hash_c,
             span: Span::new(15, 20),
             diagnostics: vec![Diagnostic::new("rule1", "Err2", Span::new(16, 18))],
         };
@@ -687,7 +698,7 @@ mod tests {
         // This is a tie-breaker case for find_best_match.
         // It should pick one (the first one) and the other should remain unmatched.
         let current_blocks = vec![BlockCacheEntry {
-            hash: "C".to_string(),
+            hash: hash_c,
             span: Span::new(10, 15),
             diagnostics: vec![],
         }];
