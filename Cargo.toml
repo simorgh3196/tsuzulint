@@ -45,7 +45,7 @@ wasmi = "1.0"
 markdown = "1.0.0-alpha.21"
 
 # Memory Allocation - Arena allocator for AST nodes (Oxc-like architecture)
-bumpalo = "3.19"
+bumpalo = "3.20"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -80,7 +80,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "stream",
 ] }
 semver = "1.0"
-jsonschema = "0.41"
+jsonschema = "0.42"
 sha2 = "0.10"
 unicode-segmentation = "1.12.0"
 
