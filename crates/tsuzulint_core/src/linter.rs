@@ -183,9 +183,12 @@ impl Linter {
         let mut has_globs = false;
 
         for pattern in patterns {
+            // Check if the pattern is a direct file path first
             let path = Path::new(pattern);
             if path.exists() && path.is_file() {
+                // Canonicalize to get absolute path for consistent checking
                 if let Ok(abs_path) = path.canonicalize() {
+                    // Check exclude patterns
                     if self
                         .exclude_globs
                         .as_ref()
@@ -194,6 +197,7 @@ impl Linter {
                         continue;
                     }
 
+                    // Check include patterns (if specified)
                     if self
                         .include_globs
                         .as_ref()
@@ -205,6 +209,7 @@ impl Linter {
                     files.push(abs_path);
                 }
             } else {
+                // Treat as glob pattern
                 let glob = Glob::new(pattern).map_err(|e| {
                     LinterError::config(format!("Invalid pattern '{}': {}", pattern, e))
                 })?;
@@ -221,12 +226,14 @@ impl Linter {
             for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_file() && glob_set.is_match(path) {
+                    // Check exclude patterns
                     if let Some(ref excludes) = self.exclude_globs
                         && excludes.is_match(path)
                     {
                         continue;
                     }
 
+                    // Check include patterns (if specified)
                     if let Some(ref includes) = self.include_globs
                         && !includes.is_match(path)
                     {
@@ -1412,6 +1419,47 @@ mod tests {
 
         // Should only appear once
         assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_discover_files_multiple_glob_patterns() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let md_file = temp_dir.path().join("test.md");
+        let txt_file = temp_dir.path().join("test.txt");
+        let rs_file = temp_dir.path().join("test.rs");
+
+        fs::write(&md_file, "# Test").unwrap();
+        fs::write(&txt_file, "Test").unwrap();
+        fs::write(&rs_file, "fn main() {}").unwrap();
+
+        let config = test_config_in(temp_dir.path());
+        let linter = Linter::new(config).unwrap();
+
+        // Use multiple glob patterns
+        let files = linter
+            .discover_files(
+                &["**/*.md".to_string(), "**/*.txt".to_string()],
+                temp_dir.path(),
+            )
+            .unwrap();
+
+        // Should find both .md and .txt files, but not .rs
+        assert!(
+            files.iter().any(|f| f.ends_with("test.md")),
+            "Should find .md file"
+        );
+        assert!(
+            files.iter().any(|f| f.ends_with("test.txt")),
+            "Should find .txt file"
+        );
+        assert!(
+            !files.iter().any(|f| f.ends_with("test.rs")),
+            "Should not find .rs file"
+        );
+        assert_eq!(files.len(), 2, "Should find exactly 2 files");
     }
 
     #[test]
