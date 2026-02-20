@@ -12,7 +12,7 @@ use tsuzulint_ast::{NodeType, Span, TxtNode};
 pub struct LineInfo {
     /// Byte offset of line start (inclusive).
     pub start: u32,
-    /// Byte offset of line end (exclusive, includes newline if present).
+    /// Byte offset of end of line content, excluding the newline character.
     pub end: u32,
     /// Indentation level in spaces (tabs count as 4 spaces).
     pub indent: u32,
@@ -229,15 +229,16 @@ impl<'a> LintContext<'a> {
         }
 
         if source.ends_with('\n') && !lines.is_empty() {
-            let last = lines.last().unwrap();
-            if last.end == source.len() as u32 - 1 {
-                lines.push(LineInfo {
-                    start: source.len() as u32,
-                    end: source.len() as u32,
-                    indent: 0,
-                    indent_bytes: 0,
-                    is_blank: true,
-                });
+            if let Some(last) = lines.last() {
+                if last.end == source.len() as u32 - 1 {
+                    lines.push(LineInfo {
+                        start: source.len() as u32,
+                        end: source.len() as u32,
+                        indent: 0,
+                        indent_bytes: 0,
+                        is_blank: true,
+                    });
+                }
             }
         }
 
@@ -256,6 +257,9 @@ impl<'a> LintContext<'a> {
 
     /// Returns line information for the given line number (1-indexed).
     pub fn line_info(&self, line: u32) -> Option<&LineInfo> {
+        if line == 0 {
+            return None;
+        }
         self.lines.get(line as usize - 1)
     }
 
