@@ -54,7 +54,7 @@
 //!
 //! impl<'a> Visitor<'a> for FirstHeaderFinder {
 //!     fn visit_header(&mut self, node: &TxtNode<'a>) -> VisitResult {
-//!         self.found_depth = node.data.depth;
+//!         self.found_depth = node.depth();
 //!         ControlFlow::Break(()) // Stop traversal
 //!     }
 //! }

@@ -56,10 +56,10 @@ pub struct Linter {
 impl Linter {
     /// Creates a new linter with the given configuration.
     pub fn new(config: LinterConfig) -> Result<Self, LinterError> {
-        let cache_dir = PathBuf::from(&config.cache_dir);
+        let cache_dir = PathBuf::from(config.cache.path());
         let mut cache = CacheManager::new(cache_dir);
 
-        if !config.cache {
+        if !config.cache.is_enabled() {
             cache.disable();
         }
 
@@ -167,13 +167,20 @@ impl Linter {
 
     /// Discovers files matching the given patterns.
     ///
-    /// Walks the `base_dir` directory tree and returns files matching the patterns.
+    /// Walks the `base_dir` directory tree once and checks all glob patterns,
+    /// rather than walking once per pattern (O(P + F) instead of O(P * F)).
     fn discover_files(
         &self,
         patterns: &[String],
         base_dir: &Path,
     ) -> Result<Vec<PathBuf>, LinterError> {
         let mut files = Vec::new();
+
+        // Separate direct file paths from glob patterns.
+        // Build a single GlobSet from all glob patterns so we only walk the
+        // directory tree once instead of once per pattern.
+        let mut glob_builder = GlobSetBuilder::new();
+        let mut has_globs = false;
 
         for pattern in patterns {
             // Check if the pattern is a direct file path first
@@ -191,8 +198,6 @@ impl Linter {
                     }
 
                     // Check include patterns (if specified)
-                    // For direct file arguments, we might want to be more lenient,
-                    // but for strictness we check includes too (unless includes are empty/not set)
                     if self
                         .include_globs
                         .as_ref()
@@ -202,18 +207,25 @@ impl Linter {
                     }
 
                     files.push(abs_path);
-                    continue;
                 }
+            } else {
+                // Treat as glob pattern
+                let glob = Glob::new(pattern).map_err(|e| {
+                    LinterError::config(format!("Invalid pattern '{}': {}", pattern, e))
+                })?;
+                glob_builder.add(glob);
+                has_globs = true;
             }
+        }
 
-            let glob = Glob::new(pattern).map_err(|e| {
-                LinterError::config(format!("Invalid pattern '{}': {}", pattern, e))
-            })?;
-            let matcher = glob.compile_matcher();
+        if has_globs {
+            let glob_set = glob_builder
+                .build()
+                .map_err(|e| LinterError::config(format!("Failed to build globset: {}", e)))?;
 
             for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
-                if path.is_file() && matcher.is_match(path) {
+                if path.is_file() && glob_set.is_match(path) {
                     // Check exclude patterns
                     if let Some(ref excludes) = self.exclude_globs
                         && excludes.is_match(path)
@@ -242,24 +254,30 @@ impl Linter {
 
     /// Lints a list of files in parallel using rayon.
     ///
-    /// Creates a new `PluginHost` instance for each file to ensure thread safety.
-    /// While this incurs some overhead from plugin reloading, it avoids lock
-    /// contention and allows full utilization of multi-core processors.
+    /// Uses `map_init` to create a new `PluginHost` instance once per thread
+    /// rather than once per file. This significantly improves performance by
+    /// avoiding repetitive plugin loading/compilation while maintaining thread safety.
     ///
     /// Returns a tuple of (successful results, failed files with errors).
     pub fn lint_files(&self, paths: &[PathBuf]) -> LintFilesResult {
         // Parallel processing using rayon
-        // Each file gets its own PluginHost to avoid shared mutable state
-        // Collect both successes and failures
+        // Use map_init to initialize PluginHost once per thread
         let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
             .par_iter()
-            .map(|path| {
-                // Create PluginHost for this file
-                let mut file_host = self.create_plugin_host().map_err(|e| (path.clone(), e))?;
-
-                self.lint_file_with_host(path, &mut file_host)
-                    .map_err(|e| (path.clone(), e))
-            })
+            .map_init(
+                // Initialization function: runs once per thread
+                || self.create_plugin_host(),
+                // Map function: runs for each item
+                |host_result, path| match host_result {
+                    Ok(file_host) => self
+                        .lint_file_internal(path, file_host)
+                        .map_err(|e| (path.clone(), e)),
+                    Err(e) => Err((
+                        path.clone(),
+                        LinterError::Internal(format!("Failed to initialize plugin host: {}", e)),
+                    )),
+                },
+            )
             .collect();
 
         // Separate successes and failures
@@ -486,17 +504,6 @@ impl Linter {
         }
     }
 
-    /// Lints a single file with a provided PluginHost.
-    ///
-    /// Used for parallel processing where each thread has its own PluginHost.
-    fn lint_file_with_host(
-        &self,
-        path: &Path,
-        host: &mut PluginHost,
-    ) -> Result<LintResult, LinterError> {
-        self.lint_file_internal(path, host)
-    }
-
     /// Serializes a value to a RawValue, mapping errors to LinterError.
     fn to_raw_value<T: serde::Serialize>(
         value: &T,
@@ -522,6 +529,13 @@ impl Linter {
                 e
             ))
         })?;
+
+        if !metadata.is_file() {
+            return Err(LinterError::file(format!(
+                "Not a regular file: {}",
+                path.display()
+            )));
+        }
 
         if metadata.len() > MAX_FILE_SIZE {
             return Err(LinterError::file(format!(
@@ -707,6 +721,8 @@ impl Linter {
         // Deduplicate diagnostics
         // We combine reused (unchanged blocks), global (fresh), and block (changed blocks) diagnostics.
         let mut all_diagnostics = reused_diagnostics;
+        // Optimization: Pre-allocate memory to avoid reallocations
+        all_diagnostics.reserve(global_diagnostics.len() + block_diagnostics.len());
         all_diagnostics.extend(global_diagnostics.iter().cloned());
         all_diagnostics.extend(block_diagnostics);
 
@@ -716,10 +732,12 @@ impl Linter {
             global_keys.insert(d);
         }
 
-        // Sort by derived order (Position first) to bring duplicates together
-        // Note: Diagnostic::Ord sorts by span.start, then end, message, rule_id
+        // Sort by derived order to bring duplicates together.
+        // Diagnostic::Ord compares span.start first, so this also sorts by position.
         all_diagnostics.sort_unstable();
         all_diagnostics.dedup();
+        // Note: all_diagnostics is already sorted by span.start due to sort_unstable() and Diagnostic::Ord.
+
         let final_diagnostics = all_diagnostics;
 
         // Update cache
@@ -843,17 +861,28 @@ impl Linter {
 
     /// Distributes diagnostics to blocks efficiently using a sorted cursor approach.
     ///
-    /// # Arguments
+    /// This optimization reduces complexity from O(Blocks * Diagnostics) to O(Blocks + Diagnostics)
+    /// (plus sorting cost O(B log B + D log D)), which is significant for large files with many blocks.
     ///
-    /// * `diagnostics` - Must be sorted by start position.
+    /// # Preconditions
     ///
-    /// This optimization reduces complexity from O(Blocks * Diagnostics) to O(Blocks + Diagnostics),
-    /// which is significant for large files with many blocks.
+    /// - `diagnostics` must be sorted by start offset. This is a contract with the caller.
+    /// - Calling code (e.g., `lint_file_internal`) ensures this by sorting diagnostics before calling
+    ///   this function via `all_diagnostics.sort_unstable()`.
+    /// - If this precondition is violated, the sweep-line algorithm may silently misassign
+    ///   diagnostics, resulting in missed or incorrectly cached block diagnostics.
     fn distribute_diagnostics(
         mut blocks: Vec<BlockCacheEntry>,
         diagnostics: &[tsuzulint_plugin::Diagnostic],
         global_keys: &HashSet<&tsuzulint_plugin::Diagnostic>,
     ) -> Vec<BlockCacheEntry> {
+        debug_assert!(
+            diagnostics
+                .windows(2)
+                .all(|w| w[0].span.start <= w[1].span.start),
+            "distribute_diagnostics: diagnostics must be sorted by span.start"
+        );
+
         // Ensure blocks are sorted by start position for the sweep-line algorithm to work correctly
         blocks.sort_by_key(|b| b.span.start);
 
@@ -866,6 +895,9 @@ impl Linter {
             .filter(|d| !global_keys.contains(d))
             .collect();
 
+        // 2. Diagnostics are already sorted by start position (contract with caller).
+        // This allows us to scan through them linearly as we iterate through blocks.
+        // (Removed redundant sort_by_key)
         let mut diag_idx = 0;
 
         blocks
@@ -1022,7 +1054,10 @@ mod tests {
     fn test_config() -> (LinterConfig, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let mut config = LinterConfig::new();
-        config.cache_dir = temp_dir.path().to_string_lossy().to_string();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: temp_dir.path().to_string_lossy().to_string(),
+        });
         (config, temp_dir)
     }
 
@@ -1033,7 +1068,10 @@ mod tests {
         let cache_dir = base.join(".cache");
         std::fs::create_dir_all(&cache_dir).unwrap();
         let mut config = LinterConfig::new();
-        config.cache_dir = cache_dir.to_string_lossy().to_string();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: cache_dir.to_string_lossy().to_string(),
+        });
         config
     }
 
@@ -1070,11 +1108,22 @@ mod tests {
     #[test]
     fn test_linter_with_cache_disabled() {
         let (mut config, _temp) = test_config();
-        config.cache = false;
+        config.cache = crate::config::CacheConfig::Boolean(false);
 
         let linter = Linter::new(config).unwrap();
-        // Verify linter was created successfully with cache disabled
-        assert!(linter.include_globs.is_none());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.md");
+        std::fs::write(&file_path, "content").unwrap();
+        let result1 = linter.lint_file(&file_path).unwrap();
+        let result2 = linter.lint_file(&file_path).unwrap();
+        assert!(
+            !result1.from_cache,
+            "cache disabled: first lint should not be from cache"
+        );
+        assert!(
+            !result2.from_cache,
+            "cache disabled: second lint should not be from cache"
+        );
     }
 
     #[test]
@@ -1408,6 +1457,47 @@ mod tests {
 
         // Should only appear once
         assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_discover_files_multiple_glob_patterns() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let md_file = temp_dir.path().join("test.md");
+        let txt_file = temp_dir.path().join("test.txt");
+        let rs_file = temp_dir.path().join("test.rs");
+
+        fs::write(&md_file, "# Test").unwrap();
+        fs::write(&txt_file, "Test").unwrap();
+        fs::write(&rs_file, "fn main() {}").unwrap();
+
+        let config = test_config_in(temp_dir.path());
+        let linter = Linter::new(config).unwrap();
+
+        // Use multiple glob patterns
+        let files = linter
+            .discover_files(
+                &["**/*.md".to_string(), "**/*.txt".to_string()],
+                temp_dir.path(),
+            )
+            .unwrap();
+
+        // Should find both .md and .txt files, but not .rs
+        assert!(
+            files.iter().any(|f| f.ends_with("test.md")),
+            "Should find .md file"
+        );
+        assert!(
+            files.iter().any(|f| f.ends_with("test.txt")),
+            "Should find .txt file"
+        );
+        assert!(
+            !files.iter().any(|f| f.ends_with("test.rs")),
+            "Should not find .rs file"
+        );
+        assert_eq!(files.len(), 2, "Should find exactly 2 files");
     }
 
     #[test]
@@ -1821,8 +1911,6 @@ mod tests {
         };
 
         let (mut config, temp_dir) = test_config();
-        // Enable caching
-        config.cache = true;
 
         // Setup rule
         config.rules.push(crate::config::RuleDefinition::Simple(
@@ -1932,6 +2020,30 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn test_lint_file_rejects_special_files() {
+        use std::process::Command;
+
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        // Create a named pipe (FIFO) in a temp directory for a deterministic test
+        // that does not rely on /dev/null being present.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let fifo_path = temp_dir.path().join("test.fifo");
+        let status = Command::new("mkfifo")
+            .arg(&fifo_path)
+            .status()
+            .expect("mkfifo not available");
+        assert!(status.success(), "Failed to create FIFO");
+
+        let result = linter.lint_file(&fifo_path);
+        assert!(result.is_err(), "lint_file should reject a FIFO");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Not a regular file"));
+    }
+
+    #[test]
     fn test_distribute_diagnostics() {
         use tsuzulint_ast::Span;
         use tsuzulint_plugin::Diagnostic;
@@ -1985,7 +2097,7 @@ mod tests {
             loc: None,
         };
 
-        // Note: Diagnostics must be sorted for distribute_diagnostics
+        // Note: Diagnostics can be unsorted initially, but distribute_diagnostics expects them sorted.
         let mut diagnostics = vec![
             diag2.clone(),
             diag1.clone(),
@@ -2043,9 +2155,13 @@ mod tests {
             fix: None,
             loc: None,
         };
+        // Note: distribute_diagnostics requires sorted diagnostics (by start offset)
+        let mut boundary_diagnostics = vec![diag_at_end, diag_zero_at_end];
+        boundary_diagnostics.sort_by_key(|d| d.span.start);
+
         let result_boundary = Linter::distribute_diagnostics(
             vec![block_boundary],
-            &[diag_at_end, diag_zero_at_end],
+            &boundary_diagnostics,
             &HashSet::new(),
         );
         // Neither diagnostic should be assigned (half-open: block.end is exclusive)
@@ -2097,6 +2213,39 @@ mod tests {
         // Verify sorting
         assert!(diags[0].span.start < diags[1].span.start);
         assert!(diags[1].span.start < diags[2].span.start);
+    }
+
+    #[test]
+    fn test_lint_files_poisoned_dynamic_rules_mutex() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        // Poison the dynamic_rules mutex by panicking while holding the lock
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = linter.dynamic_rules.lock().unwrap();
+            panic!("intentional poison");
+        }));
+
+        // Verify the mutex is actually poisoned
+        assert!(linter.dynamic_rules.lock().is_err());
+
+        // Create a temp file so lint_files has something to process
+        let file_path = temp_dir.path().join("test_poison.md");
+        std::fs::write(&file_path, "Hello").unwrap();
+
+        let result = linter.lint_files(&[file_path]);
+        assert!(result.is_ok());
+
+        let (successes, failures) = result.unwrap();
+        assert!(successes.is_empty());
+        assert_eq!(failures.len(), 1);
+
+        let error_msg = failures[0].1.to_string();
+        assert!(
+            error_msg.contains("Failed to initialize plugin host"),
+            "Expected 'Failed to initialize plugin host' in error, got: {}",
+            error_msg
+        );
     }
 
     #[test]
