@@ -242,24 +242,30 @@ impl Linter {
 
     /// Lints a list of files in parallel using rayon.
     ///
-    /// Creates a new `PluginHost` instance for each file to ensure thread safety.
-    /// While this incurs some overhead from plugin reloading, it avoids lock
-    /// contention and allows full utilization of multi-core processors.
+    /// Uses `map_init` to create a new `PluginHost` instance once per thread
+    /// rather than once per file. This significantly improves performance by
+    /// avoiding repetitive plugin loading/compilation while maintaining thread safety.
     ///
     /// Returns a tuple of (successful results, failed files with errors).
     pub fn lint_files(&self, paths: &[PathBuf]) -> LintFilesResult {
         // Parallel processing using rayon
-        // Each file gets its own PluginHost to avoid shared mutable state
-        // Collect both successes and failures
+        // Use map_init to initialize PluginHost once per thread
         let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
             .par_iter()
-            .map(|path| {
-                // Create PluginHost for this file
-                let mut file_host = self.create_plugin_host().map_err(|e| (path.clone(), e))?;
-
-                self.lint_file_with_host(path, &mut file_host)
-                    .map_err(|e| (path.clone(), e))
-            })
+            .map_init(
+                // Initialization function: runs once per thread
+                || self.create_plugin_host(),
+                // Map function: runs for each item
+                |host_result, path| match host_result {
+                    Ok(file_host) => self
+                        .lint_file_internal(path, file_host)
+                        .map_err(|e| (path.clone(), e)),
+                    Err(e) => Err((
+                        path.clone(),
+                        LinterError::Internal(format!("Failed to initialize plugin host: {}", e)),
+                    )),
+                },
+            )
             .collect();
 
         // Separate successes and failures
@@ -484,17 +490,6 @@ impl Linter {
             // Default to plain text
             Box::new(txt_parser)
         }
-    }
-
-    /// Lints a single file with a provided PluginHost.
-    ///
-    /// Used for parallel processing where each thread has its own PluginHost.
-    fn lint_file_with_host(
-        &self,
-        path: &Path,
-        host: &mut PluginHost,
-    ) -> Result<LintResult, LinterError> {
-        self.lint_file_internal(path, host)
     }
 
     /// Serializes a value to a RawValue, mapping errors to LinterError.
@@ -2110,6 +2105,39 @@ mod tests {
         // Verify sorting
         assert!(diags[0].span.start < diags[1].span.start);
         assert!(diags[1].span.start < diags[2].span.start);
+    }
+
+    #[test]
+    fn test_lint_files_poisoned_dynamic_rules_mutex() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        // Poison the dynamic_rules mutex by panicking while holding the lock
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = linter.dynamic_rules.lock().unwrap();
+            panic!("intentional poison");
+        }));
+
+        // Verify the mutex is actually poisoned
+        assert!(linter.dynamic_rules.lock().is_err());
+
+        // Create a temp file so lint_files has something to process
+        let file_path = temp_dir.path().join("test_poison.md");
+        std::fs::write(&file_path, "Hello").unwrap();
+
+        let result = linter.lint_files(&[file_path]);
+        assert!(result.is_ok());
+
+        let (successes, failures) = result.unwrap();
+        assert!(successes.is_empty());
+        assert_eq!(failures.len(), 1);
+
+        let error_msg = failures[0].1.to_string();
+        assert!(
+            error_msg.contains("Failed to initialize plugin host"),
+            "Expected 'Failed to initialize plugin host' in error, got: {}",
+            error_msg
+        );
     }
 
     #[test]
