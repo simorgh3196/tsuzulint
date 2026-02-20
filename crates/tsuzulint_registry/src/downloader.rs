@@ -362,4 +362,33 @@ mod tests {
             _ => panic!("Expected TooLarge error"),
         }
     }
+
+    #[tokio::test]
+    async fn test_download_no_content_length() {
+        let mock_server = MockServer::start().await;
+        let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
+        let expected_hash = HashVerifier::compute(wasm_content);
+
+        // Serve with chunked transfer encoding (no Content-Length)
+        Mock::given(method("GET"))
+            .and(path("/chunked.wasm"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(wasm_content.as_slice())
+                    .insert_header("Transfer-Encoding", "chunked"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/chunked.wasm", mock_server.uri()));
+        let downloader = WasmDownloader::new();
+
+        let result = downloader
+            .download(&manifest)
+            .await
+            .expect("Download failed with no Content-Length");
+
+        assert_eq!(result.bytes, wasm_content);
+        assert_eq!(result.computed_hash, expected_hash);
+    }
 }
