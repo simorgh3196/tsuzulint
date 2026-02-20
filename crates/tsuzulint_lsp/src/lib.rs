@@ -6,6 +6,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(test)]
+static TEST_LINT_DELAY_MS: AtomicU64 = AtomicU64::new(0);
+
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -81,7 +87,7 @@ impl Backend {
             }
         };
 
-        let diagnostics = self.lint_text(text, &path);
+        let diagnostics = self.lint_text(text, &path).await;
 
         // Convert to LSP diagnostics
         let lsp_diagnostics: Vec<Diagnostic> = diagnostics
@@ -95,32 +101,52 @@ impl Backend {
     }
 
     /// Lints text and returns TsuzuLint diagnostics.
-    fn lint_text(&self, text: &str, path: &std::path::Path) -> Vec<TsuzuLintDiagnostic> {
-        // Safely acquire read lock, handling potential poisoning
-        let linter_guard = match self.state.linter.read() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                error!("Linter lock poisoned: {}", poisoned);
-                return vec![];
-            }
-        };
+    ///
+    /// This method offloads the blocking lint operation to `spawn_blocking`
+    /// to avoid blocking the async runtime.
+    async fn lint_text(&self, text: &str, path: &std::path::Path) -> Vec<TsuzuLintDiagnostic> {
+        let state = self.state.clone();
+        let text = text.to_string();
+        let path = path.to_path_buf();
 
-        // Check if linter is available
-        let linter = match linter_guard.as_ref() {
-            Some(l) => l,
-            None => {
-                debug!("Linter not available, skipping linting");
-                return vec![];
+        tokio::task::spawn_blocking(move || {
+            // Simulate load for testing (injected delay via static)
+            #[cfg(test)]
+            {
+                let delay_ms = TEST_LINT_DELAY_MS.load(Ordering::Relaxed);
+                if delay_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                }
             }
-        };
 
-        match linter.lint_content(text, path) {
-            Ok(diagnostics) => diagnostics,
-            Err(e) => {
-                error!("Lint error: {}", e);
-                vec![]
+            // Safely acquire read lock, handling potential poisoning
+            let linter_guard = match state.linter.read() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    error!("Linter lock poisoned: {}", poisoned);
+                    return vec![];
+                }
+            };
+
+            // Check if linter is available
+            let linter = match linter_guard.as_ref() {
+                Some(l) => l,
+                None => {
+                    debug!("Linter not available, skipping linting");
+                    return vec![];
+                }
+            };
+
+            match linter.lint_content(&text, &path) {
+                Ok(diagnostics) => diagnostics,
+                Err(e) => {
+                    error!("Lint error: {}", e);
+                    vec![]
+                }
             }
-        }
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// Converts a TsuzuLint diagnostic to an LSP diagnostic.
@@ -290,6 +316,12 @@ impl Backend {
                 }
             }
         }
+    }
+
+    /// Sets a simulated delay for lint_text (test only, global state).
+    #[cfg(test)]
+    pub fn set_global_test_delay(delay: std::time::Duration) {
+        TEST_LINT_DELAY_MS.store(delay.as_millis() as u64, Ordering::Relaxed);
     }
 }
 
@@ -521,7 +553,7 @@ impl LanguageServer for Backend {
 
         // Re-run linting to get diagnostics with fixes
         // Note: In a real implementation, we should cache diagnostics map to avoid re-linting
-        let diagnostics = self.lint_text(&text, &path);
+        let diagnostics = self.lint_text(&text, &path).await;
 
         let mut actions = Vec::new();
 
@@ -684,6 +716,7 @@ pub async fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower_lsp::lsp_types::Position;
 
     #[test]
@@ -768,5 +801,157 @@ mod tests {
             Some(Position::new(0, 0))
         );
         assert_eq!(Backend::offset_to_position(1, ""), None);
+    }
+
+    /// Tests that lint_text does not block the async runtime.
+    ///
+    /// Strategy:
+    /// 1. Inject a 100ms delay into lint_text
+    /// 2. Open 3 documents in parallel via LSP protocol
+    /// 3. If blocking: total time ~300ms (sequential execution)
+    /// 4. If non-blocking: total time ~100ms + overhead (parallel execution)
+    #[tokio::test]
+    async fn test_lint_text_does_not_block_runtime() {
+        use std::time::{Duration, Instant};
+
+        // Set test delay (100ms per lint operation)
+        Backend::set_global_test_delay(Duration::from_millis(100));
+
+        // Create LSP server pipes
+        let (client_read, server_write) = tokio::io::duplex(4096);
+        let (server_read, client_write) = tokio::io::duplex(4096);
+
+        let (service, socket) = LspService::new(Backend::new);
+
+        // Start server in background
+        let _server_handle = tokio::spawn(async move {
+            tower_lsp::Server::new(server_read, server_write, socket)
+                .serve(service)
+                .await;
+        });
+
+        let mut reader = tokio::io::BufReader::new(client_read);
+        let mut writer = client_write;
+
+        // Channel to collect responses
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(msg) = recv_msg(&mut reader).await {
+                if tx.send(msg).is_err() {
+                    break;
+                }
+            }
+        });
+
+        // Setup
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root_path = temp_dir.path();
+        let root_uri = Url::from_file_path(root_path).unwrap();
+
+        // Initialize
+        let init_req = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{}","capabilities":{{}}}}}}"#,
+            root_uri
+        );
+        send_msg(&mut writer, &init_req).await;
+        let _resp = rx.recv().await.unwrap();
+
+        // Initialized
+        let initialized_notif = r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#;
+        send_msg(&mut writer, initialized_notif).await;
+
+        // Measure time to open 3 documents in parallel
+        let start = Instant::now();
+
+        // Send 3 didOpen requests rapidly (they should be processed in parallel if non-blocking)
+        for i in 0..3 {
+            let file_path = temp_dir.path().join(format!("test{}.md", i));
+            let file_uri = Url::from_file_path(file_path).unwrap();
+            let did_open = format!(
+                r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"markdown","version":0,"text":"test content {}"}}}}}}"#,
+                file_uri, i
+            );
+            send_msg(&mut writer, &did_open).await;
+        }
+
+        // Wait for all 3 publishDiagnostics responses
+        let mut diagnostics_count = 0;
+        let timeout = tokio::time::sleep(Duration::from_secs(5));
+        tokio::pin!(timeout);
+
+        loop {
+            tokio::select! {
+                msg_opt = rx.recv() => {
+                    if let Some(msg) = msg_opt {
+                        if msg.contains("publishDiagnostics") {
+                            diagnostics_count += 1;
+                            if diagnostics_count >= 3 {
+                                break;
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                _ = &mut timeout => break,
+            }
+        }
+
+        let elapsed = start.elapsed();
+
+        // Reset delay
+        Backend::set_global_test_delay(Duration::from_millis(0));
+
+        // Verify all diagnostics received
+        assert_eq!(diagnostics_count, 3, "Expected 3 diagnostics responses");
+
+        // Verify timing:
+        // - If blocking: 3 × 100ms = 300ms minimum
+        // - If non-blocking: ~100ms + overhead (should be < 250ms)
+        println!("Elapsed time for 3 parallel lints: {:?}", elapsed);
+
+        assert!(
+            elapsed < Duration::from_millis(250),
+            "Runtime was blocked! Expected < 250ms, got {:?}. \
+             This indicates lint_text is blocking the async runtime.",
+            elapsed
+        );
+    }
+
+    async fn send_msg<W: AsyncWriteExt + Unpin>(writer: &mut W, msg: &str) {
+        let content = format!("Content-Length: {}\r\n\r\n{}", msg.len(), msg);
+        writer.write_all(content.as_bytes()).await.unwrap();
+        writer.flush().await.unwrap();
+    }
+
+    async fn recv_msg<R: AsyncReadExt + Unpin>(reader: &mut R) -> Option<String> {
+        let mut buffer = Vec::new();
+        let mut content_length = 0;
+
+        loop {
+            let byte = reader.read_u8().await.ok()?;
+            buffer.push(byte);
+            if buffer.ends_with(b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&buffer);
+                for line in headers.lines() {
+                    if line.to_lowercase().starts_with("content-length:") {
+                        let parts: Vec<&str> = line.split(':').collect();
+                        if parts.len() == 2 {
+                            content_length = parts[1].trim().parse().unwrap_or(0);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        if content_length == 0 {
+            return None;
+        }
+
+        let mut body = vec![0u8; content_length];
+        reader.read_exact(&mut body).await.ok()?;
+
+        Some(String::from_utf8(body).unwrap())
     }
 }
