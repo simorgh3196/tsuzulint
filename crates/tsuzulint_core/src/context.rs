@@ -8,13 +8,13 @@ use std::cell::OnceCell;
 use tsuzulint_ast::{NodeType, Span, TxtNode};
 
 /// Pre-computed metadata for a single line.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LineInfo {
     /// Byte offset of line start (inclusive).
     pub start: u32,
     /// Byte offset of line end (exclusive, includes newline if present).
     pub end: u32,
-    /// Indentation level in spaces (tabs count as 4 spaces).
+    /// Indentation in bytes (tabs count as 1 byte).
     pub indent: u32,
     /// Whether this line contains only whitespace.
     pub is_blank: bool,
@@ -26,18 +26,12 @@ impl LineInfo {
         let end = start + line_text.len() as u32;
         let trimmed = line_text.trim_end();
         let is_blank = trimmed.is_empty();
+        // indent is in bytes (actual byte offset), not visual width
         let indent = if is_blank {
             0
         } else {
             let leading_len = line_text.len() - line_text.trim_start().len();
-            let leading_text = &line_text[..leading_len];
-            leading_text.chars().fold(0u32, |acc, c| {
-                if c == '\t' {
-                    (acc + 4) / 4 * 4
-                } else {
-                    acc + 1
-                }
-            })
+            leading_len as u32
         };
 
         Self {
@@ -133,8 +127,14 @@ impl<'a> LintContext<'a> {
             let info = LineInfo::from_line(offset, line);
             lines.push(info);
             offset = info.end;
+            // Add newline bytes: check if next bytes are \r\n (CRLF) or just \n (LF)
             if offset < source.len() as u32 {
-                offset += 1;
+                let bytes = source.as_bytes();
+                if bytes[offset as usize] == b'\r' && offset + 1 < source.len() as u32 && bytes[offset as usize + 1] == b'\n' {
+                    offset += 2; // CRLF
+                } else if bytes[offset as usize] == b'\n' || bytes[offset as usize] == b'\r' {
+                    offset += 1; // LF or CR
+                }
             }
         }
 
@@ -165,6 +165,9 @@ impl<'a> LintContext<'a> {
 
     /// Returns line information for the given line number (1-indexed).
     pub fn line_info(&self, line: u32) -> Option<&LineInfo> {
+        if line == 0 {
+            return None;
+        }
         self.lines.get(line as usize - 1)
     }
 
@@ -202,9 +205,12 @@ impl<'a> LintContext<'a> {
     /// Returns the text of a specific line (1-indexed).
     pub fn line_text(&self, line: u32) -> Option<&'a str> {
         let info = self.line_info(line)?;
+        // Use byte slicing directly - info.start and info.end are byte offsets
         let end = if info.end > info.start && info.end <= self.source.len() as u32 {
-            let end_char = self.source.chars().nth((info.end - 1) as usize)?;
-            if end_char == '\r' {
+            // Check if the last character is \r (for CRLF handling) by checking bytes
+            let bytes = self.source.as_bytes();
+            let last_idx = (info.end - 1) as usize;
+            if bytes[last_idx] == b'\r' {
                 info.end - 1
             } else {
                 info.end
@@ -335,7 +341,7 @@ mod tests {
     #[test]
     fn test_line_info_tab_indent() {
         let info = LineInfo::from_line(0, "\thello");
-        assert_eq!(info.indent, 4);
+        assert_eq!(info.indent, 1); // tab is 1 byte
     }
 
     #[test]
@@ -424,13 +430,13 @@ mod tests {
     #[test]
     fn test_multiple_tabs() {
         let info = LineInfo::from_line(0, "\t\thello");
-        assert_eq!(info.indent, 8);
+        assert_eq!(info.indent, 2); // 2 tabs = 2 bytes
     }
 
     #[test]
     fn test_mixed_indent() {
         let info = LineInfo::from_line(0, "  \thello");
-        assert_eq!(info.indent, 4);
+        assert_eq!(info.indent, 3); // 2 spaces + 1 tab = 3 bytes
     }
 
     #[test]
@@ -438,5 +444,39 @@ mod tests {
         let ctx = LintContext::new("hello\n");
         assert_eq!(ctx.line_count(), 2);
         assert_eq!(ctx.line_info(1).unwrap().end, 5);
+    }
+
+    #[test]
+    fn test_crlf_newlines() {
+        let ctx = LintContext::new("hello\r\nworld\r\nfoo");
+        assert_eq!(ctx.line_count(), 3);
+
+        assert_eq!(ctx.line_info(1).unwrap().start, 0);
+        assert_eq!(ctx.line_info(1).unwrap().end, 5);
+
+        assert_eq!(ctx.line_info(2).unwrap().start, 7);
+        assert_eq!(ctx.line_info(2).unwrap().end, 12);
+
+        assert_eq!(ctx.line_info(3).unwrap().start, 14);
+        assert_eq!(ctx.line_info(3).unwrap().end, 17);
+
+        assert_eq!(ctx.line_text(1), Some("hello"));
+        assert_eq!(ctx.line_text(2), Some("world"));
+        assert_eq!(ctx.line_text(3), Some("foo"));
+    }
+
+    #[test]
+    fn test_line_info_zero() {
+        let ctx = LintContext::new("hello");
+        assert_eq!(ctx.line_info(0), None);
+    }
+
+    #[test]
+    fn test_line_info_multibyte() {
+        let ctx = LintContext::new("  こんにちは\n世界");
+        assert_eq!(ctx.line_count(), 2);
+        assert_eq!(ctx.line_info(1).unwrap().start, 0);
+        assert_eq!(ctx.line_info(1).unwrap().end, 17); // 2 spaces + 15 bytes (5 Japanese chars × 3 bytes)
+        assert_eq!(ctx.line_info(1).unwrap().indent, 2); // 2 spaces = 2 bytes
     }
 }
