@@ -1940,15 +1940,23 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_lint_file_rejects_special_files() {
-        use std::path::Path;
+        use std::process::Command;
 
         let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
 
-        // /dev/null is a character device on Unix and always exists
-        let path = Path::new("/dev/null");
-        let result = linter.lint_file(path);
-        assert!(result.is_err());
+        // Create a named pipe (FIFO) in a temp directory for a deterministic test
+        // that does not rely on /dev/null being present.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let fifo_path = temp_dir.path().join("test.fifo");
+        let status = Command::new("mkfifo")
+            .arg(&fifo_path)
+            .status()
+            .expect("mkfifo not available");
+        assert!(status.success(), "Failed to create FIFO");
+
+        let result = linter.lint_file(&fifo_path);
+        assert!(result.is_err(), "lint_file should reject a FIFO");
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Not a regular file"));
     }
