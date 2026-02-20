@@ -6,9 +6,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use extism::{
-    CurrentPlugin, Error, Manifest, Plugin, PluginBuilder, UserData, Val, ValType, Wasm,
-};
+use extism::{CurrentPlugin, Error, Manifest, Plugin, PluginBuilder, UserData, Val, ValType, Wasm};
 use tracing::{debug, info};
 
 use crate::executor::{LoadResult, RuleExecutor};
