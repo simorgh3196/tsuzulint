@@ -2,6 +2,8 @@
 
 use crate::error::FetchError;
 use crate::manifest::{ExternalRuleManifest, validate_manifest};
+use crate::security::validate_url;
+use reqwest::Url;
 use std::path::PathBuf;
 
 /// Source of a plugin manifest.
@@ -58,6 +60,7 @@ impl PluginSource {
 pub struct ManifestFetcher {
     client: reqwest::Client,
     github_base_url: String,
+    allow_local: bool,
 }
 
 impl Default for ManifestFetcher {
@@ -72,12 +75,19 @@ impl ManifestFetcher {
         Self {
             client: reqwest::Client::new(),
             github_base_url: "https://github.com".to_string(),
+            allow_local: false,
         }
     }
 
     /// Set the base URL for GitHub requests (for testing).
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.github_base_url = url.into();
+        self
+    }
+
+    /// Configure whether to allow fetching from local network addresses.
+    pub fn allow_local(mut self, allow: bool) -> Self {
+        self.allow_local = allow;
         self
     }
 
@@ -114,11 +124,17 @@ impl ManifestFetcher {
     }
 
     /// Fetch manifest from a URL.
-    async fn fetch_from_url(&self, url: &str) -> Result<ExternalRuleManifest, FetchError> {
+    async fn fetch_from_url(&self, url_str: &str) -> Result<ExternalRuleManifest, FetchError> {
+        let url = Url::parse(url_str)
+            .map_err(|e| FetchError::NotFound(format!("Invalid URL: {}", e)))?;
+
+        // Security check
+        validate_url(&url, self.allow_local)?;
+
         let response = self.client.get(url).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(FetchError::NotFound(format!("Manifest not found at {url}")));
+            return Err(FetchError::NotFound(format!("Manifest not found at {url_str}")));
         }
 
         let text = response.error_for_status()?.text().await?;
@@ -144,6 +160,7 @@ impl ManifestFetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::security::SecurityError;
 
     #[test]
     fn test_plugin_source_github() {
@@ -242,6 +259,22 @@ mod tests {
         match result.unwrap_err() {
             FetchError::InvalidManifest(_) => {}
             e => panic!("Expected InvalidManifest error, got: {e}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_local_denied_by_default() {
+        use wiremock::MockServer;
+
+        let mock_server = MockServer::start().await;
+
+        let fetcher = ManifestFetcher::new();
+        let url = format!("{}/manifest.json", mock_server.uri());
+        let result = fetcher.fetch(&PluginSource::Url(url)).await;
+
+        match result {
+            Err(FetchError::SecurityError(SecurityError::LoopbackDenied(_))) => {}
+            res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
         }
     }
 }
