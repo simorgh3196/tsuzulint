@@ -227,33 +227,39 @@ impl RuleExecutor for WasmiExecutor {
 
         // extism:host/user.tsuzulint_get_config
         linker
-            .func_wrap("extism:host/user", "tsuzulint_get_config", {
-                |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
-                    // Get config from host state
-                    let config = caller.data().config.clone();
-                    let bytes = config.as_bytes();
-                    let total_len = bytes.len() as i64;
+            .func_wrap(
+                "extism:host/user",
+                "tsuzulint_get_config",
+                {
+                    |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
+                        // Get config from host state
+                        let config = caller.data().config.clone();
+                        let bytes = config.as_bytes();
+                        let total_len = bytes.len() as i64;
 
-                    if len == 0 {
-                        return total_len;
-                    }
-
-                    if let Some(memory) = caller.data().memory {
-                        if memory
-                            .write(
-                                &mut caller,
-                                ptr as usize,
-                                &bytes[..std::cmp::min(len as usize, bytes.len())],
-                            )
-                            .is_ok()
-                        {
+                        if len == 0 {
                             return total_len;
                         }
+
+                        if let Some(memory) = caller.data().memory {
+                            if memory
+                                .write(
+                                    &mut caller,
+                                    ptr as usize,
+                                    &bytes[..std::cmp::min(len as usize, bytes.len())],
+                                )
+                                .is_ok()
+                            {
+                                return total_len;
+                            }
+                        }
+                        0
                     }
-                    0
-                }
-            })
-            .map_err(|e| PluginError::load(format!("Failed to add tsuzulint_get_config: {}", e)))?;
+                },
+            )
+            .map_err(|e| {
+                PluginError::load(format!("Failed to add tsuzulint_get_config: {}", e))
+            })?;
 
         // Instantiate the module
         let instance = linker
@@ -725,5 +731,72 @@ mod tests {
             err_lower.contains("fuel"),
             "Expected fuel exhaustion error, got: {err_msg}"
         );
+    }
+
+    #[test]
+    fn test_config_lifecycle() {
+        let mut executor = WasmiExecutor::new();
+
+        let json = r#"{"name":"config-rule","version":"1.0.0"}"#;
+        let len = json.len();
+
+        let wat = format!(
+            r#"
+            (module
+                (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
+                (memory (export "memory") 1)
+
+                (func $get_manifest (export "get_manifest") (result i32 i32)
+                    (i32.const 0) (i32.const {})
+                )
+
+                (func $alloc (export "alloc") (param i32) (result i32)
+                    (i32.const 100)
+                )
+
+                (func $lint (export "lint") (param i32 i32) (result i32 i32)
+                    (local $len i64)
+                    (local $ptr i32)
+
+                    ;; 1. Get config length
+                    (call $get_config (i64.const 0) (i64.const 0))
+                    local.set $len
+
+                    ;; 2. Set ptr to 100
+                    i32.const 100
+                    local.set $ptr
+
+                    ;; 3. Read config
+                    (call $get_config (i64.extend_i32_u (local.get $ptr)) (local.get $len))
+                    drop
+
+                    ;; 4. Return ptr/len
+                    (local.get $ptr)
+                    (i32.wrap_i64 (local.get $len))
+                )
+
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        );
+
+        let wasm = wat_to_wasm(&wat);
+        executor.load(&wasm).expect("Failed to load rule");
+
+        // Default config is empty object "{}"
+        let res = executor.call_lint("config-rule", b"").unwrap();
+        assert_eq!(res, b"{}");
+
+        // Update config
+        let config = serde_json::json!({"foo": "bar"});
+        executor
+            .configure("config-rule", &config)
+            .expect("Failed to configure");
+
+        // Check new config
+        let res = executor.call_lint("config-rule", b"").unwrap();
+        assert_eq!(res, b"{\"foo\":\"bar\"}");
     }
 }

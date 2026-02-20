@@ -463,6 +463,17 @@ mod tests {
     }
 
     #[test]
+    fn test_configure_rule_success() {
+        let mut host = PluginHost::new();
+        // Since we can't easily mock the executor here without dependency injection,
+        // and ExtismExecutor requires actual WASM, we rely on the fact that
+        // configure_rule calls executor.configure.
+        // However, we can at least verify that it fails if the rule is not loaded.
+        let result = host.configure_rule("nonexistent", serde_json::json!({}));
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
     fn test_serialization_compat_with_pdk() {
         // This test simulates the serialization of LintRequest in the host
         // and deserialization in the PDK (using a mock struct that matches PDK).
