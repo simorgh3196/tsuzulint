@@ -130,6 +130,15 @@ impl ContentCharacteristics {
             if trimmed.starts_with('#') {
                 chars.has_headings = true;
             }
+            // Setext-style headings: lines consisting only of = or -
+            if !chars.has_headings {
+                let underline_chars: Vec<char> = trimmed.chars().collect();
+                if !underline_chars.is_empty()
+                    && underline_chars.iter().all(|&c| c == '=' || c == '-')
+                {
+                    chars.has_headings = true;
+                }
+            }
             if trimmed.contains('[') && trimmed.contains(']') {
                 chars.has_links = true;
             }
@@ -146,6 +155,17 @@ impl ContentCharacteristics {
             }
             if trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+') {
                 chars.has_lists = true;
+            } else if !chars.has_lists {
+                // Ordered list: digit(s) followed by . or )
+                let mut chars_iter = trimmed.chars();
+                if let Some(first) = chars_iter.next()
+                    && first.is_ascii_digit()
+                {
+                    let rest: String = chars_iter.collect();
+                    if rest.starts_with('.') || rest.starts_with(')') {
+                        chars.has_lists = true;
+                    }
+                }
             }
             if trimmed.contains('|') && trimmed.contains("---") {
                 chars.has_tables = true;
@@ -235,15 +255,17 @@ impl<'a> LintContext<'a> {
         if source.ends_with('\n')
             && !lines.is_empty()
             && let Some(last) = lines.last()
-            && last.end == source.len() as u32 - 1
         {
-            lines.push(LineInfo {
-                start: source.len() as u32,
-                end: source.len() as u32,
-                indent: 0,
-                indent_bytes: 0,
-                is_blank: true,
-            });
+            let newline_len = if source.ends_with("\r\n") { 2 } else { 1 };
+            if last.end == source.len() as u32 - newline_len {
+                lines.push(LineInfo {
+                    start: source.len() as u32,
+                    end: source.len() as u32,
+                    indent: 0,
+                    indent_bytes: 0,
+                    is_blank: true,
+                });
+            }
         }
 
         lines
@@ -547,6 +569,16 @@ mod tests {
         assert_eq!(ctx.line_count(), 2);
         assert_eq!(ctx.line_info(1).unwrap().end, 5);
     }
+
+    #[test]
+    fn test_lint_context_crlf() {
+        let ctx = LintContext::new("hello\r\nworld\r\n");
+        assert_eq!(ctx.line_count(), 3);
+        assert_eq!(ctx.line_text(1), Some("hello"));
+        assert_eq!(ctx.line_text(2), Some("world"));
+        // Byte offset after "hello\r\n" = 7
+        assert_eq!(ctx.line_info(2).unwrap().start, 7);
+    }
 }
 
 #[cfg(test)]
@@ -660,5 +692,41 @@ mod tests_content_characteristics {
         let chars = ContentCharacteristics::analyze("`inline`\n\n```\ncode\n```");
         assert!(!chars.should_skip_rule(&["code".to_string()]));
         assert!(!chars.should_skip_rule(&["CodeBlock".to_string()]));
+    }
+
+    #[test]
+    fn test_detect_setext_headings_h1() {
+        let chars = ContentCharacteristics::analyze("My Title\n========");
+        assert!(chars.has_headings);
+    }
+
+    #[test]
+    fn test_detect_setext_headings_h2() {
+        let chars = ContentCharacteristics::analyze("Subtitle\n--------");
+        assert!(chars.has_headings);
+    }
+
+    #[test]
+    fn test_detect_ordered_lists() {
+        let chars = ContentCharacteristics::analyze("1. First item\n2. Second item");
+        assert!(chars.has_lists);
+    }
+
+    #[test]
+    fn test_detect_ordered_lists_paren() {
+        let chars = ContentCharacteristics::analyze("1) First item\n2) Second item");
+        assert!(chars.has_lists);
+    }
+
+    #[test]
+    fn test_should_skip_rule_multiple_types() {
+        let chars = ContentCharacteristics::analyze("# Heading\n\nJust text");
+
+        // Has Heading but not List - should NOT skip if ANY type exists
+        assert!(!chars.should_skip_rule(&["Heading".to_string(), "Str".to_string()]));
+        assert!(!chars.should_skip_rule(&["Heading".to_string(), "List".to_string()]));
+
+        // All absent types - should skip
+        assert!(chars.should_skip_rule(&["List".to_string(), "Table".to_string()]));
     }
 }
