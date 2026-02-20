@@ -202,10 +202,7 @@ impl<'a> LintContext<'a> {
         let idx = self.lines.partition_point(|info| info.start <= offset);
 
         if idx == 0 {
-            if offset < self.lines[0].start {
-                return None;
-            }
-            return Some(1);
+            return None;
         }
 
         let line_idx = idx - 1;
