@@ -293,8 +293,13 @@ impl GlobMatcher {
         let exclude_set = if !exclude_patterns.is_empty() {
             let mut builder = GlobSetBuilder::new();
             for pattern in exclude_patterns {
-                if let Ok(glob) = Glob::new(pattern) {
-                    builder.add(glob);
+                match Glob::new(pattern) {
+                    Ok(glob) => {
+                        builder.add(glob);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Invalid exclude glob pattern {:?}: {}", pattern, e);
+                    }
                 }
             }
             builder.build().ok()
