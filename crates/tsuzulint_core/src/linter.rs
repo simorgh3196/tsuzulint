@@ -255,10 +255,10 @@ impl Linter {
             .map_init(
                 // Initialization function: runs once per thread
                 || self.create_plugin_host(),
-                // Fold function: runs for each item
+                // Map function: runs for each item
                 |host_result, path| match host_result {
                     Ok(file_host) => self
-                        .lint_file_with_host(path, file_host)
+                        .lint_file_internal(path, file_host)
                         .map_err(|e| (path.clone(), e)),
                     Err(e) => Err((
                         path.clone(),
@@ -490,17 +490,6 @@ impl Linter {
             // Default to plain text
             Box::new(txt_parser)
         }
-    }
-
-    /// Lints a single file with a provided PluginHost.
-    ///
-    /// Used for parallel processing where each thread has its own PluginHost.
-    fn lint_file_with_host(
-        &self,
-        path: &Path,
-        host: &mut PluginHost,
-    ) -> Result<LintResult, LinterError> {
-        self.lint_file_internal(path, host)
     }
 
     /// Serializes a value to a RawValue, mapping errors to LinterError.
@@ -2101,6 +2090,39 @@ mod tests {
         // Verify sorting
         assert!(diags[0].span.start < diags[1].span.start);
         assert!(diags[1].span.start < diags[2].span.start);
+    }
+
+    #[test]
+    fn test_lint_files_poisoned_dynamic_rules_mutex() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        // Poison the dynamic_rules mutex by panicking while holding the lock
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = linter.dynamic_rules.lock().unwrap();
+            panic!("intentional poison");
+        }));
+
+        // Verify the mutex is actually poisoned
+        assert!(linter.dynamic_rules.lock().is_err());
+
+        // Create a temp file so lint_files has something to process
+        let file_path = temp_dir.path().join("test_poison.md");
+        std::fs::write(&file_path, "Hello").unwrap();
+
+        let result = linter.lint_files(&[file_path]);
+        assert!(result.is_ok());
+
+        let (successes, failures) = result.unwrap();
+        assert!(successes.is_empty());
+        assert_eq!(failures.len(), 1);
+
+        let error_msg = failures[0].1.to_string();
+        assert!(
+            error_msg.contains("Failed to initialize plugin host"),
+            "Expected 'Failed to initialize plugin host' in error, got: {}",
+            error_msg
+        );
     }
 
     #[test]
