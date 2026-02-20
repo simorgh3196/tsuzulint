@@ -30,6 +30,7 @@ mod linter;
 pub mod resolver;
 mod result;
 pub mod rule_manifest;
+pub mod walker;
 
 pub use config::{
     CacheConfig, CacheConfigDetail, LinterConfig, RuleDefinition, RuleDefinitionDetail,
