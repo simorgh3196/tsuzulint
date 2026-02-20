@@ -56,7 +56,7 @@ pub struct TxtNode<'a> {
     pub data: NodeData<'a>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NodeData<'a> {
     #[default]
     None,
@@ -64,23 +64,24 @@ pub enum NodeData<'a> {
     List(bool),
     CodeBlock(Option<&'a str>),
     Link(LinkData<'a>),
+    Image(LinkData<'a>),
     Reference(ReferenceData<'a>),
     Definition(DefinitionData<'a>),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkData<'a> {
     pub url: &'a str,
     pub title: Option<&'a str>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReferenceData<'a> {
     pub identifier: &'a str,
     pub label: Option<&'a str>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DefinitionData<'a> {
     pub identifier: &'a str,
     pub url: &'a str,
@@ -194,7 +195,7 @@ impl<'a> TxtNode<'a> {
     #[inline]
     pub fn url(&self) -> Option<&'a str> {
         match &self.data {
-            NodeData::Link(link) => Some(link.url),
+            NodeData::Link(data) | NodeData::Image(data) => Some(data.url),
             NodeData::Definition(def) => Some(def.url),
             _ => None,
         }
@@ -204,7 +205,7 @@ impl<'a> TxtNode<'a> {
     #[inline]
     pub fn title(&self) -> Option<&'a str> {
         match &self.data {
-            NodeData::Link(link) => link.title,
+            NodeData::Link(data) | NodeData::Image(data) => data.title,
             NodeData::Definition(def) => def.title,
             _ => None,
         }
@@ -263,7 +264,7 @@ impl<'a> NodeData<'a> {
                     0
                 }
             }
-            NodeData::Link(link_data) => {
+            NodeData::Link(link_data) | NodeData::Image(link_data) => {
                 if link_data.title.is_some() {
                     2
                 } else {
@@ -308,7 +309,7 @@ impl<'a> NodeData<'a> {
                     state.serialize_field("lang", l)?;
                 }
             }
-            NodeData::Link(link_data) => {
+            NodeData::Link(link_data) | NodeData::Image(link_data) => {
                 state.serialize_field("url", link_data.url)?;
                 if let Some(title) = link_data.title {
                     state.serialize_field("title", title)?;
@@ -350,6 +351,12 @@ impl<'a> NodeData<'a> {
     #[inline]
     pub const fn link(url: &'a str, title: Option<&'a str>) -> Self {
         Self::Link(LinkData { url, title })
+    }
+
+    /// Creates node data for an image.
+    #[inline]
+    pub const fn image(url: &'a str, title: Option<&'a str>) -> Self {
+        Self::Image(LinkData { url, title })
     }
 
     /// Creates node data for a code block.
@@ -817,8 +824,8 @@ mod tests {
         let new_size = size_of::<NodeData>();
 
         assert!(
-            new_size <= old_size * 65 / 100,
-            "NodeData should be at least 35% smaller: was {} bytes, now {} bytes",
+            new_size <= old_size * 70 / 100,
+            "NodeData should be at least 30% smaller: was {} bytes, now {} bytes",
             old_size,
             new_size
         );

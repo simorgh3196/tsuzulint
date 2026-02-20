@@ -96,7 +96,7 @@ impl MarkdownParser {
                 let mut node = self.create_leaf_node(node, source, NodeType::Image);
                 let url = arena.alloc_str(&image.url);
                 let title = image.title.as_ref().map(|t| arena.alloc_str(t));
-                node.data = NodeData::link(url, title);
+                node.data = NodeData::image(url, title);
                 node
             }
 
@@ -502,11 +502,11 @@ mod tests {
 
         assert_eq!(image.node_type, NodeType::Image);
         match image.data {
-            NodeData::Link(link_data) => {
-                assert_eq!(link_data.url, "image.png");
-                assert_eq!(link_data.title, Some("Title"));
+            NodeData::Image(image_data) => {
+                assert_eq!(image_data.url, "image.png");
+                assert_eq!(image_data.title, Some("Title"));
             }
-            _ => panic!("Expected Link variant"),
+            _ => panic!("Expected Image variant"),
         }
     }
 
