@@ -1078,8 +1078,19 @@ mod tests {
         config.cache = crate::config::CacheConfig::Boolean(false);
 
         let linter = Linter::new(config).unwrap();
-        // Verify linter was created successfully with cache disabled
-        assert!(linter.include_globs.is_none());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("test.md");
+        std::fs::write(&file_path, "content").unwrap();
+        let result1 = linter.lint_file(&file_path).unwrap();
+        let result2 = linter.lint_file(&file_path).unwrap();
+        assert!(
+            !result1.from_cache,
+            "cache disabled: first lint should not be from cache"
+        );
+        assert!(
+            !result2.from_cache,
+            "cache disabled: second lint should not be from cache"
+        );
     }
 
     #[test]

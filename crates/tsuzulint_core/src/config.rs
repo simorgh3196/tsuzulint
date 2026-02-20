@@ -57,7 +57,7 @@ fn default_cache_dir() -> &'static str {
 }
 
 /// Cache configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum CacheConfig {
     /// Shorthand for enabling/disabling cache.
@@ -91,7 +91,7 @@ impl Default for CacheConfig {
 }
 
 /// Detailed cache configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CacheConfigDetail {
     /// Whether to enable caching.
     #[serde(default = "default_cache")]
@@ -397,6 +397,24 @@ mod tests {
         let config = LinterConfig::from_json(json).unwrap();
         assert!(config.cache.is_enabled());
         assert_eq!(config.cache.path(), ".custom-cache");
+    }
+
+    #[test]
+    fn test_config_cache_object_path_only() {
+        // enabled はデフォルト (true) になるべき
+        let json = r#"{ "cache": { "path": ".custom-cache" } }"#;
+        let config = LinterConfig::from_json(json).unwrap();
+        assert!(config.cache.is_enabled());
+        assert_eq!(config.cache.path(), ".custom-cache");
+    }
+
+    #[test]
+    fn test_config_cache_object_empty() {
+        // 両フィールドともデフォルト値になるべき
+        let json = r#"{ "cache": {} }"#;
+        let config = LinterConfig::from_json(json).unwrap();
+        assert!(config.cache.is_enabled());
+        assert_eq!(config.cache.path(), ".tsuzulint-cache");
     }
 
     #[rstest]
