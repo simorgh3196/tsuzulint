@@ -276,46 +276,38 @@ struct GlobMatcher {
 
 impl GlobMatcher {
     fn new(include_patterns: &[String], exclude_patterns: &[String]) -> Self {
-        use globset::{Glob, GlobSetBuilder};
-
-        let include_set = if !include_patterns.is_empty() {
-            let mut builder = GlobSetBuilder::new();
-            for pattern in include_patterns {
-                match Glob::new(pattern) {
-                    Ok(glob) => {
-                        builder.add(glob);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Invalid include glob pattern {:?}: {}", pattern, e);
-                    }
-                }
-            }
-            builder.build().ok()
-        } else {
-            None
-        };
-
-        let exclude_set = if !exclude_patterns.is_empty() {
-            let mut builder = GlobSetBuilder::new();
-            for pattern in exclude_patterns {
-                match Glob::new(pattern) {
-                    Ok(glob) => {
-                        builder.add(glob);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Invalid exclude glob pattern {:?}: {}", pattern, e);
-                    }
-                }
-            }
-            builder.build().ok()
-        } else {
-            None
-        };
+        let include_set = Self::build_globset(include_patterns, "include");
+        let exclude_set = Self::build_globset(exclude_patterns, "exclude");
 
         Self {
             include_set,
             exclude_set,
         }
+    }
+
+    /// Builds a GlobSet from a list of patterns.
+    ///
+    /// Returns `None` if the pattern list is empty.
+    /// Logs a warning for any invalid patterns.
+    fn build_globset(patterns: &[String], name: &str) -> Option<globset::GlobSet> {
+        use globset::{Glob, GlobSetBuilder};
+
+        if patterns.is_empty() {
+            return None;
+        }
+
+        let mut builder = GlobSetBuilder::new();
+        for pattern in patterns {
+            match Glob::new(pattern) {
+                Ok(glob) => {
+                    builder.add(glob);
+                }
+                Err(e) => {
+                    tracing::warn!("Invalid {} glob pattern {:?}: {}", name, pattern, e);
+                }
+            }
+        }
+        builder.build().ok()
     }
 
     fn should_include(&self, path: &Path) -> bool {
