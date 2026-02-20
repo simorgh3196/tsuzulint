@@ -849,6 +849,18 @@ impl Linter {
     ///
     /// This optimization reduces complexity from O(Blocks * Diagnostics) to O(Blocks + Diagnostics)
     /// (plus sorting cost O(B log B + D log D)), which is significant for large files with many blocks.
+    ///
+    /// # Preconditions
+    ///
+    /// - `diagnostics` must be sorted by start offset. This is a contract with the caller.
+    /// - Calling code (e.g., `lint_file_internal`) ensures this by sorting diagnostics before calling
+    ///   this function via `all_diagnostics.sort_unstable()`.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic on its own, but if the preconditions are violated (unsorted
+    /// diagnostics), the sweep-line algorithm may incorrectly distribute diagnostics, resulting in
+    /// missed or misassigned diagnostics.
     fn distribute_diagnostics(
         mut blocks: Vec<BlockCacheEntry>,
         diagnostics: &[tsuzulint_plugin::Diagnostic],
@@ -2045,9 +2057,13 @@ mod tests {
             fix: None,
             loc: None,
         };
+        // Note: distribute_diagnostics requires sorted diagnostics (by start offset)
+        let mut boundary_diagnostics = vec![diag_at_end, diag_zero_at_end];
+        boundary_diagnostics.sort_by_key(|d| d.span.start);
+
         let result_boundary = Linter::distribute_diagnostics(
             vec![block_boundary],
-            &[diag_at_end, diag_zero_at_end],
+            &boundary_diagnostics,
             &HashSet::new(),
         );
         // Neither diagnostic should be assigned (half-open: block.end is exclusive)
