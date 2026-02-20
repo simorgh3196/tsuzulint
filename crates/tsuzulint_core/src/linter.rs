@@ -855,12 +855,8 @@ impl Linter {
     /// - `diagnostics` must be sorted by start offset. This is a contract with the caller.
     /// - Calling code (e.g., `lint_file_internal`) ensures this by sorting diagnostics before calling
     ///   this function via `all_diagnostics.sort_unstable()`.
-    ///
-    /// # Panics
-    ///
-    /// This function does not panic on its own, but if the preconditions are violated (unsorted
-    /// diagnostics), the sweep-line algorithm may incorrectly distribute diagnostics, resulting in
-    /// missed or misassigned diagnostics.
+    /// - If this precondition is violated, the sweep-line algorithm may silently misassign
+    ///   diagnostics, resulting in missed or incorrectly cached block diagnostics.
     fn distribute_diagnostics(
         mut blocks: Vec<BlockCacheEntry>,
         diagnostics: &[tsuzulint_plugin::Diagnostic],
