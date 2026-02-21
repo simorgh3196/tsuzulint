@@ -793,4 +793,55 @@ mod tests {
         let res = executor.call_lint("config-rule", b"").unwrap();
         assert_eq!(res, b"{\"foo\":\"bar\"}");
     }
+
+    #[test]
+    fn test_config_edge_cases() {
+        let mut executor = WasmiExecutor::new();
+
+        let json = r#"{"name":"edge-case-rule","version":"1.0.0"}"#;
+        let len = json.len();
+
+        let wat = format!(
+            r#"
+            (module
+                (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
+                (memory (export "memory") 1)
+
+                (func $get_manifest (export "get_manifest") (result i32 i32)
+                    (i32.const 0) (i32.const {})
+                )
+
+                (func $alloc (export "alloc") (param i32) (result i32)
+                    (i32.const 100)
+                )
+
+                (func $lint (export "lint") (param i32 i32) (result i32 i32)
+                    (local $len i64)
+
+                    ;; 1. Test len=0 (should return actual length)
+                    (call $get_config (i64.const 0) (i64.const 0))
+                    local.set $len
+
+                    ;; 2. Test invalid pointer (out of bounds)
+                    ;; This relies on memory.write returning Err, which tsuzulint_get_config catches and returns 0
+                    (call $get_config (i64.const 100000) (i64.const 10))
+
+                    ;; Return 0 0 (empty)
+                    (i32.const 0) (i32.const 0)
+                )
+
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        );
+
+        let wasm = wat_to_wasm(&wat);
+        executor.load(&wasm).expect("Failed to load rule");
+
+        // Just ensure it doesn't crash
+        let res = executor.call_lint("edge-case-rule", b"");
+        assert!(res.is_ok());
+    }
 }

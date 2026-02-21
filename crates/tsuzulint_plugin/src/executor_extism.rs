@@ -481,4 +481,55 @@ mod tests {
         let res = executor.call_lint("config-rule", b"{}");
         assert!(res.is_ok());
     }
+
+    #[test]
+    #[cfg(feature = "test-utils")]
+    fn test_config_fallback_stub() {
+        let mut executor = ExtismExecutor::new();
+
+        // This test specifically calls the tsuzulint_get_config host function
+        // which is a stub in ExtismExecutor (returns 0).
+        let json = r#"{"name":"stub-test","version":"1.0.0"}"#;
+        let mut store_instrs = String::new();
+        for (i, b) in json.bytes().enumerate() {
+            store_instrs.push_str(&format!(
+                "(call $store_u8 (i64.const {}) (i32.const {}))\n",
+                1024 + i, b
+            ));
+        }
+
+        let wat = format!(
+            r#"
+            (module
+                (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
+                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
+                (import "extism:host/env" "store_u8" (func $store_u8 (param i64 i32)))
+                (memory (export "memory") 1)
+
+                (func $get_manifest (export "get_manifest") (result i32)
+                    {}
+                    (call $output_set (i64.const 1024) (i64.const {}))
+                    (i32.const 0)
+                )
+
+                (func $lint (export "lint") (result i32)
+                    ;; Call the stub with arbitrary arguments
+                    (call $get_config (i64.const 0) (i64.const 10))
+                    ;; Convert result i64 to i32
+                    i32.wrap_i64
+                )
+            )
+            "#,
+            store_instrs,
+            json.len()
+        );
+
+        let wasm = wat_to_wasm(&wat);
+        executor.load(&wasm).expect("Failed to load rule");
+
+        let res = executor.call_lint("stub-test", b"{}");
+        // The stub returns 0, and we don't call output_set in lint, so result is empty
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), Vec::<u8>::new());
+    }
 }
