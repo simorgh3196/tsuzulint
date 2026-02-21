@@ -202,22 +202,31 @@ pub fn lint_file_internal(
         }
     }
 
-    let mut all_diagnostics = reused_diagnostics;
-    all_diagnostics.reserve(global_diagnostics.len() + block_diagnostics.len());
-    all_diagnostics.extend(global_diagnostics.iter().cloned());
-    all_diagnostics.extend(block_diagnostics);
+    let mut local_diagnostics = reused_diagnostics;
+    local_diagnostics.extend(block_diagnostics);
 
     let mut global_keys = HashSet::new();
     for d in &global_diagnostics {
         global_keys.insert(d);
     }
 
-    all_diagnostics.sort_unstable();
-    all_diagnostics.dedup();
+    // Filter out diagnostics that are already covered by global rules to avoid duplication
+    // and ensure global rules take precedence.
+    local_diagnostics.retain(|d| !global_keys.contains(d));
 
-    let final_diagnostics = all_diagnostics;
+    local_diagnostics.sort_unstable();
+    local_diagnostics.dedup();
 
-    let new_blocks = distribute_diagnostics(current_blocks, &final_diagnostics, &global_keys);
+    // Distribute local diagnostics to blocks.
+    // We pass an empty set for global_keys because we already filtered them out from local_diagnostics.
+    let new_blocks = distribute_diagnostics(current_blocks, &local_diagnostics, &HashSet::new());
+
+    let mut final_diagnostics = local_diagnostics;
+    final_diagnostics.reserve(global_diagnostics.len());
+    final_diagnostics.extend(global_diagnostics);
+
+    final_diagnostics.sort_unstable();
+    final_diagnostics.dedup();
 
     {
         let mut cache_guard = cache
