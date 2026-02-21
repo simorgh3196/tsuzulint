@@ -49,8 +49,15 @@ impl LintRequest {
     }
 
     /// Returns all nodes (works for both single and batch mode).
+    ///
+    /// When deserialized from the host (which doesn't include a `nodes` field),
+    /// returns a single-element slice containing `self.node`.
     pub fn all_nodes(&self) -> &[serde_json::Value] {
-        &self.nodes
+        if self.nodes.is_empty() {
+            std::slice::from_ref(&self.node)
+        } else {
+            &self.nodes
+        }
     }
 
     /// Returns true if this is a batch request with multiple nodes.
@@ -1142,5 +1149,87 @@ mod tests {
         assert_eq!(decoded.node, nodes[0]);
         assert_eq!(decoded.nodes.len(), 2);
         assert!(decoded.is_batch());
+    }
+
+    /// Test `all_nodes()` returns single node when deserialized without `nodes` field.
+    /// This simulates the host sending data without the `nodes` field.
+    #[test]
+    fn lint_request_all_nodes_without_nodes_field() {
+        use serde::ser::SerializeMap;
+
+        struct HostLintRequest {
+            node: serde_json::Value,
+            config: serde_json::Value,
+            source: String,
+            file_path: Option<String>,
+        }
+
+        impl serde::Serialize for HostLintRequest {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                let mut map = serializer.serialize_map(Some(4))?;
+                map.serialize_entry("node", &self.node)?;
+                map.serialize_entry("config", &self.config)?;
+                map.serialize_entry("source", &self.source)?;
+                map.serialize_entry("file_path", &self.file_path)?;
+                map.end()
+            }
+        }
+
+        let host_request = HostLintRequest {
+            node: serde_json::json!({"type": "Str", "range": [0, 5]}),
+            config: serde_json::json!({"opt": 42}),
+            source: "test".to_string(),
+            file_path: Some("test.md".to_string()),
+        };
+
+        let bytes = rmp_serde::to_vec_named(&host_request).unwrap();
+        let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
+
+        assert_eq!(decoded.node, host_request.node);
+        assert!(decoded.nodes.is_empty());
+
+        assert_eq!(decoded.all_nodes().len(), 1);
+        assert_eq!(decoded.all_nodes()[0], host_request.node);
+        assert!(!decoded.is_batch());
+    }
+
+    /// Test `all_nodes()` works correctly when `nodes` is manually empty but `node` has a value.
+    #[test]
+    fn lint_request_all_nodes_empty_nodes_with_valid_node() {
+        let request = LintRequest {
+            node: serde_json::json!({"type": "Str", "range": [0, 5]}),
+            nodes: vec![],
+            config: serde_json::json!({}),
+            source: "test".to_string(),
+            file_path: None,
+            helpers: None,
+        };
+
+        assert!(request.nodes.is_empty());
+        assert_eq!(request.all_nodes().len(), 1);
+        assert_eq!(request.all_nodes()[0]["type"], "Str");
+        assert!(!request.is_batch());
+    }
+
+    /// Test `all_nodes()` with JSON deserialization (without `nodes` field).
+    #[test]
+    fn lint_request_all_nodes_json_without_nodes_field() {
+        let json = r#"{
+            "node": {"type": "Str", "range": [0, 5]},
+            "config": {"opt": 42},
+            "source": "test"
+        }"#;
+
+        let decoded: LintRequest = serde_json::from_str(json).unwrap();
+
+        assert_eq!(decoded.node["type"], "Str");
+        assert!(decoded.nodes.is_empty());
+
+        assert_eq!(decoded.all_nodes().len(), 1);
+        assert_eq!(decoded.all_nodes()[0]["type"], "Str");
+        assert!(!decoded.is_batch());
     }
 }
