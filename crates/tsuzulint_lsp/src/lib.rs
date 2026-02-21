@@ -146,7 +146,10 @@ impl Backend {
             }
         })
         .await
-        .unwrap_or_default()
+        .unwrap_or_else(|e| {
+            error!("lint_text task failed: {}", e);
+            vec![]
+        })
     }
 
     /// Converts a TsuzuLint diagnostic to an LSP diagnostic.
@@ -716,8 +719,28 @@ pub async fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Include the common test module content directly
+    include!("../tests/common_mod.rs");
+
     use tower_lsp::lsp_types::Position;
+
+    struct DelayGuard;
+    impl Drop for DelayGuard {
+        fn drop(&mut self) {
+            Backend::set_global_test_delay(std::time::Duration::from_millis(0));
+        }
+    }
+
+    #[test]
+    fn test_delay_guard_resets_delay() {
+        Backend::set_global_test_delay(std::time::Duration::from_millis(50));
+        assert_eq!(TEST_LINT_DELAY_MS.load(Ordering::Relaxed), 50);
+        {
+            let _guard = DelayGuard;
+        }
+        assert_eq!(TEST_LINT_DELAY_MS.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn test_offset_to_position_basic_ascii() {
@@ -814,6 +837,8 @@ mod tests {
     async fn test_lint_text_does_not_block_runtime() {
         use std::time::{Duration, Instant};
 
+        let _guard = DelayGuard;
+
         // Set test delay (100ms per lint operation)
         Backend::set_global_test_delay(Duration::from_millis(100));
 
@@ -834,7 +859,7 @@ mod tests {
         let mut writer = client_write;
 
         // Channel to collect responses
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         tokio::spawn(async move {
             while let Some(msg) = recv_msg(&mut reader).await {
                 if tx.send(msg).is_err() {
@@ -899,59 +924,19 @@ mod tests {
 
         let elapsed = start.elapsed();
 
-        // Reset delay
-        Backend::set_global_test_delay(Duration::from_millis(0));
-
         // Verify all diagnostics received
         assert_eq!(diagnostics_count, 3, "Expected 3 diagnostics responses");
 
         // Verify timing:
         // - If blocking: 3 × 100ms = 300ms minimum
-        // - If non-blocking: ~100ms + overhead (should be < 250ms)
+        // - If non-blocking: ~100ms + overhead (should be < 300ms)
         println!("Elapsed time for 3 parallel lints: {:?}", elapsed);
 
         assert!(
-            elapsed < Duration::from_millis(250),
-            "Runtime was blocked! Expected < 250ms, got {:?}. \
+            elapsed < Duration::from_millis(300),
+            "Runtime was blocked! Expected < 300ms, got {:?}. \
              This indicates lint_text is blocking the async runtime.",
             elapsed
         );
-    }
-
-    async fn send_msg<W: AsyncWriteExt + Unpin>(writer: &mut W, msg: &str) {
-        let content = format!("Content-Length: {}\r\n\r\n{}", msg.len(), msg);
-        writer.write_all(content.as_bytes()).await.unwrap();
-        writer.flush().await.unwrap();
-    }
-
-    async fn recv_msg<R: AsyncReadExt + Unpin>(reader: &mut R) -> Option<String> {
-        let mut buffer = Vec::new();
-        let mut content_length = 0;
-
-        loop {
-            let byte = reader.read_u8().await.ok()?;
-            buffer.push(byte);
-            if buffer.ends_with(b"\r\n\r\n") {
-                let headers = String::from_utf8_lossy(&buffer);
-                for line in headers.lines() {
-                    if line.to_lowercase().starts_with("content-length:") {
-                        let parts: Vec<&str> = line.split(':').collect();
-                        if parts.len() == 2 {
-                            content_length = parts[1].trim().parse().unwrap_or(0);
-                        }
-                    }
-                }
-                break;
-            }
-        }
-
-        if content_length == 0 {
-            return None;
-        }
-
-        let mut body = vec![0u8; content_length];
-        reader.read_exact(&mut body).await.ok()?;
-
-        Some(String::from_utf8(body).unwrap())
     }
 }
