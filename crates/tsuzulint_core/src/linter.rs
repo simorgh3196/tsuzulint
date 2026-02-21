@@ -888,6 +888,8 @@ impl Linter {
 
         // 1. Filter out global diagnostics and create a list of references we can sort
         // We use references to avoid cloning diagnostics during the sort/scan phase
+        // Note: `diagnostics` input is expected to be sorted by start position.
+        // filtering preserves order, so local_diagnostics remains sorted.
         let local_diagnostics: Vec<&tsuzulint_plugin::Diagnostic> = diagnostics
             .iter()
             .filter(|d| !global_keys.contains(d))
@@ -896,7 +898,6 @@ impl Linter {
         // 2. Diagnostics are already sorted by start position (contract with caller).
         // This allows us to scan through them linearly as we iterate through blocks.
         // (Removed redundant sort_by_key)
-
         let mut diag_idx = 0;
 
         blocks
@@ -2103,7 +2104,7 @@ mod tests {
             diag_outside.clone(),
             diag_overlap,
         ];
-        diagnostics.sort_by_key(|d| d.span.start);
+        diagnostics.sort_unstable();
 
         let result = Linter::distribute_diagnostics(blocks.clone(), &diagnostics, &global_keys);
 
