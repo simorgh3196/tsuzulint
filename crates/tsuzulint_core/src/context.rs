@@ -123,6 +123,7 @@ impl ContentCharacteristics {
     /// Analyze content in a single pass.
     pub fn analyze(source: &str) -> Self {
         let mut chars = Self::default();
+        let mut prev_non_blank = false;
 
         for line in source.lines() {
             let trimmed = line.trim();
@@ -130,14 +131,12 @@ impl ContentCharacteristics {
             if trimmed.starts_with('#') {
                 chars.has_headings = true;
             }
-            // Setext-style headings: lines consisting only of = or -
-            if !chars.has_headings {
-                let underline_chars: Vec<char> = trimmed.chars().collect();
-                if !underline_chars.is_empty()
-                    && underline_chars.iter().all(|&c| c == '=' || c == '-')
-                {
-                    chars.has_headings = true;
-                }
+            if !chars.has_headings
+                && prev_non_blank
+                && !trimmed.is_empty()
+                && trimmed.bytes().all(|b| b == b'=' || b == b'-')
+            {
+                chars.has_headings = true;
             }
             if trimmed.contains('[') && trimmed.contains(']') {
                 chars.has_links = true;
@@ -156,14 +155,15 @@ impl ContentCharacteristics {
             if trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+') {
                 chars.has_lists = true;
             } else if !chars.has_lists {
-                // Ordered list: digit(s) followed by . or )
-                let mut chars_iter = trimmed.chars();
-                if let Some(first) = chars_iter.next()
-                    && first.is_ascii_digit()
-                {
-                    let rest: String = chars_iter.collect();
-                    if rest.starts_with('.') || rest.starts_with(')') {
+                let mut has_digit = false;
+                for c in trimmed.chars() {
+                    if c.is_ascii_digit() {
+                        has_digit = true;
+                    } else if has_digit && (c == '.' || c == ')') {
                         chars.has_lists = true;
+                        break;
+                    } else {
+                        break;
                     }
                 }
             }
@@ -176,6 +176,7 @@ impl ContentCharacteristics {
             if trimmed.starts_with('<') {
                 chars.has_html = true;
             }
+            prev_non_blank = !trimmed.is_empty();
         }
 
         chars
@@ -195,7 +196,7 @@ impl ContentCharacteristics {
             "Link" | "link" => !self.has_links,
             "Image" | "image" => !self.has_images,
             "CodeBlock" => !self.has_code_blocks && !self.has_fenced_code,
-            "code" => !self.has_inline_code,
+            "Code" | "code" => !self.has_inline_code,
             "List" | "list" => !self.has_lists,
             "Table" | "table" => !self.has_tables,
             "Blockquote" | "blockquote" => !self.has_blockquotes,
@@ -728,5 +729,49 @@ mod tests_content_characteristics {
 
         // All absent types - should skip
         assert!(chars.should_skip_rule(&["List".to_string(), "Table".to_string()]));
+    }
+
+    #[test]
+    fn test_detect_ordered_lists_multidigit() {
+        let chars = ContentCharacteristics::analyze("10. Tenth item\n99. Ninety-ninth");
+        assert!(
+            chars.has_lists,
+            "multi-digit ordered lists should be detected"
+        );
+    }
+
+    #[test]
+    fn test_detect_ordered_lists_multidigit_paren() {
+        let chars = ContentCharacteristics::analyze("10) Tenth\n100) Hundredth");
+        assert!(chars.has_lists, "multi-digit with ) should be detected");
+    }
+
+    #[test]
+    fn test_should_skip_rule_code_pascalcase() {
+        let chars = ContentCharacteristics::analyze("no inline code here");
+        assert!(chars.should_skip_rule(&["Code".to_string()]));
+        assert!(chars.should_skip_rule(&["code".to_string()]));
+
+        let chars_with_code = ContentCharacteristics::analyze("`inline`");
+        assert!(!chars_with_code.should_skip_rule(&["Code".to_string()]));
+        assert!(!chars_with_code.should_skip_rule(&["code".to_string()]));
+    }
+
+    #[test]
+    fn test_no_false_positive_horizontal_rule() {
+        let chars = ContentCharacteristics::analyze("\n---\n");
+        assert!(
+            !chars.has_headings,
+            "horizontal rule should not trigger has_headings"
+        );
+    }
+
+    #[test]
+    fn test_setext_with_preceding_content() {
+        let chars = ContentCharacteristics::analyze("My Title\n========");
+        assert!(
+            chars.has_headings,
+            "setext heading with content should be detected"
+        );
     }
 }
