@@ -276,46 +276,38 @@ struct GlobMatcher {
 
 impl GlobMatcher {
     fn new(include_patterns: &[String], exclude_patterns: &[String]) -> Self {
-        use globset::{Glob, GlobSetBuilder};
-
-        let include_set = if !include_patterns.is_empty() {
-            let mut builder = GlobSetBuilder::new();
-            for pattern in include_patterns {
-                match Glob::new(pattern) {
-                    Ok(glob) => {
-                        builder.add(glob);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Invalid include glob pattern {:?}: {}", pattern, e);
-                    }
-                }
-            }
-            builder.build().ok()
-        } else {
-            None
-        };
-
-        let exclude_set = if !exclude_patterns.is_empty() {
-            let mut builder = GlobSetBuilder::new();
-            for pattern in exclude_patterns {
-                match Glob::new(pattern) {
-                    Ok(glob) => {
-                        builder.add(glob);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Invalid exclude glob pattern {:?}: {}", pattern, e);
-                    }
-                }
-            }
-            builder.build().ok()
-        } else {
-            None
-        };
+        let include_set = Self::build_globset(include_patterns, "include");
+        let exclude_set = Self::build_globset(exclude_patterns, "exclude");
 
         Self {
             include_set,
             exclude_set,
         }
+    }
+
+    /// Builds a GlobSet from a list of patterns.
+    ///
+    /// Returns `None` if the pattern list is empty.
+    /// Logs a warning for any invalid patterns.
+    fn build_globset(patterns: &[String], name: &str) -> Option<globset::GlobSet> {
+        use globset::{Glob, GlobSetBuilder};
+
+        if patterns.is_empty() {
+            return None;
+        }
+
+        let mut builder = GlobSetBuilder::new();
+        for pattern in patterns {
+            match Glob::new(pattern) {
+                Ok(glob) => {
+                    builder.add(glob);
+                }
+                Err(e) => {
+                    tracing::warn!("Invalid {} glob pattern {:?}: {}", name, pattern, e);
+                }
+            }
+        }
+        builder.build().ok()
     }
 
     fn should_include(&self, path: &Path) -> bool {
@@ -545,5 +537,24 @@ mod tests {
         assert!(matcher.should_include(Path::new("README.md")));
         assert!(!matcher.should_include(Path::new("node_modules/pkg/README.md")));
         assert!(!matcher.should_include(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn test_glob_matcher_invalid_pattern() {
+        // "invalid[" is an invalid glob pattern. It should be logged and skipped, but valid ones are included.
+        let matcher = GlobMatcher::new(&["invalid[".to_string(), "*.md".to_string()], &[]);
+
+        assert!(matcher.should_include(Path::new("test.md")));
+        assert!(!matcher.should_include(Path::new("test.txt")));
+
+        let matcher2 = GlobMatcher::new(&[], &["invalid[".to_string(), "*.txt".to_string()]);
+        assert!(matcher2.should_include(Path::new("test.md")));
+        assert!(!matcher2.should_include(Path::new("test.txt")));
+    }
+
+    #[test]
+    fn test_build_globset_empty() {
+        let set = GlobMatcher::build_globset(&[], "test");
+        assert!(set.is_none());
     }
 }
