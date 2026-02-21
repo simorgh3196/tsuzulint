@@ -273,7 +273,7 @@ impl<'a> LintContext<'a> {
     fn collect_structure(node: &TxtNode<'a>, structure: &mut DocumentStructure) {
         match node.node_type {
             NodeType::Header => {
-                let depth = node.data.depth.unwrap_or(1);
+                let depth = node.depth().unwrap_or(1);
                 let text = Self::extract_text(node);
                 structure.headings.push(HeadingInfo {
                     depth,
@@ -282,8 +282,8 @@ impl<'a> LintContext<'a> {
                 });
             }
             NodeType::Link | NodeType::Image => {
-                let url = node.data.url.unwrap_or("").to_string();
-                let title = node.data.title.map(|s| s.to_string());
+                let url = node.url().unwrap_or("").to_string();
+                let title = node.title().map(|s| s.to_string());
                 structure.links.push(LinkInfo {
                     url,
                     title,
@@ -292,7 +292,7 @@ impl<'a> LintContext<'a> {
                 });
             }
             NodeType::CodeBlock => {
-                let lang = node.data.lang.map(|s| s.to_string());
+                let lang = node.lang().map(|s| s.to_string());
                 structure.code_blocks.push(CodeBlockInfo {
                     lang,
                     span: node.span,
@@ -608,7 +608,7 @@ mod tests {
         let str_node = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 3), "alt"));
         let children = arena.alloc_slice_copy(&[*str_node]);
         let mut img = TxtNode::new_parent(NodeType::Image, Span::new(0, 20), children);
-        img.data = NodeData::link("img.png", None);
+        img.data = NodeData::image("img.png", None);
         let img_ref = arena.alloc(img);
         let doc_children = arena.alloc_slice_copy(&[*img_ref]);
         let doc = arena.alloc(TxtNode::new_parent(

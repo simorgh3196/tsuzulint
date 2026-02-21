@@ -56,35 +56,36 @@ pub struct TxtNode<'a> {
     pub data: NodeData<'a>,
 }
 
-/// Additional data specific to certain node types.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-pub struct NodeData<'a> {
-    /// URL for Link/Image nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<&'a str>,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NodeData<'a> {
+    #[default]
+    None,
+    Header(u8),
+    List(bool),
+    CodeBlock(Option<&'a str>),
+    Link(LinkData<'a>),
+    Image(LinkData<'a>),
+    Reference(ReferenceData<'a>),
+    Definition(DefinitionData<'a>),
+}
 
-    /// Title for Link/Image nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkData<'a> {
+    pub url: &'a str,
     pub title: Option<&'a str>,
+}
 
-    /// Depth for Header nodes (1-6).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub depth: Option<u8>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReferenceData<'a> {
+    pub identifier: &'a str,
+    pub label: Option<&'a str>,
+}
 
-    /// Whether list is ordered.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ordered: Option<bool>,
-
-    /// Language for CodeBlock nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lang: Option<&'a str>,
-
-    /// Identifier for reference nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub identifier: Option<&'a str>,
-
-    /// Label for reference nodes.
-    #[serde(skip_serializing_if = "Option::is_none")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DefinitionData<'a> {
+    pub identifier: &'a str,
+    pub url: &'a str,
+    pub title: Option<&'a str>,
     pub label: Option<&'a str>,
 }
 
@@ -180,34 +181,114 @@ impl<'a> TxtNode<'a> {
     pub const fn text(&self) -> Option<&'a str> {
         self.value
     }
+
+    /// Returns the header depth if this is a Header node.
+    #[inline]
+    pub fn depth(&self) -> Option<u8> {
+        match self.data {
+            NodeData::Header(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Returns the URL if this is a Link, Image, or Definition node.
+    #[inline]
+    pub fn url(&self) -> Option<&'a str> {
+        match &self.data {
+            NodeData::Link(data) | NodeData::Image(data) => Some(data.url),
+            NodeData::Definition(def) => Some(def.url),
+            _ => None,
+        }
+    }
+
+    /// Returns the title if this is a Link, Image, or Definition node.
+    #[inline]
+    pub fn title(&self) -> Option<&'a str> {
+        match &self.data {
+            NodeData::Link(data) | NodeData::Image(data) => data.title,
+            NodeData::Definition(def) => def.title,
+            _ => None,
+        }
+    }
+
+    /// Returns the ordered flag if this is a List node.
+    #[inline]
+    pub fn ordered(&self) -> Option<bool> {
+        match self.data {
+            NodeData::List(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    /// Returns the language if this is a CodeBlock node.
+    #[inline]
+    pub fn lang(&self) -> Option<&'a str> {
+        match self.data {
+            NodeData::CodeBlock(lang) => lang,
+            _ => None,
+        }
+    }
+
+    /// Returns the identifier if this is a Reference or Definition node.
+    #[inline]
+    pub fn identifier(&self) -> Option<&'a str> {
+        match &self.data {
+            NodeData::Reference(ref_data) => Some(ref_data.identifier),
+            NodeData::Definition(def) => Some(def.identifier),
+            _ => None,
+        }
+    }
+
+    /// Returns the label if this is a Reference or Definition node.
+    #[inline]
+    pub fn label(&self) -> Option<&'a str> {
+        match &self.data {
+            NodeData::Reference(ref_data) => ref_data.label,
+            NodeData::Definition(def) => def.label,
+            _ => None,
+        }
+    }
 }
 
 impl<'a> NodeData<'a> {
-    /// Returns the number of present (non-None) fields.
+    /// Returns the number of present (non-None) fields for serialization.
     fn present_field_count(&self) -> usize {
-        let mut count = 0;
-        if self.url.is_some() {
-            count += 1;
+        match self {
+            NodeData::None => 0,
+            NodeData::Header(_) => 1,
+            NodeData::List(_) => 1,
+            NodeData::CodeBlock(lang) => {
+                if lang.is_some() {
+                    1
+                } else {
+                    0
+                }
+            }
+            NodeData::Link(link_data) | NodeData::Image(link_data) => {
+                if link_data.title.is_some() {
+                    2
+                } else {
+                    1
+                }
+            }
+            NodeData::Reference(ref_data) => {
+                if ref_data.label.is_some() {
+                    2
+                } else {
+                    1
+                }
+            }
+            NodeData::Definition(def_data) => {
+                let mut count = 2;
+                if def_data.title.is_some() {
+                    count += 1;
+                }
+                if def_data.label.is_some() {
+                    count += 1;
+                }
+                count
+            }
         }
-        if self.title.is_some() {
-            count += 1;
-        }
-        if self.depth.is_some() {
-            count += 1;
-        }
-        if self.ordered.is_some() {
-            count += 1;
-        }
-        if self.lang.is_some() {
-            count += 1;
-        }
-        if self.identifier.is_some() {
-            count += 1;
-        }
-        if self.label.is_some() {
-            count += 1;
-        }
-        count
     }
 
     /// Serializes present fields into the given struct serializer state.
@@ -215,26 +296,41 @@ impl<'a> NodeData<'a> {
         &self,
         state: &mut S,
     ) -> Result<(), S::Error> {
-        if let Some(url) = &self.url {
-            state.serialize_field("url", url)?;
-        }
-        if let Some(title) = &self.title {
-            state.serialize_field("title", title)?;
-        }
-        if let Some(depth) = &self.depth {
-            state.serialize_field("depth", depth)?;
-        }
-        if let Some(ordered) = &self.ordered {
-            state.serialize_field("ordered", ordered)?;
-        }
-        if let Some(lang) = &self.lang {
-            state.serialize_field("lang", lang)?;
-        }
-        if let Some(identifier) = &self.identifier {
-            state.serialize_field("identifier", identifier)?;
-        }
-        if let Some(label) = &self.label {
-            state.serialize_field("label", label)?;
+        match self {
+            NodeData::None => {}
+            NodeData::Header(depth) => {
+                state.serialize_field("depth", depth)?;
+            }
+            NodeData::List(ordered) => {
+                state.serialize_field("ordered", ordered)?;
+            }
+            NodeData::CodeBlock(lang) => {
+                if let Some(l) = lang {
+                    state.serialize_field("lang", l)?;
+                }
+            }
+            NodeData::Link(link_data) | NodeData::Image(link_data) => {
+                state.serialize_field("url", link_data.url)?;
+                if let Some(title) = link_data.title {
+                    state.serialize_field("title", title)?;
+                }
+            }
+            NodeData::Reference(ref_data) => {
+                state.serialize_field("identifier", ref_data.identifier)?;
+                if let Some(label) = ref_data.label {
+                    state.serialize_field("label", label)?;
+                }
+            }
+            NodeData::Definition(def_data) => {
+                state.serialize_field("identifier", def_data.identifier)?;
+                state.serialize_field("url", def_data.url)?;
+                if let Some(title) = def_data.title {
+                    state.serialize_field("title", title)?;
+                }
+                if let Some(label) = def_data.label {
+                    state.serialize_field("label", label)?;
+                }
+            }
         }
         Ok(())
     }
@@ -242,52 +338,59 @@ impl<'a> NodeData<'a> {
     /// Creates new empty node data.
     #[inline]
     pub const fn new() -> Self {
-        Self {
-            url: None,
-            title: None,
-            depth: None,
-            ordered: None,
-            lang: None,
-            identifier: None,
-            label: None,
-        }
+        Self::None
     }
 
     /// Creates node data for a header.
     #[inline]
     pub const fn header(depth: u8) -> Self {
-        Self {
-            depth: Some(depth),
-            ..Self::new()
-        }
+        Self::Header(depth)
     }
 
     /// Creates node data for a link.
     #[inline]
     pub const fn link(url: &'a str, title: Option<&'a str>) -> Self {
-        Self {
-            url: Some(url),
-            title,
-            ..Self::new()
-        }
+        Self::Link(LinkData { url, title })
+    }
+
+    /// Creates node data for an image.
+    #[inline]
+    pub const fn image(url: &'a str, title: Option<&'a str>) -> Self {
+        Self::Image(LinkData { url, title })
     }
 
     /// Creates node data for a code block.
     #[inline]
     pub const fn code_block(lang: Option<&'a str>) -> Self {
-        Self {
-            lang,
-            ..Self::new()
-        }
+        Self::CodeBlock(lang)
     }
 
     /// Creates node data for a list.
     #[inline]
     pub const fn list(ordered: bool) -> Self {
-        Self {
-            ordered: Some(ordered),
-            ..Self::new()
-        }
+        Self::List(ordered)
+    }
+
+    /// Creates node data for a reference (LinkReference, ImageReference, FootnoteReference).
+    #[inline]
+    pub const fn reference(identifier: &'a str, label: Option<&'a str>) -> Self {
+        Self::Reference(ReferenceData { identifier, label })
+    }
+
+    /// Creates node data for a definition.
+    #[inline]
+    pub const fn definition(
+        identifier: &'a str,
+        url: &'a str,
+        title: Option<&'a str>,
+        label: Option<&'a str>,
+    ) -> Self {
+        Self::Definition(DefinitionData {
+            identifier,
+            url,
+            title,
+            label,
+        })
     }
 }
 
@@ -321,57 +424,118 @@ mod tests {
     #[test]
     fn test_node_data_header() {
         let data = NodeData::header(2);
-        assert_eq!(data.depth, Some(2));
+        assert!(matches!(data, NodeData::Header(2)));
     }
 
     #[test]
     fn test_node_data_link() {
         let data = NodeData::link("https://example.com", Some("Example"));
-        assert_eq!(data.url, Some("https://example.com"));
-        assert_eq!(data.title, Some("Example"));
+        match data {
+            NodeData::Link(link_data) => {
+                assert_eq!(link_data.url, "https://example.com");
+                assert_eq!(link_data.title, Some("Example"));
+            }
+            _ => panic!("Expected Link variant"),
+        }
     }
 
     #[test]
     fn test_node_data_link_without_title() {
         let data = NodeData::link("https://example.com", None);
-        assert_eq!(data.url, Some("https://example.com"));
-        assert!(data.title.is_none());
+        match data {
+            NodeData::Link(link_data) => {
+                assert_eq!(link_data.url, "https://example.com");
+                assert!(link_data.title.is_none());
+            }
+            _ => panic!("Expected Link variant"),
+        }
     }
 
     #[test]
     fn test_node_data_code_block() {
         let data = NodeData::code_block(Some("rust"));
-        assert_eq!(data.lang, Some("rust"));
+        assert!(matches!(data, NodeData::CodeBlock(Some("rust"))));
     }
 
     #[test]
     fn test_node_data_code_block_without_lang() {
         let data = NodeData::code_block(None);
-        assert!(data.lang.is_none());
+        assert!(matches!(data, NodeData::CodeBlock(None)));
     }
 
     #[test]
     fn test_node_data_list_ordered() {
         let data = NodeData::list(true);
-        assert_eq!(data.ordered, Some(true));
+        assert!(matches!(data, NodeData::List(true)));
     }
 
     #[test]
     fn test_node_data_list_unordered() {
         let data = NodeData::list(false);
-        assert_eq!(data.ordered, Some(false));
+        assert!(matches!(data, NodeData::List(false)));
+    }
+
+    #[test]
+    fn test_node_data_reference() {
+        let data = NodeData::reference("ref-id", Some("Reference Label"));
+        match data {
+            NodeData::Reference(ref_data) => {
+                assert_eq!(ref_data.identifier, "ref-id");
+                assert_eq!(ref_data.label, Some("Reference Label"));
+            }
+            _ => panic!("Expected Reference variant"),
+        }
+    }
+
+    #[test]
+    fn test_node_data_reference_without_label() {
+        let data = NodeData::reference("ref-id", None);
+        match data {
+            NodeData::Reference(ref_data) => {
+                assert_eq!(ref_data.identifier, "ref-id");
+                assert!(ref_data.label.is_none());
+            }
+            _ => panic!("Expected Reference variant"),
+        }
+    }
+
+    #[test]
+    fn test_node_data_definition() {
+        let data = NodeData::definition(
+            "def-id",
+            "https://example.com",
+            Some("Definition Title"),
+            Some("Definition Label"),
+        );
+        match data {
+            NodeData::Definition(def_data) => {
+                assert_eq!(def_data.identifier, "def-id");
+                assert_eq!(def_data.url, "https://example.com");
+                assert_eq!(def_data.title, Some("Definition Title"));
+                assert_eq!(def_data.label, Some("Definition Label"));
+            }
+            _ => panic!("Expected Definition variant"),
+        }
+    }
+
+    #[test]
+    fn test_node_data_definition_minimal() {
+        let data = NodeData::definition("def-id", "https://example.com", None, None);
+        match data {
+            NodeData::Definition(def_data) => {
+                assert_eq!(def_data.identifier, "def-id");
+                assert_eq!(def_data.url, "https://example.com");
+                assert!(def_data.title.is_none());
+                assert!(def_data.label.is_none());
+            }
+            _ => panic!("Expected Definition variant"),
+        }
     }
 
     #[test]
     fn test_node_data_new_empty() {
         let data = NodeData::new();
-        assert!(data.url.is_none());
-        assert!(data.title.is_none());
-        assert!(data.depth.is_none());
-        assert!(data.ordered.is_none());
-        assert!(data.lang.is_none());
-        assert!(data.identifier.is_none());
-        assert!(data.label.is_none());
+        assert!(matches!(data, NodeData::None));
     }
 
     #[test]
@@ -447,16 +611,14 @@ mod tests {
     fn test_header_depth_values() {
         for depth in 1u8..=6 {
             let data = NodeData::header(depth);
-            assert_eq!(data.depth, Some(depth));
+            assert!(matches!(data, NodeData::Header(d) if d == depth));
         }
     }
 
     #[test]
     fn test_node_data_default() {
         let data = NodeData::default();
-        assert!(data.url.is_none());
-        assert!(data.title.is_none());
-        assert!(data.depth.is_none());
+        assert!(matches!(data, NodeData::None));
     }
 
     #[test]
@@ -484,8 +646,86 @@ mod tests {
         node.data = NodeData::code_block(Some("rust"));
 
         assert_eq!(node.node_type, NodeType::CodeBlock);
-        assert_eq!(node.data.lang, Some("rust"));
+        assert!(matches!(node.data, NodeData::CodeBlock(Some("rust"))));
         assert_eq!(node.value, Some(code));
+    }
+
+    #[test]
+    fn test_accessors_depth() {
+        let mut header = TxtNode::new_parent(NodeType::Header, Span::new(0, 10), &[]);
+        header.data = NodeData::header(2);
+        assert_eq!(header.depth(), Some(2));
+
+        let para = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 10), &[]);
+        assert_eq!(para.depth(), None);
+    }
+
+    #[test]
+    fn test_accessors_url_and_title() {
+        let arena = AstArena::new();
+        let mut link = TxtNode::new_parent(NodeType::Link, Span::new(0, 10), &[]);
+        link.data = NodeData::link(
+            arena.alloc_str("https://example.com"),
+            Some(arena.alloc_str("Example")),
+        );
+        assert_eq!(link.url(), Some("https://example.com"));
+        assert_eq!(link.title(), Some("Example"));
+
+        let mut def = TxtNode::new_leaf(NodeType::Definition, Span::new(0, 10));
+        def.data = NodeData::definition(
+            arena.alloc_str("id"),
+            arena.alloc_str("https://def.com"),
+            None,
+            None,
+        );
+        assert_eq!(def.url(), Some("https://def.com"));
+        assert_eq!(def.title(), None);
+    }
+
+    #[test]
+    fn test_accessors_ordered() {
+        let mut list = TxtNode::new_parent(NodeType::List, Span::new(0, 10), &[]);
+        list.data = NodeData::list(true);
+        assert_eq!(list.ordered(), Some(true));
+
+        list.data = NodeData::list(false);
+        assert_eq!(list.ordered(), Some(false));
+
+        let para = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 10), &[]);
+        assert_eq!(para.ordered(), None);
+    }
+
+    #[test]
+    fn test_accessors_lang() {
+        let mut code_block = TxtNode::new_text(NodeType::CodeBlock, Span::new(0, 10), "code");
+        code_block.data = NodeData::code_block(Some("rust"));
+        assert_eq!(code_block.lang(), Some("rust"));
+
+        code_block.data = NodeData::code_block(None);
+        assert_eq!(code_block.lang(), None);
+
+        let para = TxtNode::new_parent(NodeType::Paragraph, Span::new(0, 10), &[]);
+        assert_eq!(para.lang(), None);
+    }
+
+    #[test]
+    fn test_accessors_identifier_and_label() {
+        let arena = AstArena::new();
+        let mut ref_node = TxtNode::new_leaf(NodeType::FootnoteReference, Span::new(0, 10));
+        ref_node.data =
+            NodeData::reference(arena.alloc_str("fn-1"), Some(arena.alloc_str("Footnote")));
+        assert_eq!(ref_node.identifier(), Some("fn-1"));
+        assert_eq!(ref_node.label(), Some("Footnote"));
+
+        let mut def_node = TxtNode::new_leaf(NodeType::Definition, Span::new(0, 10));
+        def_node.data = NodeData::definition(
+            arena.alloc_str("def-id"),
+            arena.alloc_str("https://example.com"),
+            None,
+            Some(arena.alloc_str("Def Label")),
+        );
+        assert_eq!(def_node.identifier(), Some("def-id"));
+        assert_eq!(def_node.label(), Some("Def Label"));
     }
 
     #[test]
@@ -522,13 +762,11 @@ mod tests {
     fn test_serialization_flattened_data() {
         let mut node = TxtNode::new_parent(NodeType::Header, Span::new(0, 10), &[]);
         node.data = NodeData::header(2);
-        node.data.url = Some("https://example.com");
 
         let json = serde_json::to_value(node).unwrap();
 
         assert_eq!(json["type"], "Header");
         assert_eq!(json["depth"], 2);
-        assert_eq!(json["url"], "https://example.com");
     }
 
     #[test]
@@ -543,30 +781,25 @@ mod tests {
     }
 
     #[test]
-    fn test_serialization_all_fields_len() {
-        let mut node = TxtNode::new_text(NodeType::CodeBlock, Span::new(0, 10), "code");
-        // Manually set all fields
-        node.data.url = Some("http://url");
-        node.data.title = Some("Title");
-        node.data.depth = Some(1);
-        node.data.ordered = Some(true);
-        node.data.lang = Some("rust");
-        node.data.identifier = Some("id");
-        node.data.label = Some("lbl");
+    fn test_serialization_definition_all_fields() {
+        let mut node = TxtNode::new_leaf(NodeType::Definition, Span::new(0, 10));
+        node.data = NodeData::Definition(DefinitionData {
+            identifier: "id",
+            url: "http://url",
+            title: Some("Title"),
+            label: Some("lbl"),
+        });
 
         let json = serde_json::to_value(node).unwrap();
         let obj = json.as_object().unwrap();
 
-        // Expected fields: type, range, value (since it's text), plus 7 data fields
-        // Total = 3 + 7 = 10
-        assert_eq!(obj.len(), 10);
+        // Expected fields: type, range, identifier, url, title, label
+        // Total = 6
+        assert_eq!(obj.len(), 6);
 
+        assert_eq!(obj["identifier"], "id");
         assert_eq!(obj["url"], "http://url");
         assert_eq!(obj["title"], "Title");
-        assert_eq!(obj["depth"], 1);
-        assert_eq!(obj["ordered"], true);
-        assert_eq!(obj["lang"], "rust");
-        assert_eq!(obj["identifier"], "id");
         assert_eq!(obj["label"], "lbl");
     }
 
@@ -581,5 +814,20 @@ mod tests {
         assert_eq!(obj.len(), 2);
         assert!(!obj.contains_key("children"));
         assert!(!obj.contains_key("value"));
+    }
+
+    #[test]
+    fn test_nodedata_size_optimization() {
+        use std::mem::size_of;
+
+        let old_size = 7 * size_of::<Option<&str>>();
+        let new_size = size_of::<NodeData>();
+
+        assert!(
+            new_size <= old_size * 70 / 100,
+            "NodeData should be at least 30% smaller: was {} bytes, now {} bytes",
+            old_size,
+            new_size
+        );
     }
 }

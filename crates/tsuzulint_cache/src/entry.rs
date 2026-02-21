@@ -6,13 +6,16 @@ use serde::{Deserialize, Serialize};
 use tsuzulint_ast::Span;
 use tsuzulint_plugin::Diagnostic;
 
+/// A block hash (32 bytes).
+pub type BlockHash = [u8; 32];
+
 /// A cached block of content.
 #[derive(
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
 pub struct BlockCacheEntry {
     /// Hash of the block content.
-    pub hash: String,
+    pub hash: BlockHash,
 
     /// Original span of the block.
     pub span: Span,
@@ -216,12 +219,12 @@ mod tests {
         let versions = HashMap::new();
         let blocks = vec![
             BlockCacheEntry {
-                hash: "block1".to_string(),
+                hash: [1; 32],
                 span: Span::new(0, 10),
                 diagnostics: vec![],
             },
             BlockCacheEntry {
-                hash: "block2".to_string(),
+                hash: [2; 32],
                 span: Span::new(11, 20),
                 diagnostics: vec![Diagnostic::new("rule1", "Error", Span::new(12, 15))],
             },

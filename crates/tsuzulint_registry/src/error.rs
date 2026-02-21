@@ -1,6 +1,7 @@
 //! Error types for manifest fetching operations.
 
 use crate::ManifestError;
+use crate::security::SecurityError;
 use thiserror::Error;
 
 /// Error type for manifest fetch operations.
@@ -21,4 +22,8 @@ pub enum FetchError {
     /// File system I/O error.
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+
+    /// Security error (SSRF protection).
+    #[error("Security error: {0}")]
+    SecurityError(#[from] SecurityError),
 }

@@ -328,22 +328,40 @@ mod tests {
 
     #[test]
     fn test_ast_to_json_with_node_data() {
-        use tsuzulint_ast::{AstArena, NodeType, Span, TxtNode};
+        use tsuzulint_ast::{AstArena, NodeData, NodeType, Span, TxtNode};
 
         let arena = AstArena::new();
-        let mut node = TxtNode::new_parent(NodeType::Header, Span::new(0, 10), &[]);
-        node.data.depth = Some(2);
-        node.data.url = Some(arena.alloc_str("https://example.com"));
-        node.data.title = Some(arena.alloc_str("Example"));
-        node.data.lang = Some(arena.alloc_str("rust"));
-        node.data.ordered = Some(true);
 
-        let json = serde_json::to_value(node).unwrap();
-
+        // Test header node
+        let mut header = TxtNode::new_parent(NodeType::Header, Span::new(0, 10), &[]);
+        header.data = NodeData::header(2);
+        let json = serde_json::to_value(header).unwrap();
         assert_eq!(json["depth"], 2);
+
+        // Test link node
+        let mut link = TxtNode::new_parent(NodeType::Link, Span::new(0, 10), &[]);
+        link.data = NodeData::link(
+            arena.alloc_str("https://example.com"),
+            Some(arena.alloc_str("Example")),
+        );
+        let json = serde_json::to_value(link).unwrap();
         assert_eq!(json["url"], "https://example.com");
         assert_eq!(json["title"], "Example");
+
+        // Test code block node
+        let mut code_block = TxtNode::new_text(
+            NodeType::CodeBlock,
+            Span::new(0, 10),
+            arena.alloc_str("code"),
+        );
+        code_block.data = NodeData::code_block(Some(arena.alloc_str("rust")));
+        let json = serde_json::to_value(code_block).unwrap();
         assert_eq!(json["lang"], "rust");
+
+        // Test list node
+        let mut list = TxtNode::new_parent(NodeType::List, Span::new(0, 10), &[]);
+        list.data = NodeData::list(true);
+        let json = serde_json::to_value(list).unwrap();
         assert_eq!(json["ordered"], true);
     }
 

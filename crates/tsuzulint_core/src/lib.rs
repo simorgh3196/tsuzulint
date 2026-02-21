@@ -25,6 +25,7 @@
 mod config;
 pub mod context;
 mod error;
+mod fix;
 mod fixer;
 pub mod formatters;
 mod linter;
@@ -39,6 +40,7 @@ pub use config::{
 };
 pub use context::{CodeBlockInfo, DocumentStructure, HeadingInfo, LineInfo, LinkInfo, LintContext};
 pub use error::LinterError;
+pub use fix::{DependencyGraph, FixCoordinator, FixResult};
 pub use fixer::{FixerResult, apply_fixes_to_content, apply_fixes_to_file};
 pub use formatters::generate_sarif;
 pub use linter::Linter;
