@@ -203,6 +203,7 @@ impl PluginResolver {
 mod tests {
     use super::*;
     use crate::hash::HashVerifier;
+    use crate::security::SecurityError;
     use serde_json::json;
     use tempfile::tempdir;
     use wiremock::matchers::{method, path};
@@ -370,7 +371,12 @@ mod tests {
         .unwrap();
 
         let result = resolver.resolve(&spec).await;
-        assert!(matches!(result, Err(ResolveError::SecurityError(_))));
+        assert!(matches!(
+            result,
+            Err(ResolveError::SecurityError(
+                SecurityError::FileNotFound { .. }
+            ))
+        ));
     }
 
     #[tokio::test]

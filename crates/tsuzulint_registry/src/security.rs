@@ -16,6 +16,8 @@ pub enum SecurityError {
     AbsolutePathNotAllowed(String),
     #[error("Parent directory '..' not allowed in path: {0}")]
     ParentDirNotAllowed(String),
+    #[error("WASM file not found: {path}")]
+    FileNotFound { path: String },
 }
 
 pub fn validate_url(url: &Url, allow_local: bool) -> Result<(), SecurityError> {
@@ -78,9 +80,8 @@ pub fn validate_local_wasm_path(
     let wasm_path = manifest_dir.join(wasm_relative);
 
     if !wasm_path.exists() {
-        return Err(SecurityError::PathTraversal {
+        return Err(SecurityError::FileNotFound {
             path: wasm_path.to_string_lossy().to_string(),
-            base: manifest_dir.to_string_lossy().to_string(),
         });
     }
 
