@@ -43,7 +43,8 @@ async fn main() {
     };
 
     // Use a large max size to allow download
-    let downloader = WasmDownloader::with_max_size((file_size_mb + 10) as u64 * 1024 * 1024);
+    let downloader =
+        WasmDownloader::with_max_size((file_size_mb + 10) as u64 * 1024 * 1024).allow_local(true);
 
     println!("Starting download benchmark ({} MB file)...", file_size_mb);
 

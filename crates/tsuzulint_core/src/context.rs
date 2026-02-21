@@ -235,13 +235,20 @@ impl<'a> LintContext<'a> {
     }
 
     /// Creates a new LintContext with a pre-parsed AST.
+    ///
+    /// This automatically calls [`build_structure()`](Self::build_structure) to populate
+    /// the document structure cache from the AST.
     pub fn with_ast(source: &'a str, root: &TxtNode<'a>) -> Self {
         let ctx = Self::new(source);
         ctx.build_structure(root);
         ctx
     }
 
-    /// Returns the cached document structure, or an empty structure if not built.
+    /// Returns the cached document structure.
+    ///
+    /// Returns an empty structure if neither [`with_ast()`](Self::with_ast) nor
+    /// [`build_structure()`](Self::build_structure) was called before this method.
+    /// See [`build_structure()`](Self::build_structure) for ordering requirements.
     pub fn structure(&self) -> &DocumentStructure {
         self.structure.get_or_init(DocumentStructure::default)
     }
@@ -361,6 +368,16 @@ impl<'a> LintContext<'a> {
     }
 
     /// Builds document structure from an AST node.
+    ///
+    /// # Ordering Requirement
+    ///
+    /// This method must be called **before** [`structure()`](Self::structure) to populate
+    /// the cached structure with AST data. If `structure()` is called first, it will
+    /// initialize the cache with an empty `DocumentStructure::default()`, and subsequent
+    /// calls to `build_structure()` will have no effect.
+    ///
+    /// For convenience, use [`with_ast()`](Self::with_ast) to construct a context that
+    /// automatically builds structure from the AST.
     pub fn build_structure(&self, root: &TxtNode<'a>) -> &DocumentStructure {
         self.structure.get_or_init(|| {
             let mut structure = DocumentStructure::default();
@@ -668,13 +685,17 @@ mod tests {
 
     #[test]
     fn test_with_ast_builds_structure_from_headings() {
+        // Source "# Title\n## Sub" is 14 bytes:
+        // - "# Title" (7 bytes, span 0-7)
+        // - "\n" (1 byte)
+        // - "## Sub" (6 bytes, span 8-14)
         let arena = AstArena::new();
         let h1 = make_header_node(&arena, 1, "Title", Span::new(0, 7));
-        let h2 = make_header_node(&arena, 2, "Sub", Span::new(8, 13));
+        let h2 = make_header_node(&arena, 2, "Sub", Span::new(8, 14));
         let children = arena.alloc_slice_copy(&[*h1, *h2]);
         let doc = arena.alloc(TxtNode::new_parent(
             NodeType::Document,
-            Span::new(0, 13),
+            Span::new(0, 14),
             children,
         ));
 
