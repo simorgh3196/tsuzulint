@@ -541,10 +541,20 @@ mod tests {
 
     #[test]
     fn test_glob_matcher_invalid_pattern() {
-        // This should log a warning but not panic
-        let matcher = GlobMatcher::new(&["[invalid".to_string()], &[]);
+        // "invalid[" is an invalid glob pattern. It should be logged and skipped, but valid ones are included.
+        let matcher = GlobMatcher::new(&["invalid[".to_string(), "*.md".to_string()], &[]);
 
-        // Invalid pattern is skipped, so the set is effectively empty (matches nothing)
-        assert!(!matcher.should_include(Path::new("test.md")));
+        assert!(matcher.should_include(Path::new("test.md")));
+        assert!(!matcher.should_include(Path::new("test.txt")));
+
+        let matcher2 = GlobMatcher::new(&[], &["invalid[".to_string(), "*.txt".to_string()]);
+        assert!(matcher2.should_include(Path::new("test.md")));
+        assert!(!matcher2.should_include(Path::new("test.txt")));
+    }
+
+    #[test]
+    fn test_build_globset_empty() {
+        let set = GlobMatcher::build_globset(&[], "test");
+        assert!(set.is_none());
     }
 }
