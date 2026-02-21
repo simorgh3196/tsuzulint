@@ -207,6 +207,12 @@ impl PluginResolver {
         })
     }
 
+    /// Set a custom downloader.
+    pub fn with_downloader(mut self, downloader: WasmDownloader) -> Self {
+        self.downloader = downloader;
+        self
+    }
+
     /// Resolve a plugin specification to a usable WASM module.
     pub async fn resolve(&self, spec: &PluginSpec) -> Result<ResolvedPlugin, ResolveError> {
         // Pre-process source for fetching
@@ -561,8 +567,15 @@ mod tests {
             .await;
 
         // Configure fetcher to use mock server
-        let fetcher = ManifestFetcher::new().with_base_url(mock_server.uri());
-        let resolver = PluginResolver::with_fetcher(fetcher).unwrap();
+        let fetcher = ManifestFetcher::new()
+            .with_base_url(mock_server.uri())
+            .allow_local(true); // Allow localhost for fetcher
+
+        let downloader = WasmDownloader::new().allow_local(true); // Allow localhost for downloader
+
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .unwrap()
+            .with_downloader(downloader);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -603,7 +616,13 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let resolver = PluginResolver::new().unwrap();
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let downloader = WasmDownloader::new().allow_local(true);
+
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .unwrap()
+            .with_downloader(downloader);
+
         let spec = PluginSpec::parse(&json!({
             "url": format!("{}/manifest.json", mock_server.uri()),
             "as": "test-alias"

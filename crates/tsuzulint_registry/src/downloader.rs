@@ -2,7 +2,9 @@
 
 use crate::hash::HashVerifier;
 use crate::manifest::ExternalRuleManifest;
+use crate::security::{SecurityError, validate_url};
 use futures_util::StreamExt;
+use reqwest::Url;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -30,6 +32,10 @@ pub enum DownloadError {
     /// I/O error.
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+
+    /// Security error (SSRF protection).
+    #[error("Security error: {0}")]
+    SecurityError(#[from] SecurityError),
 }
 
 /// Result of a successful WASM download.
@@ -46,6 +52,7 @@ pub struct WasmDownloader {
     client: reqwest::Client,
     max_size: u64,
     timeout: Duration,
+    allow_local: bool,
 }
 
 impl Default for WasmDownloader {
@@ -61,6 +68,7 @@ impl WasmDownloader {
             client: reqwest::Client::new(),
             max_size: DEFAULT_MAX_SIZE,
             timeout: DEFAULT_TIMEOUT,
+            allow_local: false,
         }
     }
 
@@ -70,6 +78,7 @@ impl WasmDownloader {
             client: reqwest::Client::new(),
             max_size,
             timeout: DEFAULT_TIMEOUT,
+            allow_local: false,
         }
     }
 
@@ -79,7 +88,17 @@ impl WasmDownloader {
             client: reqwest::Client::new(),
             max_size,
             timeout,
+            allow_local: false,
         }
+    }
+
+    /// Configure whether to allow downloads from local network addresses.
+    ///
+    /// By default, downloads from loopback, link-local, and private IP ranges are blocked
+    /// to prevent SSRF attacks. Set this to `true` to allow them (e.g. for testing).
+    pub fn allow_local(mut self, allow: bool) -> Self {
+        self.allow_local = allow;
+        self
     }
 
     /// Download WASM from the manifest's artifact URL.
@@ -107,12 +126,18 @@ impl WasmDownloader {
     }
 
     /// Download WASM from a resolved URL using streaming.
-    async fn download_from_url(&self, url: &str) -> Result<DownloadResult, DownloadError> {
+    async fn download_from_url(&self, url_str: &str) -> Result<DownloadResult, DownloadError> {
+        let url = Url::parse(url_str)
+            .map_err(|e| DownloadError::NotFound(format!("Invalid URL: {}", e)))?;
+
+        // Security check: validate URL against SSRF rules
+        validate_url(&url, self.allow_local)?;
+
         let response = self.client.get(url).timeout(self.timeout).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(DownloadError::NotFound(format!(
-                "WASM file not found at {url}"
+                "WASM file not found at {url_str}"
             )));
         }
 
@@ -253,7 +278,8 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::new();
+        // Explicitly allow local for tests
+        let downloader = WasmDownloader::new().allow_local(true);
         let result = downloader
             .download(&manifest)
             .await
@@ -275,7 +301,7 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::new();
+        let downloader = WasmDownloader::new().allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
@@ -296,7 +322,7 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::new();
+        let downloader = WasmDownloader::new().allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
@@ -322,7 +348,7 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/large.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::with_max_size(max_size);
+        let downloader = WasmDownloader::with_max_size(max_size).allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
@@ -347,7 +373,7 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/stream.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::with_max_size(max_size);
+        let downloader = WasmDownloader::with_max_size(max_size).allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
@@ -355,6 +381,24 @@ mod tests {
                 assert_eq!(max, max_size);
             }
             _ => panic!("Expected TooLarge error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_local_denied_by_default() {
+        let mock_server = MockServer::start().await;
+
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+
+        // Default downloader (deny local)
+        let downloader = WasmDownloader::new();
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::SecurityError(SecurityError::LoopbackDenied(_))) => {
+                // Success - access denied
+            }
+            res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
         }
     }
 }
