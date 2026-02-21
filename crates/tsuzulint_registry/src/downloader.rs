@@ -145,18 +145,23 @@ impl WasmDownloader {
         let response = response.error_for_status()?;
 
         // Check Content-Length header if available (early rejection)
-        if let Some(content_length) = response.content_length()
-            && content_length > self.max_size
+        let content_length = response.content_length();
+        if let Some(len) = content_length
+            && len > self.max_size
         {
             return Err(DownloadError::TooLarge {
-                size: content_length,
+                size: len,
                 max: self.max_size,
             });
         }
 
         // Stream the body while checking size
         let mut stream = response.bytes_stream();
-        let mut bytes = Vec::new();
+        let mut bytes = if let Some(len) = content_length {
+            Vec::with_capacity(len as usize)
+        } else {
+            Vec::new()
+        };
         let mut total_size: u64 = 0;
 
         while let Some(chunk_result) = stream.next().await {
