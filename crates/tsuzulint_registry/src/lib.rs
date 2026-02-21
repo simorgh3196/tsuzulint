@@ -8,11 +8,13 @@ pub mod hash;
 pub use tsuzulint_manifest as manifest;
 pub mod resolver;
 pub mod security;
+pub mod spec;
 
 pub use downloader::{DownloadError, DownloadResult, WasmDownloader};
 pub use error::FetchError;
 pub use fetcher::{ManifestFetcher, PluginSource};
 pub use hash::{HashError, HashVerifier};
 pub use manifest::{ExternalRuleManifest, ManifestError};
-pub use resolver::{ParseError, PluginResolver, PluginSpec, ResolveError, ResolvedPlugin};
-pub use security::{SecurityError, validate_url};
+pub use resolver::{PluginResolver, ResolveError, ResolvedPlugin};
+pub use security::{SecurityError, validate_local_wasm_path, validate_url};
+pub use spec::{ParseError, PluginSpec};
