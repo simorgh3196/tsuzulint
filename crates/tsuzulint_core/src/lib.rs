@@ -22,16 +22,23 @@
 //! }
 //! ```
 
+mod block_extractor;
 mod config;
 pub mod context;
+mod diagnostic_dist;
 mod error;
+mod file_linter;
 mod fix;
 mod fixer;
 pub mod formatters;
+mod ignore_range;
 mod linter;
+mod manifest_resolver;
+mod parallel_linter;
 pub mod pool;
 pub mod resolver;
 mod result;
+mod rule_loader;
 pub mod rule_manifest;
 pub mod walker;
 
@@ -43,12 +50,11 @@ pub use error::LinterError;
 pub use fix::{DependencyGraph, FixCoordinator, FixResult};
 pub use fixer::{FixerResult, apply_fixes_to_content, apply_fixes_to_file};
 pub use formatters::generate_sarif;
-pub use linter::Linter;
+pub use linter::{LintFilesResult, Linter};
 pub use pool::{PluginHostPool, PooledHost};
 pub use result::LintResult;
 
 #[cfg(test)]
 pub mod test_utils;
 
-// Re-export commonly used types
 pub use tsuzulint_plugin::{Diagnostic, Fix, Severity};
