@@ -1115,6 +1115,22 @@ mod tests {
     }
 
     #[test]
+    fn lint_request_batch_single_node_is_not_batch() {
+        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
+        let request = LintRequest::batch(
+            vec![node.clone()],
+            serde_json::json!({}),
+            "source".to_string(),
+        );
+
+        assert_eq!(request.node, node);
+        assert_eq!(request.nodes.len(), 1);
+        // A batch() with exactly one node is not considered a batch (nodes.len() > 1 is false).
+        assert!(!request.is_batch());
+        assert_eq!(request.all_nodes().len(), 1);
+    }
+
+    #[test]
     fn lint_request_msgpack_roundtrip_single() {
         let node = serde_json::json!({"type": "Str", "range": [0, 5]});
         let request = LintRequest::single(

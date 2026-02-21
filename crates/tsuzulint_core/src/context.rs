@@ -134,7 +134,7 @@ impl ContentCharacteristics {
             if !chars.has_headings
                 && prev_non_blank
                 && !trimmed.is_empty()
-                && trimmed.bytes().all(|b| b == b'=' || b == b'-')
+                && (trimmed.bytes().all(|b| b == b'=') || trimmed.bytes().all(|b| b == b'-'))
             {
                 chars.has_headings = true;
             }
@@ -254,7 +254,6 @@ impl<'a> LintContext<'a> {
         }
 
         if source.ends_with('\n')
-            && !lines.is_empty()
             && let Some(last) = lines.last()
         {
             let newline_len = if source.ends_with("\r\n") { 2 } else { 1 };
@@ -301,10 +300,7 @@ impl<'a> LintContext<'a> {
         let idx = self.lines.partition_point(|info| info.start <= offset);
 
         if idx == 0 {
-            if offset < self.lines[0].start {
-                return None;
-            }
-            return Some(1);
+            return None;
         }
 
         let line_idx = idx - 1;
@@ -546,6 +542,15 @@ mod tests {
     }
 
     #[test]
+    fn test_content_start_tab_indent() {
+        // Tab is 1 byte, so content_start() must return start + 1, not start + 4.
+        let info = LineInfo::from_line(10, "\thello");
+        assert_eq!(info.indent, 4); // visual indent
+        assert_eq!(info.indent_bytes, 1); // byte length of leading whitespace
+        assert_eq!(info.content_start(), 11); // 10 + 1 byte, not 10 + 4
+    }
+
+    #[test]
     fn test_line_info_with_cr() {
         let info = LineInfo::from_line(0, "hello\r");
         assert_eq!(info.end, 6);
@@ -772,6 +777,16 @@ mod tests_content_characteristics {
         assert!(
             chars.has_headings,
             "setext heading with content should be detected"
+        );
+    }
+
+    #[test]
+    fn test_setext_heading_no_mixed_chars() {
+        // Mixed '=' and '-' is NOT a valid setext heading per CommonMark
+        let chars = ContentCharacteristics::analyze("My Title\n=-=-=-=");
+        assert!(
+            !chars.has_headings,
+            "mixed '=' and '-' should not be detected as heading"
         );
     }
 }
