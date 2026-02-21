@@ -125,6 +125,27 @@ impl Linter {
         Ok(())
     }
 
+    /// Checks if a file path should be ignored based on include/exclude patterns.
+    fn should_ignore(&self, path: &Path) -> bool {
+        if self
+            .exclude_globs
+            .as_ref()
+            .is_some_and(|excludes| excludes.is_match(path))
+        {
+            return true;
+        }
+
+        if self
+            .include_globs
+            .as_ref()
+            .is_some_and(|includes| !includes.is_match(path))
+        {
+            return true;
+        }
+
+        false
+    }
+
     #[allow(dead_code)]
     fn lint_file(&self, path: &Path) -> Result<LintResult, LinterError> {
         let mut host = self
@@ -166,19 +187,7 @@ impl Linter {
             let path = Path::new(pattern);
             if path.exists() && path.is_file() {
                 if let Ok(abs_path) = path.canonicalize() {
-                    if self
-                        .exclude_globs
-                        .as_ref()
-                        .is_some_and(|excludes| excludes.is_match(&abs_path))
-                    {
-                        continue;
-                    }
-
-                    if self
-                        .include_globs
-                        .as_ref()
-                        .is_some_and(|includes| !includes.is_match(&abs_path))
-                    {
+                    if self.should_ignore(&abs_path) {
                         continue;
                     }
 
@@ -201,15 +210,7 @@ impl Linter {
             for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_file() && glob_set.is_match(path) {
-                    if let Some(ref excludes) = self.exclude_globs
-                        && excludes.is_match(path)
-                    {
-                        continue;
-                    }
-
-                    if let Some(ref includes) = self.include_globs
-                        && !includes.is_match(path)
-                    {
+                    if self.should_ignore(path) {
                         continue;
                     }
 
