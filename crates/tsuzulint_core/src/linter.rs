@@ -907,8 +907,8 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_discover_files_ignores_symlinks() {
-        use std::os::unix::fs::symlink;
         use std::fs;
+        use std::os::unix::fs::symlink;
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
@@ -927,7 +927,12 @@ mod tests {
             .unwrap();
 
         // Should only contain target.md, NOT link.md
-        assert_eq!(files.len(), 1, "Should ignore symlinks, but found: {:?}", files);
+        assert_eq!(
+            files.len(),
+            1,
+            "Should ignore symlinks, but found: {:?}",
+            files
+        );
         // Canonicalize target_file because discover_files might return absolute paths or relative
         // Actually discover_files returns paths as yielded by WalkDir (absolute if base_dir is absolute)
         // temp_dir.path() is absolute.
