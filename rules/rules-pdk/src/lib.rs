@@ -52,9 +52,14 @@ impl LintRequest {
     ///
     /// When deserialized from the host (which doesn't include a `nodes` field),
     /// returns a single-element slice containing `self.node`.
+    /// Returns an empty slice for empty batch requests where `node` is `Null`.
     pub fn all_nodes(&self) -> &[serde_json::Value] {
         if self.nodes.is_empty() {
-            std::slice::from_ref(&self.node)
+            if self.node.is_null() {
+                &[]
+            } else {
+                std::slice::from_ref(&self.node)
+            }
         } else {
             &self.nodes
         }
@@ -1112,6 +1117,9 @@ mod tests {
         assert!(!request.is_batch());
         assert_eq!(request.node, serde_json::Value::Null);
         assert_eq!(request.nodes.len(), 0);
+        // Empty batch should return empty slice, not [Null]
+        assert_eq!(request.all_nodes().len(), 0);
+        assert!(request.all_nodes().is_empty());
     }
 
     #[test]
