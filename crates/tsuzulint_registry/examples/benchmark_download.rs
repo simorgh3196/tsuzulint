@@ -73,17 +73,21 @@ async fn main() {
     let total_duration: std::time::Duration = durations.iter().sum();
     let avg_duration = total_duration / iterations as u32;
 
-    // Calculate Standard Deviation
+    // Calculate Standard Deviation (sample variance, ÷(N-1))
     let avg_micros = avg_duration.as_micros() as f64;
-    let variance = durations
-        .iter()
-        .map(|d| {
-            let diff = d.as_micros() as f64 - avg_micros;
-            diff * diff
-        })
-        .sum::<f64>()
-        / iterations as f64;
-    let std_dev = variance.sqrt();
+    let std_dev = if iterations > 1 {
+        let variance = durations
+            .iter()
+            .map(|d| {
+                let diff = d.as_micros() as f64 - avg_micros;
+                diff * diff
+            })
+            .sum::<f64>()
+            / (iterations as f64 - 1.0);
+        variance.sqrt()
+    } else {
+        0.0
+    };
 
     let avg_throughput = file_size_mb as f64 / avg_duration.as_secs_f64();
 
