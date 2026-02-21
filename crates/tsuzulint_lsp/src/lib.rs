@@ -719,6 +719,10 @@ pub async fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::Mutex;
+
+    // Define a global Mutex to serialize tests that manipulate TEST_LINT_DELAY_MS
+    static TEST_MUTEX: Mutex<()> = Mutex::const_new(());
 
     // Include the common test module content directly
     include!("../tests/common_mod.rs");
@@ -732,8 +736,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_delay_guard_resets_delay() {
+    #[tokio::test]
+    async fn test_delay_guard_resets_delay() {
+        // Acquire lock to prevent race conditions with other tests using TEST_LINT_DELAY_MS
+        let _lock = TEST_MUTEX.lock().await;
+
         Backend::set_global_test_delay(std::time::Duration::from_millis(50));
         assert_eq!(TEST_LINT_DELAY_MS.load(Ordering::Relaxed), 50);
         {
@@ -836,6 +843,9 @@ mod tests {
     #[tokio::test]
     async fn test_lint_text_does_not_block_runtime() {
         use std::time::{Duration, Instant};
+
+        // Acquire lock to prevent race conditions with other tests using TEST_LINT_DELAY_MS
+        let _lock = TEST_MUTEX.lock().await;
 
         let _guard = DelayGuard;
 
