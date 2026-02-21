@@ -192,14 +192,14 @@ impl ContentCharacteristics {
         }
 
         node_types.iter().all(|node_type| match node_type.as_str() {
-            "Heading" | "heading" => !self.has_headings,
+            "Header" | "Heading" | "heading" => !self.has_headings,
             "Link" | "link" => !self.has_links,
             "Image" | "image" => !self.has_images,
             "CodeBlock" => !self.has_code_blocks && !self.has_fenced_code,
             "Code" | "code" => !self.has_inline_code,
             "List" | "list" => !self.has_lists,
             "Table" | "table" => !self.has_tables,
-            "Blockquote" | "blockquote" => !self.has_blockquotes,
+            "BlockQuote" | "Blockquote" | "blockquote" => !self.has_blockquotes,
             "Html" | "html" => !self.has_html,
             _ => false,
         })
@@ -787,6 +787,34 @@ mod tests_content_characteristics {
         assert!(
             !chars.has_headings,
             "mixed '=' and '-' should not be detected as heading"
+        );
+    }
+
+    #[test]
+    fn test_should_skip_rule_with_ast_canonical_names() {
+        // Test that AST canonical names (Header, BlockQuote) match correctly
+        let chars = ContentCharacteristics::analyze("plain text only");
+
+        // "Header" is the AST canonical name (NodeType::Header.to_string())
+        assert!(
+            chars.should_skip_rule(&["Header".to_string()]),
+            "Header (AST canonical) should match"
+        );
+        // Also accept "Heading" for convenience
+        assert!(
+            chars.should_skip_rule(&["Heading".to_string()]),
+            "Heading should also match"
+        );
+
+        // "BlockQuote" is the AST canonical name (NodeType::BlockQuote.to_string())
+        assert!(
+            chars.should_skip_rule(&["BlockQuote".to_string()]),
+            "BlockQuote (AST canonical) should match"
+        );
+        // Also accept "Blockquote" for convenience
+        assert!(
+            chars.should_skip_rule(&["Blockquote".to_string()]),
+            "Blockquote should also match"
         );
     }
 }
