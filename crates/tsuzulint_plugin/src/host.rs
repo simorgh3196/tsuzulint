@@ -45,8 +45,6 @@ struct LintRequest<'a, T: Serialize> {
     sentences: &'a [Sentence],
     /// The node to lint (serialized).
     node: &'a T,
-    /// Rule configuration.
-    config: serde_json::Value,
     /// Source text.
     source: &'a str,
     /// File path (if available).
@@ -211,6 +209,13 @@ impl PluginHost {
             return Err(PluginError::not_found(name));
         }
 
+        let real_name = self
+            .aliases
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string());
+
+        self.executor.configure(&real_name, &config)?;
         self.configs.insert(name.to_string(), config);
         Ok(())
     }
@@ -273,7 +278,6 @@ impl PluginHost {
     ) -> Result<Vec<Diagnostic>, PluginError> {
         Self::run_rule_with_parts_internal(
             &mut self.executor,
-            &self.configs,
             &self.aliases,
             name,
             node,
@@ -288,7 +292,6 @@ impl PluginHost {
     #[allow(clippy::too_many_arguments)]
     fn run_rule_with_parts_internal<T: Serialize>(
         executor: &mut Executor,
-        configs: &HashMap<String, serde_json::Value>,
         aliases: &HashMap<String, String>,
         name: &str,
         node: &T,
@@ -297,14 +300,8 @@ impl PluginHost {
         sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        let config = configs
-            .get(name)
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-
         let request = LintRequest {
             node,
-            config,
             source,
             tokens,
             sentences,
@@ -364,23 +361,32 @@ impl PluginHost {
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let mut all_diagnostics = Vec::new();
 
-        // Iterate over manifest keys directly without collecting into a Vec.
-        // We can do this because run_rule_with_parts takes split borrows,
-        // so `self.manifests` (immutable) is not conflicted with `self.executor` (mutable).
+        // Serialize LintRequest ONCE
+        let request = LintRequest {
+            node,
+            source,
+            tokens,
+            sentences,
+            file_path,
+        };
+
+        let request_bytes = rmp_serde::to_vec_named(&request)
+            .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
+
+        // Iterate over manifest keys directly
         for name in self.manifests.keys() {
-            match Self::run_rule_with_parts_internal(
-                &mut self.executor,
-                &self.configs,
-                &self.aliases,
-                name,
-                node,
-                source,
-                tokens,
-                sentences,
-                file_path,
-            ) {
-                Ok(diagnostics) => {
-                    all_diagnostics.extend(diagnostics);
+            let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
+            match self.executor.call_lint(real_name, &request_bytes) {
+                Ok(response_bytes) => {
+                    match rmp_serde::from_slice::<LintResponse>(&response_bytes) {
+                        Ok(response) => {
+                            all_diagnostics.extend(response.diagnostics);
+                        }
+                        Err(e) => {
+                            warn!("Invalid response from '{}': {}", name, e);
+                        }
+                    }
                 }
                 Err(e) => {
                     warn!("Rule '{}' failed: {}", name, e);
@@ -468,7 +474,6 @@ mod tests {
         #[derive(Debug, Clone, Deserialize)]
         struct PdkLintRequest {
             pub node: serde_json::Value,
-            pub config: serde_json::Value,
             pub source: String,
             pub tokens: Vec<Token>,
             pub sentences: Vec<Sentence>,
@@ -478,7 +483,6 @@ mod tests {
         }
 
         let node_data = serde_json::json!({"type": "Doc", "children": []});
-        let config = serde_json::json!({"option": "value"});
         let tokens = vec![];
         let sentences = vec![];
         let source = "test content";
@@ -487,7 +491,6 @@ mod tests {
         // Host side
         let host_request = LintRequest {
             node: &node_data,
-            config: config.clone(),
             source,
             tokens: &tokens,
             sentences: &sentences,
@@ -506,7 +509,6 @@ mod tests {
         assert_eq!(guest_request.tokens, tokens);
         assert_eq!(guest_request.sentences, sentences);
         assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
-        assert_eq!(guest_request.config, config);
         assert_eq!(guest_request.node, node_data);
         assert_eq!(guest_request.helpers, None);
     }

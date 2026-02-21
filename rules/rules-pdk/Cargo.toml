@@ -11,6 +11,7 @@ description = "Common types for TsuzuLint WASM rules"
 serde = { workspace = true }
 serde_json = { workspace = true }
 rmp-serde = { workspace = true }
+extism-pdk = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
