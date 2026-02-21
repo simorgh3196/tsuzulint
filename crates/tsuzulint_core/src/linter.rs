@@ -200,7 +200,7 @@ impl Linter {
 
             for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
-                if path.is_file() && glob_set.is_match(path) {
+                if entry.file_type().is_file() && glob_set.is_match(path) {
                     if let Some(ref excludes) = self.exclude_globs
                         && excludes.is_match(path)
                     {
@@ -902,5 +902,41 @@ mod tests {
 
         assert!(diags[0].span.start < diags[1].span.start);
         assert!(diags[1].span.start < diags[2].span.start);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_discover_files_ignores_symlinks() {
+        use std::fs;
+        use std::os::unix::fs::symlink;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let target_file = temp_dir.path().join("target.md");
+        let link_file = temp_dir.path().join("link.md");
+
+        fs::write(&target_file, "# Target").unwrap();
+        symlink(&target_file, &link_file).unwrap();
+
+        let mut config = LinterConfig::new();
+        config.base_dir = Some(temp_dir.path().to_path_buf());
+        let linter = Linter::new(config).unwrap();
+
+        let files = linter
+            .discover_files(&["*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        // Should only contain target.md, NOT link.md
+        assert_eq!(
+            files.len(),
+            1,
+            "Should ignore symlinks, but found: {:?}",
+            files
+        );
+        // Canonicalize target_file because discover_files might return absolute paths or relative
+        // Actually discover_files returns paths as yielded by WalkDir (absolute if base_dir is absolute)
+        // temp_dir.path() is absolute.
+        assert!(files.iter().any(|f| f.ends_with("target.md")));
+        assert!(!files.iter().any(|f| f.ends_with("link.md")));
     }
 }
