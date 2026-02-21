@@ -1,4 +1,5 @@
 use reqwest::Url;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -9,6 +10,12 @@ pub enum SecurityError {
     LoopbackDenied(String),
     #[error("Access to private IP address denied: {0}")]
     PrivateIpDenied(String),
+    #[error("Path traversal detected: {path} escapes {base}")]
+    PathTraversal { path: String, base: String },
+    #[error("Absolute or rooted path not allowed: {0}")]
+    AbsolutePathNotAllowed(String),
+    #[error("Parent directory '..' not allowed in path: {0}")]
+    ParentDirNotAllowed(String),
 }
 
 pub fn validate_url(url: &Url, allow_local: bool) -> Result<(), SecurityError> {
@@ -47,6 +54,58 @@ pub fn validate_url(url: &Url, allow_local: bool) -> Result<(), SecurityError> {
     }
 
     Ok(())
+}
+
+pub fn validate_local_wasm_path(
+    wasm_relative: &Path,
+    manifest_dir: &Path,
+) -> Result<PathBuf, SecurityError> {
+    if wasm_relative.is_absolute() || wasm_relative.has_root() {
+        return Err(SecurityError::AbsolutePathNotAllowed(
+            wasm_relative.to_string_lossy().to_string(),
+        ));
+    }
+
+    if wasm_relative
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(SecurityError::ParentDirNotAllowed(
+            wasm_relative.to_string_lossy().to_string(),
+        ));
+    }
+
+    let wasm_path = manifest_dir.join(wasm_relative);
+
+    if !wasm_path.exists() {
+        return Err(SecurityError::PathTraversal {
+            path: wasm_path.to_string_lossy().to_string(),
+            base: manifest_dir.to_string_lossy().to_string(),
+        });
+    }
+
+    let manifest_canon = manifest_dir
+        .canonicalize()
+        .map_err(|_| SecurityError::PathTraversal {
+            path: wasm_path.to_string_lossy().to_string(),
+            base: manifest_dir.to_string_lossy().to_string(),
+        })?;
+
+    let wasm_canon = wasm_path
+        .canonicalize()
+        .map_err(|_| SecurityError::PathTraversal {
+            path: wasm_path.to_string_lossy().to_string(),
+            base: manifest_dir.to_string_lossy().to_string(),
+        })?;
+
+    if !wasm_canon.starts_with(&manifest_canon) {
+        return Err(SecurityError::PathTraversal {
+            path: wasm_path.display().to_string(),
+            base: manifest_dir.display().to_string(),
+        });
+    }
+
+    Ok(wasm_canon)
 }
 
 #[cfg(test)]
