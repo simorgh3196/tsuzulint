@@ -33,6 +33,8 @@ struct HostState {
     memory: Option<Memory>,
     /// Resource limits for the store.
     limits: StoreLimits,
+    /// Current rule configuration (JSON string).
+    config: String,
 }
 
 impl HostState {
@@ -44,6 +46,7 @@ impl HostState {
             limits: StoreLimitsBuilder::new()
                 .memory_size(DEFAULT_MEMORY_LIMIT_BYTES)
                 .build(),
+            config: "{}".to_string(),
         }
     }
 }
@@ -213,6 +216,44 @@ impl RuleExecutor for WasmiExecutor {
             )
             .map_err(|e| PluginError::load(format!("Failed to add output_set: {}", e)))?;
 
+        // extism:host/env.config_get (stub)
+        linker
+            .func_wrap(
+                "extism:host/env",
+                "config_get",
+                |_caller: Caller<'_, HostState>, _offset: i64| -> i64 { 0 },
+            )
+            .map_err(|e| PluginError::load(format!("Failed to add config_get: {}", e)))?;
+
+        // extism:host/user.tsuzulint_get_config
+        linker
+            .func_wrap("extism:host/user", "tsuzulint_get_config", {
+                |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
+                    let config = caller.data().config.clone();
+                    let bytes = config.as_bytes();
+                    let total_len = bytes.len() as i64;
+
+                    if len == 0 {
+                        return total_len;
+                    }
+
+                    if let Some(memory) = caller.data().memory {
+                        if memory
+                            .write(
+                                &mut caller,
+                                ptr as usize,
+                                &bytes[..std::cmp::min(len as usize, bytes.len())],
+                            )
+                            .is_ok()
+                        {
+                            return total_len;
+                        }
+                    }
+                    -1
+                }
+            })
+            .map_err(|e| PluginError::load(format!("Failed to add tsuzulint_get_config: {}", e)))?;
+
         // Instantiate the module
         let instance = linker
             .instantiate_and_start(&mut store, &module)
@@ -278,6 +319,23 @@ impl RuleExecutor for WasmiExecutor {
             name,
             manifest: rule_manifest,
         })
+    }
+
+    fn configure(
+        &mut self,
+        rule_name: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), PluginError> {
+        let rule = self
+            .rules
+            .get_mut(rule_name)
+            .ok_or_else(|| PluginError::not_found(rule_name))?;
+
+        let config_json = serde_json::to_string(config)
+            .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
+
+        rule.store.data_mut().config = config_json;
+        Ok(())
     }
 
     fn call_lint(&mut self, rule_name: &str, input_bytes: &[u8]) -> Result<Vec<u8>, PluginError> {
@@ -666,5 +724,130 @@ mod tests {
             err_lower.contains("fuel"),
             "Expected fuel exhaustion error, got: {err_msg}"
         );
+    }
+
+    #[test]
+    fn test_config_lifecycle() {
+        let mut executor = WasmiExecutor::new();
+
+        let json = r#"{"name":"config-rule","version":"1.0.0"}"#;
+        let len = json.len();
+
+        let wat = format!(
+            r#"
+            (module
+                (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
+                (memory (export "memory") 1)
+
+                (func $get_manifest (export "get_manifest") (result i32 i32)
+                    (i32.const 0) (i32.const {})
+                )
+
+                (func $alloc (export "alloc") (param i32) (result i32)
+                    (i32.const 100)
+                )
+
+                (func $lint (export "lint") (param i32 i32) (result i32 i32)
+                    (local $len i64)
+                    (local $ptr i32)
+
+                    ;; 1. Get config length
+                    (call $get_config (i64.const 0) (i64.const 0))
+                    local.set $len
+
+                    ;; 2. Set ptr to 100
+                    i32.const 100
+                    local.set $ptr
+
+                    ;; 3. Read config
+                    (call $get_config (i64.extend_i32_u (local.get $ptr)) (local.get $len))
+                    drop
+
+                    ;; 4. Return ptr/len
+                    (local.get $ptr)
+                    (i32.wrap_i64 (local.get $len))
+                )
+
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        );
+
+        let wasm = wat_to_wasm(&wat);
+        executor.load(&wasm).expect("Failed to load rule");
+
+        // Default config is empty object "{}"
+        let res = executor.call_lint("config-rule", b"").unwrap();
+        assert_eq!(res, b"{}");
+
+        // Update config
+        let config = serde_json::json!({"foo": "bar"});
+        executor
+            .configure("config-rule", &config)
+            .expect("Failed to configure");
+
+        // Check new config
+        let res = executor.call_lint("config-rule", b"").unwrap();
+        assert_eq!(res, b"{\"foo\":\"bar\"}");
+    }
+
+    #[test]
+    fn test_config_edge_cases() {
+        let mut executor = WasmiExecutor::new();
+
+        let json = r#"{"name":"edge-case-rule","version":"1.0.0"}"#;
+        let len = json.len();
+
+        let wat = format!(
+            r#"
+            (module
+                (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
+                (memory (export "memory") 1)
+
+                (func $get_manifest (export "get_manifest") (result i32 i32)
+                    (i32.const 0) (i32.const {})
+                )
+
+                (func $alloc (export "alloc") (param i32) (result i32)
+                    (i32.const 100)
+                )
+
+                (func $lint (export "lint") (param i32 i32) (result i32 i32)
+                    (local $len i64)
+
+                    ;; 1. Test len=0 (should return actual length)
+                    (call $get_config (i64.const 0) (i64.const 0))
+                    local.set $len
+
+                    ;; 2. Test invalid pointer (out of bounds)
+                    ;; This relies on memory.write returning Err, which tsuzulint_get_config catches and returns 0
+                    (call $get_config (i64.const 100000) (i64.const 10))
+
+                    ;; Return 0 0 (empty)
+                    (i32.const 0) (i32.const 0)
+                )
+
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        );
+
+        let wasm = wat_to_wasm(&wat);
+        executor.load(&wasm).expect("Failed to load rule");
+
+        // Just ensure it doesn't crash
+        let res = executor.call_lint("edge-case-rule", b"");
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_configure_not_found() {
+        let mut executor = WasmiExecutor::new();
+        let result = executor.configure("nonexistent", &serde_json::json!({}));
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 }

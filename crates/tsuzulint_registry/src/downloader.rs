@@ -1,47 +1,55 @@
-use crate::hash::{HashError, HashVerifier};
+//! WASM downloader for plugin artifacts.
+
+use crate::hash::HashVerifier;
 use crate::manifest::ExternalRuleManifest;
+use crate::security::{SecurityError, validate_url};
 use futures_util::StreamExt;
-use reqwest::Client;
+use reqwest::Url;
 use std::time::Duration;
 use thiserror::Error;
 
-const DEFAULT_MAX_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default maximum file size for WASM downloads (50 MB).
+pub const DEFAULT_MAX_SIZE: u64 = 50 * 1024 * 1024;
 
+/// Default request timeout (60 seconds).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Error type for WASM download operations.
 #[derive(Debug, Error)]
 pub enum DownloadError {
+    /// Network request failed.
     #[error("Network error: {0}")]
     NetworkError(#[from] reqwest::Error),
-    #[error("File too large: {size} bytes (max: {max} bytes)")]
-    TooLarge { size: u64, max: u64 },
-    #[error("Hash mismatch: expected {expected}, got {actual}")]
-    HashMismatch { expected: String, actual: String },
-    #[error("Hash verification failed: {0}")]
-    HashError(#[from] HashError),
-    #[error("{0}")]
+
+    /// Resource not found.
+    #[error("Not found: {0}")]
     NotFound(String),
+
+    /// File size exceeds the maximum allowed.
+    #[error("File too large: {size} bytes exceeds maximum of {max} bytes")]
+    TooLarge { size: u64, max: u64 },
+
+    /// I/O error.
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    /// Security error (SSRF protection).
     #[error("Security error: {0}")]
     SecurityError(#[from] SecurityError),
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
 }
 
-#[derive(Debug, Error)]
-pub enum SecurityError {
-    #[error("Loopback address denied: {0}")]
-    LoopbackDenied(String),
-    #[error("Invalid URL scheme: {0}")]
-    InvalidScheme(String),
-}
-
+/// Result of a successful WASM download.
 #[derive(Debug)]
 pub struct DownloadResult {
+    /// Downloaded WASM binary.
     pub bytes: Vec<u8>,
+    /// Computed SHA256 hash of the downloaded bytes (lowercase hex).
     pub computed_hash: String,
 }
 
+/// Downloader for WASM artifacts from plugin manifests.
 pub struct WasmDownloader {
-    client: Client,
+    client: reqwest::Client,
     max_size: u64,
     timeout: Duration,
     allow_local: bool,
@@ -84,7 +92,10 @@ impl WasmDownloader {
         }
     }
 
-    /// Allow downloading from local addresses (e.g. localhost, private IPs).
+    /// Configure whether to allow downloads from local network addresses.
+    ///
+    /// By default, downloads from loopback, link-local, and private IP ranges are blocked
+    /// to prevent SSRF attacks. Set this to `true` to allow them (e.g. for testing).
     pub fn allow_local(mut self, allow: bool) -> Self {
         self.allow_local = allow;
         self
@@ -114,45 +125,19 @@ impl WasmDownloader {
             .replace("{version}", &manifest.rule.version)
     }
 
-    /// Validate the URL before downloading.
-    fn validate_url(&self, url_str: &str) -> Result<(), DownloadError> {
-        let url = reqwest::Url::parse(url_str).map_err(|e| {
-            // reqwest::Error doesn't expose a clean constructor for url::ParseError
-            // so we create a generic network error message
-            // or we could add a UrlParseError variant to DownloadError
-            DownloadError::NotFound(format!("Invalid URL: {e}"))
-        })?;
-
-        // Check scheme
-        if url.scheme() != "http" && url.scheme() != "https" {
-            return Err(SecurityError::InvalidScheme(url.scheme().to_string()).into());
-        }
-
-        // Check for loopback/private addresses unless explicitly allowed
-        if !self.allow_local {
-            if let Some(host_str) = url.host_str()
-                && (host_str == "localhost"
-                    || host_str == "127.0.0.1"
-                    || host_str == "::1"
-                    || host_str.starts_with("192.168.")
-                    || host_str.starts_with("10."))
-            {
-                return Err(SecurityError::LoopbackDenied(host_str.to_string()).into());
-            }
-        }
-
-        Ok(())
-    }
-
     /// Download WASM from a resolved URL using streaming.
-    async fn download_from_url(&self, url: &str) -> Result<DownloadResult, DownloadError> {
-        self.validate_url(url)?;
+    async fn download_from_url(&self, url_str: &str) -> Result<DownloadResult, DownloadError> {
+        let url = Url::parse(url_str)
+            .map_err(|e| DownloadError::NotFound(format!("Invalid URL: {}", e)))?;
+
+        // Security check: validate URL against SSRF rules
+        validate_url(&url, self.allow_local)?;
 
         let response = self.client.get(url).timeout(self.timeout).send().await?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(DownloadError::NotFound(format!(
-                "WASM file not found at {url}"
+                "WASM file not found at {url_str}"
             )));
         }
 
@@ -160,23 +145,18 @@ impl WasmDownloader {
         let response = response.error_for_status()?;
 
         // Check Content-Length header if available (early rejection)
-        let content_length = response.content_length();
-        if let Some(len) = content_length
-            && len > self.max_size
+        if let Some(content_length) = response.content_length()
+            && content_length > self.max_size
         {
             return Err(DownloadError::TooLarge {
-                size: len,
+                size: content_length,
                 max: self.max_size,
             });
         }
 
         // Stream the body while checking size
         let mut stream = response.bytes_stream();
-        let mut bytes = if let Some(len) = content_length {
-            Vec::with_capacity(len as usize)
-        } else {
-            Vec::new()
-        };
+        let mut bytes = Vec::new();
         let mut total_size: u64 = 0;
 
         while let Some(chunk_result) = stream.next().await {

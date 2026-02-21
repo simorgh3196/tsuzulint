@@ -208,7 +208,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
     }
 
     // Parse configuration
-    let config: Config = serde_json::from_value(request.config.clone()).unwrap_or_default();
+    let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
 
     // Get effective particles
     let particles = config.effective_particles();

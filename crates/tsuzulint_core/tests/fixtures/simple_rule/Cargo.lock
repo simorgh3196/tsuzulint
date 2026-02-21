@@ -364,6 +364,7 @@ dependencies = [
 name = "tsuzulint-rule-pdk"
 version = "0.1.0"
 dependencies = [
+ "extism-pdk",
  "rmp-serde",
  "serde",
  "serde_json",

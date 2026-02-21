@@ -556,6 +556,7 @@ dependencies = [
 name = "tsuzulint-rule-pdk"
 version = "0.1.0"
 dependencies = [
+ "extism-pdk",
  "pretty_assertions",
  "rmp-serde",
  "serde",

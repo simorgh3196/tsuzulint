@@ -48,6 +48,15 @@ pub trait RuleExecutor {
         self.load(&wasm_bytes)
     }
 
+    /// Configures a loaded rule.
+    ///
+    /// # Arguments
+    ///
+    /// * `rule_name` - Name of the rule to configure
+    /// * `config` - The configuration object
+    fn configure(&mut self, rule_name: &str, config: &serde_json::Value)
+    -> Result<(), PluginError>;
+
     /// Calls the `lint` function of a loaded rule.
     ///
     /// # Arguments
