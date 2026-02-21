@@ -278,7 +278,6 @@ impl PluginHost {
     ) -> Result<Vec<Diagnostic>, PluginError> {
         Self::run_rule_with_parts_internal(
             &mut self.executor,
-            &self.configs,
             &self.aliases,
             name,
             node,
@@ -293,7 +292,6 @@ impl PluginHost {
     #[allow(clippy::too_many_arguments)]
     fn run_rule_with_parts_internal<T: Serialize>(
         executor: &mut Executor,
-        _configs: &HashMap<String, serde_json::Value>,
         aliases: &HashMap<String, String>,
         name: &str,
         node: &T,
@@ -381,11 +379,14 @@ impl PluginHost {
 
             match self.executor.call_lint(real_name, &request_bytes) {
                 Ok(response_bytes) => {
-                    let response: LintResponse =
-                        rmp_serde::from_slice(&response_bytes).map_err(|e| {
-                            PluginError::call(format!("Invalid response from '{}': {}", name, e))
-                        })?;
-                    all_diagnostics.extend(response.diagnostics);
+                    match rmp_serde::from_slice::<LintResponse>(&response_bytes) {
+                        Ok(response) => {
+                            all_diagnostics.extend(response.diagnostics);
+                        }
+                        Err(e) => {
+                            warn!("Invalid response from '{}': {}", name, e);
+                        }
+                    }
                 }
                 Err(e) => {
                     warn!("Rule '{}' failed: {}", name, e);
@@ -458,17 +459,6 @@ mod tests {
     #[test]
     fn test_configure_rule_not_found() {
         let mut host = PluginHost::new();
-        let result = host.configure_rule("nonexistent", serde_json::json!({}));
-        assert!(matches!(result, Err(PluginError::NotFound(_))));
-    }
-
-    #[test]
-    fn test_configure_rule_success() {
-        let mut host = PluginHost::new();
-        // Since we can't easily mock the executor here without dependency injection,
-        // and ExtismExecutor requires actual WASM, we rely on the fact that
-        // configure_rule calls executor.configure.
-        // However, we can at least verify that it fails if the rule is not loaded.
         let result = host.configure_rule("nonexistent", serde_json::json!({}));
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }

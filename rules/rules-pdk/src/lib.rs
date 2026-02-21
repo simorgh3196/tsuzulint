@@ -28,24 +28,35 @@ pub fn set_mock_config(config: serde_json::Value) {
 /// Helper to get configuration for the current rule.
 pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
     #[cfg(target_arch = "wasm32")]
-    unsafe {
-        // Try Extism config first
+    {
+        // Try Extism config first (safe operation)
         if let Ok(Some(s)) = config::get("config") {
             return Ok(serde_json::from_str(&s)?);
         }
 
         // Fallback to custom host function (for Wasmi)
-        // First get length
-        let len = tsuzulint_get_config(0, 0);
+        let len = unsafe { tsuzulint_get_config(0, 0) };
+
+        // Check for error sentinel (u64::MAX from -1 i64)
+        if len == u64::MAX {
+            return Err(Error::msg("Failed to get config: memory write error").into());
+        }
+
         if len == 0 {
             return Ok(serde_json::from_str("{}")?);
         }
 
         // Allocate buffer and get content
         let mut buf = vec![0u8; len as usize];
-        tsuzulint_get_config(buf.as_mut_ptr() as u64, len);
+        let result = unsafe { tsuzulint_get_config(buf.as_mut_ptr() as u64, len) };
 
-        let json = String::from_utf8(buf).map_err(|e| Error::msg(format!("Invalid UTF-8 config: {}", e)))?;
+        // Check for error sentinel on second call
+        if result == u64::MAX {
+            return Err(Error::msg("Failed to get config: memory write error").into());
+        }
+
+        let json = String::from_utf8(buf)
+            .map_err(|e| Error::msg(format!("Invalid UTF-8 config: {}", e)))?;
         Ok(serde_json::from_str(&json)?)
     }
 
@@ -1038,5 +1049,44 @@ mod tests {
         let decoded: LintResponse = rmp_serde::from_slice(&bytes).unwrap();
         assert_eq!(decoded.diagnostics.len(), 1);
         assert_eq!(decoded.diagnostics[0].rule_id, "test");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    mod mock_config_tests {
+        use super::{Deserialize, Diagnostic, LintResponse, Span, get_config, set_mock_config};
+        use rmp_serde;
+
+        #[derive(Debug, Deserialize)]
+        struct TestConfig {
+            #[serde(default)]
+            key: String,
+        }
+
+        #[test]
+        fn test_get_config_valid() {
+            set_mock_config(serde_json::json!({"key": "value"}));
+            let config: TestConfig = get_config().expect("Failed to get config");
+            assert_eq!(config.key, "value");
+            set_mock_config(serde_json::json!({}));
+        }
+
+        #[test]
+        fn test_get_config_empty() {
+            set_mock_config(serde_json::json!({}));
+            let config: TestConfig = get_config().expect("Failed to get empty config");
+            assert_eq!(config.key, "");
+        }
+
+        #[test]
+        fn test_get_config_invalid_json() {
+            #[derive(Debug, Deserialize)]
+            struct StrictConfig {
+                required_field: String,
+            }
+
+            set_mock_config(serde_json::json!({}));
+            let result: Result<StrictConfig, _> = get_config();
+            assert!(result.is_err());
+        }
     }
 }

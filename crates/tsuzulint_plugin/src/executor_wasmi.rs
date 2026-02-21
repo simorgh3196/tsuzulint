@@ -229,7 +229,6 @@ impl RuleExecutor for WasmiExecutor {
         linker
             .func_wrap("extism:host/user", "tsuzulint_get_config", {
                 |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
-                    // Get config from host state
                     let config = caller.data().config.clone();
                     let bytes = config.as_bytes();
                     let total_len = bytes.len() as i64;
@@ -250,7 +249,7 @@ impl RuleExecutor for WasmiExecutor {
                             return total_len;
                         }
                     }
-                    0
+                    -1
                 }
             })
             .map_err(|e| PluginError::load(format!("Failed to add tsuzulint_get_config: {}", e)))?;
@@ -843,5 +842,12 @@ mod tests {
         // Just ensure it doesn't crash
         let res = executor.call_lint("edge-case-rule", b"");
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_configure_not_found() {
+        let mut executor = WasmiExecutor::new();
+        let result = executor.configure("nonexistent", &serde_json::json!({}));
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 }

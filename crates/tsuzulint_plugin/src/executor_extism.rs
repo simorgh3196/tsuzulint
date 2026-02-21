@@ -533,4 +533,11 @@ mod tests {
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Vec::<u8>::new());
     }
+
+    #[test]
+    fn test_configure_not_found() {
+        let mut executor = ExtismExecutor::new();
+        let result = executor.configure("nonexistent", &serde_json::json!({}));
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
 }
