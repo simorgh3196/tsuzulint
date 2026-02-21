@@ -145,18 +145,23 @@ impl WasmDownloader {
         let response = response.error_for_status()?;
 
         // Check Content-Length header if available (early rejection)
-        if let Some(content_length) = response.content_length()
-            && content_length > self.max_size
+        let content_length = response.content_length();
+        if let Some(len) = content_length
+            && len > self.max_size
         {
             return Err(DownloadError::TooLarge {
-                size: content_length,
+                size: len,
                 max: self.max_size,
             });
         }
 
         // Stream the body while checking size
         let mut stream = response.bytes_stream();
-        let mut bytes = Vec::new();
+        let mut bytes = if let Some(len) = content_length {
+            Vec::with_capacity(len as usize)
+        } else {
+            Vec::new()
+        };
         let mut total_size: u64 = 0;
 
         while let Some(chunk_result) = stream.next().await {
@@ -382,6 +387,37 @@ mod tests {
             }
             _ => panic!("Expected TooLarge error"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_download_no_content_length() {
+        let mock_server = MockServer::start().await;
+        let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
+        let expected_hash = HashVerifier::compute(wasm_content);
+
+        // Serve with chunked transfer encoding (no Content-Length)
+        Mock::given(method("GET"))
+            .and(path("/chunked.wasm"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(wasm_content.as_slice())
+                    .insert_header("Transfer-Encoding", "chunked"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/chunked.wasm", mock_server.uri()));
+
+        // Explicitly allow local because wiremock runs on localhost
+        let downloader = WasmDownloader::new().allow_local(true);
+
+        let result = downloader
+            .download(&manifest)
+            .await
+            .expect("Download failed with no Content-Length");
+
+        assert_eq!(result.bytes, wasm_content);
+        assert_eq!(result.computed_hash, expected_hash);
     }
 
     #[tokio::test]

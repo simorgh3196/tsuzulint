@@ -8,7 +8,7 @@ use std::cell::OnceCell;
 use tsuzulint_ast::{NodeType, Span, TxtNode};
 
 /// Pre-computed metadata for a single line.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LineInfo {
     /// Byte offset of line start (inclusive).
     pub start: u32,
@@ -234,6 +234,25 @@ impl<'a> LintContext<'a> {
         }
     }
 
+    /// Creates a new LintContext with a pre-parsed AST.
+    ///
+    /// This automatically calls [`build_structure()`](Self::build_structure) to populate
+    /// the document structure cache from the AST.
+    pub fn with_ast(source: &'a str, root: &TxtNode<'a>) -> Self {
+        let ctx = Self::new(source);
+        ctx.build_structure(root);
+        ctx
+    }
+
+    /// Returns the cached document structure.
+    ///
+    /// Returns an empty structure if neither [`with_ast()`](Self::with_ast) nor
+    /// [`build_structure()`](Self::build_structure) was called before this method.
+    /// See [`build_structure()`](Self::build_structure) for ordering requirements.
+    pub fn structure(&self) -> &DocumentStructure {
+        self.structure.get_or_init(DocumentStructure::default)
+    }
+
     /// Computes line information from source text.
     fn compute_lines(source: &str) -> Vec<LineInfo> {
         let mut lines = Vec::new();
@@ -349,6 +368,16 @@ impl<'a> LintContext<'a> {
     }
 
     /// Builds document structure from an AST node.
+    ///
+    /// # Ordering Requirement
+    ///
+    /// This method must be called **before** [`structure()`](Self::structure) to populate
+    /// the cached structure with AST data. If `structure()` is called first, it will
+    /// initialize the cache with an empty `DocumentStructure::default()`, and subsequent
+    /// calls to `build_structure()` will have no effect.
+    ///
+    /// For convenience, use [`with_ast()`](Self::with_ast) to construct a context that
+    /// automatically builds structure from the AST.
     pub fn build_structure(&self, root: &TxtNode<'a>) -> &DocumentStructure {
         self.structure.get_or_init(|| {
             let mut structure = DocumentStructure::default();
@@ -584,6 +613,416 @@ mod tests {
         assert_eq!(ctx.line_text(2), Some("world"));
         // Byte offset after "hello\r\n" = 7
         assert_eq!(ctx.line_info(2).unwrap().start, 7);
+        assert_eq!(ctx.line_info(2).unwrap().end, 12);
+        assert_eq!(ctx.line_info(3).unwrap().start, 14);
+        assert_eq!(ctx.line_info(3).unwrap().end, 14);
+    }
+
+    #[test]
+    fn test_line_info_zero() {
+        let ctx = LintContext::new("hello");
+        assert_eq!(ctx.line_info(0), None);
+    }
+
+    #[test]
+    fn test_line_info_multibyte() {
+        let ctx = LintContext::new("  こんにちは\n世界");
+        assert_eq!(ctx.line_count(), 2);
+        assert_eq!(ctx.line_info(1).unwrap().start, 0);
+        assert_eq!(ctx.line_info(1).unwrap().end, 17); // 2 spaces + 15 bytes (5 Japanese chars × 3 bytes)
+        assert_eq!(ctx.line_info(1).unwrap().indent, 2); // 2 spaces = 2 bytes
+    }
+
+    // ---- Tests for with_ast and structure() ----
+
+    use tsuzulint_ast::{AstArena, NodeData};
+
+    fn make_header_node<'a>(
+        arena: &'a AstArena,
+        depth: u8,
+        text: &'a str,
+        span: Span,
+    ) -> &'a TxtNode<'a> {
+        let str_node = arena.alloc(TxtNode::new_text(NodeType::Str, span, text));
+        let children = arena.alloc_slice_copy(&[*str_node]);
+        let mut header = TxtNode::new_parent(NodeType::Header, span, children);
+        header.data = NodeData::header(depth);
+        arena.alloc(header)
+    }
+
+    fn make_link_node<'a>(
+        arena: &'a AstArena,
+        url: &'a str,
+        title: Option<&'a str>,
+        text: &'a str,
+        span: Span,
+    ) -> &'a TxtNode<'a> {
+        let str_node = arena.alloc(TxtNode::new_text(NodeType::Str, span, text));
+        let children = arena.alloc_slice_copy(&[*str_node]);
+        let mut link = TxtNode::new_parent(NodeType::Link, span, children);
+        link.data = NodeData::link(url, title);
+        arena.alloc(link)
+    }
+
+    fn make_code_block_node<'a>(
+        arena: &'a AstArena,
+        lang: Option<&'a str>,
+        code: &'a str,
+        span: Span,
+    ) -> &'a TxtNode<'a> {
+        let mut cb = TxtNode::new_text(NodeType::CodeBlock, span, code);
+        cb.data = NodeData::code_block(lang);
+        arena.alloc(cb)
+    }
+
+    fn make_inline_code_node<'a>(
+        arena: &'a AstArena,
+        code: &'a str,
+        span: Span,
+    ) -> &'a TxtNode<'a> {
+        arena.alloc(TxtNode::new_text(NodeType::Code, span, code))
+    }
+
+    #[test]
+    fn test_with_ast_builds_structure_from_headings() {
+        // Source "# Title\n## Sub" is 14 bytes:
+        // - "# Title" (7 bytes, span 0-7)
+        // - "\n" (1 byte)
+        // - "## Sub" (6 bytes, span 8-14)
+        let arena = AstArena::new();
+        let h1 = make_header_node(&arena, 1, "Title", Span::new(0, 7));
+        let h2 = make_header_node(&arena, 2, "Sub", Span::new(8, 14));
+        let children = arena.alloc_slice_copy(&[*h1, *h2]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 14),
+            children,
+        ));
+
+        let ctx = LintContext::with_ast("# Title\n## Sub", doc);
+        let structure = ctx.structure();
+
+        assert_eq!(structure.headings.len(), 2);
+        assert_eq!(structure.headings[0].depth, 1);
+        assert_eq!(structure.headings[0].text, "Title");
+        assert_eq!(structure.headings[1].depth, 2);
+        assert_eq!(structure.headings[1].text, "Sub");
+    }
+
+    #[test]
+    fn test_with_ast_builds_structure_from_links() {
+        let arena = AstArena::new();
+        let link = make_link_node(
+            &arena,
+            "https://example.com",
+            Some("Example"),
+            "click",
+            Span::new(0, 30),
+        );
+        let children = arena.alloc_slice_copy(&[*link]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 30),
+            children,
+        ));
+
+        let ctx = LintContext::with_ast("placeholder source text.......", doc);
+        let structure = ctx.structure();
+
+        assert_eq!(structure.links.len(), 1);
+        assert_eq!(structure.links[0].url, "https://example.com");
+        assert_eq!(structure.links[0].title, Some("Example".to_string()));
+        assert!(!structure.links[0].is_image);
+    }
+
+    #[test]
+    fn test_with_ast_builds_structure_from_image() {
+        let arena = AstArena::new();
+        let str_node = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 3), "alt"));
+        let children = arena.alloc_slice_copy(&[*str_node]);
+        let mut img = TxtNode::new_parent(NodeType::Image, Span::new(0, 20), children);
+        img.data = NodeData::image("img.png", None);
+        let img_ref = arena.alloc(img);
+        let doc_children = arena.alloc_slice_copy(&[*img_ref]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 20),
+            doc_children,
+        ));
+
+        let ctx = LintContext::with_ast("![alt](img.png)     ", doc);
+        let structure = ctx.structure();
+
+        assert_eq!(structure.links.len(), 1);
+        assert!(structure.links[0].is_image);
+        assert_eq!(structure.links[0].url, "img.png");
+    }
+
+    #[test]
+    fn test_with_ast_builds_structure_from_code_blocks() {
+        let arena = AstArena::new();
+        let cb = make_code_block_node(&arena, Some("rust"), "fn main() {}", Span::new(0, 30));
+        let inline = make_inline_code_node(&arena, "x", Span::new(35, 38));
+        let children = arena.alloc_slice_copy(&[*cb, *inline]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 38),
+            children,
+        ));
+
+        let source = "```rust\nfn main() {}\n```\n\n`x`  extra";
+        let ctx = LintContext::with_ast(source, doc);
+        let structure = ctx.structure();
+
+        assert_eq!(structure.code_blocks.len(), 2);
+        assert!(!structure.code_blocks[0].is_inline);
+        assert_eq!(structure.code_blocks[0].lang, Some("rust".to_string()));
+        assert!(structure.code_blocks[1].is_inline);
+        assert!(structure.code_blocks[1].lang.is_none());
+    }
+
+    #[test]
+    fn test_structure_without_ast_returns_empty() {
+        let ctx = LintContext::new("hello world");
+        let structure = ctx.structure();
+
+        assert!(structure.headings.is_empty());
+        assert!(structure.links.is_empty());
+        assert!(structure.code_blocks.is_empty());
+    }
+
+    #[test]
+    fn test_structure_is_cached() {
+        let arena = AstArena::new();
+        let h1 = make_header_node(&arena, 1, "Title", Span::new(0, 7));
+        let children = arena.alloc_slice_copy(&[*h1]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 7),
+            children,
+        ));
+
+        let ctx = LintContext::with_ast("# Title", doc);
+        let s1 = ctx.structure() as *const DocumentStructure;
+        let s2 = ctx.structure() as *const DocumentStructure;
+        // Same pointer means cached
+        assert_eq!(s1, s2);
+    }
+
+    #[test]
+    fn test_is_in_code_block() {
+        let arena = AstArena::new();
+        let cb = make_code_block_node(&arena, Some("rust"), "code", Span::new(10, 30));
+        let inline = make_inline_code_node(&arena, "x", Span::new(35, 40));
+        let children = arena.alloc_slice_copy(&[*cb, *inline]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 40),
+            children,
+        ));
+
+        let source = "          code here             `x`  ext";
+        let ctx = LintContext::with_ast(source, doc);
+        let structure = ctx.structure();
+
+        // Inside the code block
+        assert!(ctx.is_in_code_block(10, structure));
+        assert!(ctx.is_in_code_block(20, structure));
+        // At the end boundary (exclusive), not inside
+        assert!(!ctx.is_in_code_block(30, structure));
+        // Before code block
+        assert!(!ctx.is_in_code_block(5, structure));
+        // Inline code should not count
+        assert!(!ctx.is_in_code_block(37, structure));
+    }
+
+    #[test]
+    fn test_is_in_code_block_multiple_blocks() {
+        let arena = AstArena::new();
+        let cb1 = make_code_block_node(&arena, None, "a", Span::new(0, 10));
+        let cb2 = make_code_block_node(&arena, None, "b", Span::new(20, 30));
+        let children = arena.alloc_slice_copy(&[*cb1, *cb2]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 30),
+            children,
+        ));
+
+        let source = "aaaaaaaaaa          bbbbbbbbbb";
+        let ctx = LintContext::with_ast(source, doc);
+        let structure = ctx.structure();
+
+        assert!(ctx.is_in_code_block(5, structure));
+        assert!(!ctx.is_in_code_block(15, structure)); // gap between blocks
+        assert!(ctx.is_in_code_block(25, structure));
+    }
+
+    #[test]
+    fn test_nested_structure_collection() {
+        // Header inside blockquote: collect_structure should traverse children
+        let arena = AstArena::new();
+        let h1 = make_header_node(&arena, 1, "Nested", Span::new(2, 10));
+        let bq_children = arena.alloc_slice_copy(&[*h1]);
+        let bq = arena.alloc(TxtNode::new_parent(
+            NodeType::BlockQuote,
+            Span::new(0, 12),
+            bq_children,
+        ));
+        let doc_children = arena.alloc_slice_copy(&[*bq]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 12),
+            doc_children,
+        ));
+
+        let ctx = LintContext::with_ast("> # Nested  ", doc);
+        let structure = ctx.structure();
+
+        assert_eq!(structure.headings.len(), 1);
+        assert_eq!(structure.headings[0].text, "Nested");
+    }
+
+    // ---- Additional edge case tests for line operations ----
+
+    #[test]
+    fn test_cr_only_line_endings() {
+        // Rust's str::lines() only splits on \n and \r\n, not standalone \r.
+        // So CR-only content is treated as a single line.
+        let ctx = LintContext::new("hello\rworld\rfoo");
+        assert_eq!(ctx.line_count(), 1);
+    }
+
+    #[test]
+    fn test_multiple_consecutive_blank_lines() {
+        let ctx = LintContext::new("hello\n\n\nworld");
+        assert_eq!(ctx.line_count(), 4);
+        assert_eq!(ctx.line_text(1), Some("hello"));
+        assert_eq!(ctx.line_text(2), Some(""));
+        assert_eq!(ctx.line_text(3), Some(""));
+        assert_eq!(ctx.line_text(4), Some("world"));
+        assert!(ctx.line_info(2).unwrap().is_blank);
+        assert!(ctx.line_info(3).unwrap().is_blank);
+    }
+
+    #[test]
+    fn test_trailing_crlf() {
+        let ctx = LintContext::new("hello\r\n");
+        assert_eq!(ctx.line_count(), 2);
+        assert_eq!(ctx.line_text(1), Some("hello"));
+        // Line 2 is the trailing blank line
+        assert!(ctx.line_info(2).unwrap().is_blank);
+    }
+
+    #[test]
+    fn test_trailing_cr_only() {
+        // Rust's str::lines() only splits on \n and \r\n, not standalone \r.
+        let ctx = LintContext::new("hello\r");
+        assert_eq!(ctx.line_count(), 1);
+        assert_eq!(ctx.line_text(1), Some("hello"));
+    }
+
+    #[test]
+    fn test_byte_offset_to_line_at_newline_char() {
+        // "hello\nworld" - offset 5 is the last byte of "hello", offset 6 is 'w'
+        let ctx = LintContext::new("hello\nworld");
+        // Offset 5 should be in line 1 (the 'o' at end of "hello", 0-indexed byte 5 = end of line)
+        assert_eq!(ctx.byte_offset_to_line(5), Some(1));
+        // Offset 6 is 'w', start of line 2
+        assert_eq!(ctx.byte_offset_to_line(6), Some(2));
+    }
+
+    #[test]
+    fn test_byte_offset_to_line_crlf_at_newline() {
+        // "hi\r\nbye" => line 1 = "hi" (0..2), CRLF at 2..4, line 2 = "bye" (4..7)
+        let ctx = LintContext::new("hi\r\nbye");
+        assert_eq!(ctx.byte_offset_to_line(0), Some(1)); // 'h'
+        assert_eq!(ctx.byte_offset_to_line(1), Some(1)); // 'i'
+        assert_eq!(ctx.byte_offset_to_line(2), Some(1)); // \r (between line end and next line start)
+        assert_eq!(ctx.byte_offset_to_line(3), Some(1)); // \n (still in the gap)
+        assert_eq!(ctx.byte_offset_to_line(4), Some(2)); // 'b'
+    }
+
+    #[test]
+    fn test_line_text_blank_middle_line() {
+        let ctx = LintContext::new("a\n\nb");
+        assert_eq!(ctx.line_text(1), Some("a"));
+        assert_eq!(ctx.line_text(2), Some(""));
+        assert_eq!(ctx.line_text(3), Some("b"));
+    }
+
+    #[test]
+    fn test_line_text_crlf_content() {
+        let ctx = LintContext::new("hello\r\nworld");
+        assert_eq!(ctx.line_text(1), Some("hello"));
+        assert_eq!(ctx.line_text(2), Some("world"));
+    }
+
+    #[test]
+    fn test_byte_offset_to_line_at_source_end() {
+        let ctx = LintContext::new("abc");
+        // Offset 3 = one past last byte, should still resolve to line 1
+        assert_eq!(ctx.byte_offset_to_line(3), Some(1));
+        // Offset 4 = out of bounds
+        assert_eq!(ctx.byte_offset_to_line(4), None);
+    }
+
+    #[test]
+    fn test_source_accessor() {
+        let ctx = LintContext::new("hello world");
+        assert_eq!(ctx.source(), "hello world");
+    }
+
+    #[test]
+    fn test_with_ast_source_accessor() {
+        let arena = AstArena::new();
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 5),
+            &[],
+        ));
+        let ctx = LintContext::with_ast("hello", doc);
+        assert_eq!(ctx.source(), "hello");
+        assert_eq!(ctx.line_count(), 1);
+    }
+
+    #[test]
+    fn test_only_newlines() {
+        let ctx = LintContext::new("\n\n");
+        // "\n\n" => line 1: "", line 2: "", plus trailing blank from final \n
+        assert_eq!(ctx.line_count(), 3);
+        assert!(ctx.line_info(1).unwrap().is_blank);
+        assert!(ctx.line_info(2).unwrap().is_blank);
+        assert!(ctx.line_info(3).unwrap().is_blank);
+    }
+
+    #[test]
+    fn test_extract_text_from_nested_nodes() {
+        let arena = AstArena::new();
+        let s1 = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 5), "Hello"));
+        let s2 = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(6, 11), "World"));
+        let em_children = arena.alloc_slice_copy(&[*s2]);
+        let em = arena.alloc(TxtNode::new_parent(
+            NodeType::Emphasis,
+            Span::new(5, 12),
+            em_children,
+        ));
+        let h_children = arena.alloc_slice_copy(&[*s1, *em]);
+        let mut header = TxtNode::new_parent(NodeType::Header, Span::new(0, 12), h_children);
+        header.data = NodeData::header(1);
+        let header_ref = arena.alloc(header);
+
+        let doc_children = arena.alloc_slice_copy(&[*header_ref]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 12),
+            doc_children,
+        ));
+
+        let ctx = LintContext::with_ast("Hello *World*", doc);
+        let structure = ctx.structure();
+
+        assert_eq!(structure.headings.len(), 1);
+        assert_eq!(structure.headings[0].text, "HelloWorld");
     }
 }
 
