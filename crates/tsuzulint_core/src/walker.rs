@@ -307,7 +307,13 @@ impl GlobMatcher {
                 }
             }
         }
-        builder.build().ok()
+        match builder.build() {
+            Ok(set) => Some(set),
+            Err(e) => {
+                tracing::warn!("Failed to build {} glob set: {}", name, e);
+                None
+            }
+        }
     }
 
     fn should_include(&self, path: &Path) -> bool {
