@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 use tsuzulint_ast::AstArena;
@@ -25,7 +25,7 @@ pub fn lint_file_internal(
     host: &mut PluginHost,
     tokenizer: &Arc<Tokenizer>,
     config_hash: &str,
-    cache: &mut CacheManager,
+    cache: &Mutex<CacheManager>,
     enabled_rules: &HashSet<&str>,
     timings_enabled: bool,
 ) -> Result<LintResult, LinterError> {
@@ -60,14 +60,19 @@ pub fn lint_file_internal(
     let content_hash = CacheManager::hash_content(&content);
     let rule_versions = super::rule_loader::get_rule_versions_from_host(host);
 
-    if cache.is_valid(path, &content_hash, config_hash, &rule_versions)
-        && let Some(entry) = cache.get(path)
     {
-        debug!("Using cached result for {}", path.display());
-        return Ok(LintResult::cached(
-            path.to_path_buf(),
-            entry.diagnostics.clone(),
-        ));
+        let cache_guard = cache
+            .lock()
+            .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
+        if cache_guard.is_valid(path, &content_hash, config_hash, &rule_versions)
+            && let Some(entry) = cache_guard.get(path)
+        {
+            debug!("Using cached result for {}", path.display());
+            return Ok(LintResult::cached(
+                path.to_path_buf(),
+                entry.diagnostics.clone(),
+            ));
+        }
     }
 
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -87,8 +92,12 @@ pub fn lint_file_internal(
 
     let current_blocks = extract_blocks(&ast, &content);
 
-    let (reused_diagnostics, matched_mask) =
-        cache.reconcile_blocks(path, &current_blocks, config_hash, &rule_versions);
+    let (reused_diagnostics, matched_mask) = {
+        let cache_guard = cache
+            .lock()
+            .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
+        cache_guard.reconcile_blocks(path, &current_blocks, config_hash, &rule_versions)
+    };
 
     let mut global_diagnostics = Vec::new();
     let mut block_diagnostics = Vec::new();
@@ -210,14 +219,19 @@ pub fn lint_file_internal(
 
     let new_blocks = distribute_diagnostics(current_blocks, &final_diagnostics, &global_keys);
 
-    let entry = tsuzulint_cache::CacheEntry::new(
-        content_hash,
-        config_hash.to_string(),
-        rule_versions,
-        final_diagnostics.clone(),
-        new_blocks,
-    );
-    cache.set(path.to_path_buf(), entry);
+    {
+        let mut cache_guard = cache
+            .lock()
+            .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
+        let entry = tsuzulint_cache::CacheEntry::new(
+            content_hash,
+            config_hash.to_string(),
+            rule_versions,
+            final_diagnostics.clone(),
+            new_blocks,
+        );
+        cache_guard.set(path.to_path_buf(), entry);
+    }
 
     let mut result = LintResult::new(path.to_path_buf(), final_diagnostics);
     result.timings = timings;

@@ -135,17 +135,12 @@ impl Linter {
         let enabled_rules_vec = self.config.enabled_rules();
         let enabled_rules: HashSet<&str> = enabled_rules_vec.iter().map(|(n, _)| *n).collect();
 
-        let mut cache = self
-            .cache
-            .lock()
-            .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
-
         lint_file_internal(
             path,
             &mut host,
             &self.tokenizer,
             &self.config_hash,
-            &mut cache,
+            &self.cache,
             &enabled_rules,
             self.config.timings,
         )

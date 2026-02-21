@@ -46,17 +46,12 @@ pub fn lint_files(
                     }
                 };
 
-                let mut cache_guard = cache
-                    .lock()
-                    .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))
-                    .map_err(|e| (path.clone(), e))?;
-
                 lint_file_internal(
                     path,
                     file_host,
                     tokenizer,
                     config_hash,
-                    &mut cache_guard,
+                    cache,
                     &enabled_rules,
                     timings_enabled,
                 )
