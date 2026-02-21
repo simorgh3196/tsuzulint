@@ -307,13 +307,7 @@ impl GlobMatcher {
                 }
             }
         }
-        match builder.build() {
-            Ok(set) => Some(set),
-            Err(e) => {
-                tracing::warn!("Failed to build {} glob set: {}", name, e);
-                None
-            }
-        }
+        builder.build().ok()
     }
 
     fn should_include(&self, path: &Path) -> bool {
@@ -543,5 +537,14 @@ mod tests {
         assert!(matcher.should_include(Path::new("README.md")));
         assert!(!matcher.should_include(Path::new("node_modules/pkg/README.md")));
         assert!(!matcher.should_include(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn test_glob_matcher_invalid_pattern() {
+        // This should log a warning but not panic
+        let matcher = GlobMatcher::new(&["[invalid".to_string()], &[]);
+
+        // Invalid pattern is skipped, so the set is effectively empty (matches nothing)
+        assert!(!matcher.should_include(Path::new("test.md")));
     }
 }
