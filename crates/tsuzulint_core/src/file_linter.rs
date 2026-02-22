@@ -126,17 +126,15 @@ pub fn lint_file_internal(
                 }
             } else {
                 let ast_raw = to_raw_value(&ast, "AST")?;
+                let request_bytes = host
+                    .prepare_lint_request(&ast_raw, &content, &tokens, &sentences, path.to_str())
+                    .map_err(|e| {
+                        LinterError::Internal(format!("Failed to prepare lint request: {}", e))
+                    })?;
 
                 for rule in global_rule_names {
                     let start = Instant::now();
-                    match host.run_rule_with_parts(
-                        &rule,
-                        &ast_raw,
-                        &content,
-                        &tokens,
-                        &sentences,
-                        path.to_str(),
-                    ) {
+                    match host.run_rule_with_prepared(&rule, &request_bytes) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
@@ -174,23 +172,27 @@ pub fn lint_file_internal(
                                     start.elapsed();
                             }
                         } else if let Ok(node_raw) = to_raw_value(node, "block node") {
-                            for rule in &block_rule_names {
-                                let start = Instant::now();
-                                match host.run_rule_with_parts(
-                                    rule,
-                                    &node_raw,
-                                    &content,
-                                    &tokens,
-                                    &sentences,
-                                    path.to_str(),
-                                ) {
-                                    Ok(diags) => block_diagnostics.extend(diags),
-                                    Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                            // Serialize request once for all rules running on this block
+                            if let Ok(request_bytes) = host.prepare_lint_request(
+                                &node_raw,
+                                &content,
+                                &tokens,
+                                &sentences,
+                                path.to_str(),
+                            ) {
+                                for rule in &block_rule_names {
+                                    let start = Instant::now();
+                                    match host.run_rule_with_prepared(rule, &request_bytes) {
+                                        Ok(diags) => block_diagnostics.extend(diags),
+                                        Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                                    }
+                                    if timings_enabled {
+                                        *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
+                                            start.elapsed();
+                                    }
                                 }
-                                if timings_enabled {
-                                    *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
-                                        start.elapsed();
-                                }
+                            } else {
+                                warn!("Failed to prepare lint request for block node");
                             }
                         } else {
                             warn!("Failed to serialize/create RawValue for block node");
@@ -205,14 +207,19 @@ pub fn lint_file_internal(
     let mut local_diagnostics = reused_diagnostics;
     local_diagnostics.extend(block_diagnostics);
 
-    let mut global_keys = HashSet::new();
-    for d in &global_diagnostics {
-        global_keys.insert(d);
-    }
+    // Filter out diagnostics that are covered by global rules (by checking rule ID).
+    // Global rules take precedence, and their diagnostics should not be stored in block cache.
+    // This is faster than hashing entire Diagnostic objects.
+    let global_rule_names_for_filter =
+        get_rule_names_by_isolation(host, enabled_rules, IsolationLevel::Global);
+    let global_rule_ids: HashSet<&str> = global_rule_names_for_filter
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
 
-    // Filter out diagnostics that are already covered by global rules to avoid duplication
-    // and ensure global rules take precedence.
-    local_diagnostics.retain(|d| !global_keys.contains(d));
+    if !global_rule_ids.is_empty() {
+        local_diagnostics.retain(|d| !global_rule_ids.contains(d.rule_id.as_str()));
+    }
 
     local_diagnostics.sort_unstable();
     local_diagnostics.dedup();

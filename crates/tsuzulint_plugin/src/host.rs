@@ -58,6 +58,19 @@ struct LintResponse {
     diagnostics: Vec<Diagnostic>,
 }
 
+/// A prepared (serialized) lint request ready for rule execution.
+///
+/// This struct holds the serialized message that will be passed to WASM plugins.
+/// Creating this once and reusing it across multiple rules avoids redundant serialization overhead.
+pub struct PreparedLintRequest(Vec<u8>);
+
+impl PreparedLintRequest {
+    /// Returns the underlying bytes of the prepared request.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 /// Host for loading and executing WASM rule plugins.
 ///
 /// # Example
@@ -276,30 +289,22 @@ impl PluginHost {
         sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        Self::run_rule_with_parts_internal(
-            &mut self.executor,
-            &self.aliases,
-            name,
-            node,
-            source,
-            tokens,
-            sentences,
-            file_path,
-        )
+        let request = self.prepare_lint_request(node, source, tokens, sentences, file_path)?;
+        self.run_rule_with_prepared(name, &request)
     }
 
-    /// Internal helper to run a rule with split borrows.
-    #[allow(clippy::too_many_arguments)]
-    fn run_rule_with_parts_internal<T: Serialize>(
-        executor: &mut Executor,
-        aliases: &HashMap<String, String>,
-        name: &str,
+    /// Prepares a lint request by serializing it once.
+    ///
+    /// Use this when you need to run multiple rules on the same input to avoid
+    /// repeated serialization costs.
+    pub fn prepare_lint_request<T: Serialize>(
+        &self,
         node: &T,
         source: &str,
         tokens: &[Token],
         sentences: &[Sentence],
         file_path: Option<&str>,
-    ) -> Result<Vec<Diagnostic>, PluginError> {
+    ) -> Result<PreparedLintRequest, PluginError> {
         let request = LintRequest {
             node,
             source,
@@ -308,12 +313,21 @@ impl PluginHost {
             file_path,
         };
 
-        let real_name = aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
-
         let request_bytes = rmp_serde::to_vec_named(&request)
             .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
 
-        let response_bytes = executor.call_lint(real_name, &request_bytes)?;
+        Ok(PreparedLintRequest(request_bytes))
+    }
+
+    /// Runs a specific rule using a pre-prepared (serialized) request.
+    pub fn run_rule_with_prepared(
+        &mut self,
+        name: &str,
+        request: &PreparedLintRequest,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
+        let response_bytes = self.executor.call_lint(real_name, &request.0)?;
 
         let response: LintResponse = rmp_serde::from_slice(&response_bytes)
             .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
