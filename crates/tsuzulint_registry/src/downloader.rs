@@ -2,11 +2,12 @@
 
 use crate::hash::HashVerifier;
 use crate::manifest::ExternalRuleManifest;
-use crate::security::{SecurityError, validate_url};
+use crate::security::{check_ip, validate_url, SecurityError};
 use futures_util::StreamExt;
 use reqwest::Url;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::net::lookup_host;
 
 /// Default maximum file size for WASM downloads (50 MB).
 pub const DEFAULT_MAX_SIZE: u64 = 50 * 1024 * 1024;
@@ -36,6 +37,14 @@ pub enum DownloadError {
     /// Security error (SSRF protection).
     #[error("Security error: {0}")]
     SecurityError(#[from] SecurityError),
+
+    /// Too many redirects.
+    #[error("Too many redirects")]
+    RedirectLimitExceeded,
+
+    /// Invalid redirect URL.
+    #[error("Invalid redirect URL: {0}")]
+    InvalidRedirectUrl(String),
 }
 
 /// Result of a successful WASM download.
@@ -64,31 +73,31 @@ impl Default for WasmDownloader {
 impl WasmDownloader {
     /// Create a new WASM downloader with default settings.
     pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            max_size: DEFAULT_MAX_SIZE,
-            timeout: DEFAULT_TIMEOUT,
-            allow_local: false,
-        }
+        Self::create(DEFAULT_MAX_SIZE, DEFAULT_TIMEOUT, false)
     }
 
     /// Create a new WASM downloader with a custom maximum file size.
     pub fn with_max_size(max_size: u64) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            max_size,
-            timeout: DEFAULT_TIMEOUT,
-            allow_local: false,
-        }
+        Self::create(max_size, DEFAULT_TIMEOUT, false)
     }
 
     /// Create a new WASM downloader with custom settings.
     pub fn with_options(max_size: u64, timeout: Duration) -> Self {
+        Self::create(max_size, timeout, false)
+    }
+
+    fn create(max_size: u64, timeout: Duration, allow_local: bool) -> Self {
+        // We disable automatic redirects to manually validate each hop
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("Failed to create reqwest client");
+
         Self {
-            client: reqwest::Client::new(),
+            client,
             max_size,
             timeout,
-            allow_local: false,
+            allow_local,
         }
     }
 
@@ -126,65 +135,106 @@ impl WasmDownloader {
     }
 
     /// Download WASM from a resolved URL using streaming.
-    async fn download_from_url(&self, url_str: &str) -> Result<DownloadResult, DownloadError> {
-        let url = Url::parse(url_str)
-            .map_err(|e| DownloadError::NotFound(format!("Invalid URL: {}", e)))?;
+    async fn download_from_url(&self, initial_url_str: &str) -> Result<DownloadResult, DownloadError> {
+        let mut current_url_str = initial_url_str.to_string();
+        let mut redirect_count = 0;
+        const MAX_REDIRECTS: u32 = 10;
 
-        // Security check: validate URL against SSRF rules
-        validate_url(&url, self.allow_local)?;
+        loop {
+            if redirect_count > MAX_REDIRECTS {
+                return Err(DownloadError::RedirectLimitExceeded);
+            }
 
-        let response = self.client.get(url).timeout(self.timeout).send().await?;
+            let url = Url::parse(&current_url_str)
+                .map_err(|e| DownloadError::NotFound(format!("Invalid URL: {}", e)))?;
 
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(DownloadError::NotFound(format!(
-                "WASM file not found at {url_str}"
-            )));
-        }
+            // 1. Basic URL validation (scheme, string host checks)
+            validate_url(&url, self.allow_local)?;
 
-        // Check HTTP status first to prioritize server errors over size errors
-        let response = response.error_for_status()?;
+            // 2. DNS Resolution and IP Validation (SSRF protection)
+            if !self.allow_local && let Some(host) = url.host_str() {
+                let port = url.port_or_known_default().unwrap_or(80);
+                // This uses the system resolver (via tokio/std)
+                let addrs = lookup_host((host, port)).await?;
+                for addr in addrs {
+                    check_ip(addr.ip())?;
+                }
+            }
 
-        // Check Content-Length header if available (early rejection)
-        let content_length = response.content_length();
-        if let Some(len) = content_length
-            && len > self.max_size
-        {
-            return Err(DownloadError::TooLarge {
-                size: len,
-                max: self.max_size,
-            });
-        }
+            // 3. Perform Request (without following redirects)
+            let response = self.client.get(url.clone()).timeout(self.timeout).send().await?;
 
-        // Stream the body while checking size
-        let mut stream = response.bytes_stream();
-        let mut bytes = if let Some(len) = content_length {
-            Vec::with_capacity(len as usize)
-        } else {
-            Vec::new()
-        };
-        let mut total_size: u64 = 0;
+            // 4. Handle Redirects
+            if response.status().is_redirection()
+                && let Some(location) = response.headers().get(reqwest::header::LOCATION)
+            {
+                let location_str = location.to_str().map_err(|_| {
+                    DownloadError::InvalidRedirectUrl(
+                        "Location header is not valid UTF-8".to_string(),
+                    )
+                })?;
 
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?;
-            total_size += chunk.len() as u64;
+                // Resolve relative URLs
+                let next_url = url.join(location_str).map_err(|e| {
+                    DownloadError::InvalidRedirectUrl(format!("Failed to parse redirect URL: {}", e))
+                })?;
 
-            // Early rejection if size exceeds limit
-            if total_size > self.max_size {
+                current_url_str = next_url.to_string();
+                redirect_count += 1;
+                continue;
+            }
+
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Err(DownloadError::NotFound(format!(
+                    "WASM file not found at {current_url_str}"
+                )));
+            }
+
+            // Check HTTP status first to prioritize server errors over size errors
+            let response = response.error_for_status()?;
+
+            // Check Content-Length header if available (early rejection)
+            let content_length = response.content_length();
+            if let Some(len) = content_length
+                && len > self.max_size
+            {
                 return Err(DownloadError::TooLarge {
-                    size: total_size,
+                    size: len,
                     max: self.max_size,
                 });
             }
 
-            bytes.extend_from_slice(&chunk);
+            // Stream the body while checking size
+            let mut stream = response.bytes_stream();
+            let mut bytes = if let Some(len) = content_length {
+                Vec::with_capacity(len as usize)
+            } else {
+                Vec::new()
+            };
+            let mut total_size: u64 = 0;
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+                total_size += chunk.len() as u64;
+
+                // Early rejection if size exceeds limit
+                if total_size > self.max_size {
+                    return Err(DownloadError::TooLarge {
+                        size: total_size,
+                        max: self.max_size,
+                    });
+                }
+
+                bytes.extend_from_slice(&chunk);
+            }
+
+            let computed_hash = HashVerifier::compute(&bytes);
+
+            return Ok(DownloadResult {
+                bytes,
+                computed_hash,
+            });
         }
-
-        let computed_hash = HashVerifier::compute(&bytes);
-
-        Ok(DownloadResult {
-            bytes,
-            computed_hash,
-        })
     }
 }
 
@@ -435,6 +485,63 @@ mod tests {
                 // Success - access denied
             }
             res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_redirect_success() {
+        let mock_server = MockServer::start().await;
+        let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
+
+        // Redirect from /redirect to /rule.wasm
+        Mock::given(method("GET"))
+            .and(path("/redirect"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("Location", format!("{}/rule.wasm", mock_server.uri()).as_str()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(wasm_content.as_slice()))
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/redirect", mock_server.uri()));
+
+        let downloader = WasmDownloader::new().allow_local(true);
+        let result = downloader
+            .download(&manifest)
+            .await
+            .expect("Download failed with redirect");
+
+        assert_eq!(result.bytes, wasm_content);
+    }
+
+    #[tokio::test]
+    async fn test_redirect_limit_exceeded() {
+        let mock_server = MockServer::start().await;
+
+        // Redirect loop
+        Mock::given(method("GET"))
+            .and(path("/loop"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("Location", format!("{}/loop", mock_server.uri()).as_str()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let manifest = create_dummy_manifest(format!("{}/loop", mock_server.uri()));
+
+        let downloader = WasmDownloader::new().allow_local(true);
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::RedirectLimitExceeded) => {}
+            res => panic!("Expected RedirectLimitExceeded, got {:?}", res),
         }
     }
 }

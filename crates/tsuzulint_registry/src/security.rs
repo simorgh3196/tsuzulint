@@ -20,6 +20,30 @@ pub enum SecurityError {
     FileNotFound { path: String },
 }
 
+/// Checks if an IP address is safe (publicly routable).
+pub fn check_ip(ip: std::net::IpAddr) -> Result<(), SecurityError> {
+    match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            if ipv4.is_loopback() || ipv4.is_unspecified() {
+                return Err(SecurityError::LoopbackDenied(ipv4.to_string()));
+            }
+            if ipv4.is_private() || ipv4.is_link_local() {
+                return Err(SecurityError::PrivateIpDenied(ipv4.to_string()));
+            }
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            if ipv6.is_loopback() || ipv6.is_unspecified() {
+                return Err(SecurityError::LoopbackDenied(ipv6.to_string()));
+            }
+            // Unique local (fc00::/7)
+            if (ipv6.segments()[0] & 0xfe00) == 0xfc00 || ipv6.is_unicast_link_local() {
+                return Err(SecurityError::PrivateIpDenied(ipv6.to_string()));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_url(url: &Url, allow_local: bool) -> Result<(), SecurityError> {
     if allow_local {
         return Ok(());
@@ -36,21 +60,10 @@ pub fn validate_url(url: &Url, allow_local: bool) -> Result<(), SecurityError> {
             }
         }
         Some(url::Host::Ipv4(ipv4)) => {
-            if ipv4.is_loopback() || ipv4.is_unspecified() {
-                return Err(SecurityError::LoopbackDenied(ipv4.to_string()));
-            }
-            if ipv4.is_private() || ipv4.is_link_local() {
-                return Err(SecurityError::PrivateIpDenied(ipv4.to_string()));
-            }
+            check_ip(std::net::IpAddr::V4(ipv4))?;
         }
         Some(url::Host::Ipv6(ipv6)) => {
-            if ipv6.is_loopback() || ipv6.is_unspecified() {
-                return Err(SecurityError::LoopbackDenied(ipv6.to_string()));
-            }
-            // Unique local (fc00::/7)
-            if (ipv6.segments()[0] & 0xfe00) == 0xfc00 || ipv6.is_unicast_link_local() {
-                return Err(SecurityError::PrivateIpDenied(ipv6.to_string()));
-            }
+            check_ip(std::net::IpAddr::V6(ipv6))?;
         }
         None => {}
     }
@@ -229,5 +242,16 @@ mod tests {
         // Just outside 192.168.0.0/16
         assert_valid("http://192.167.255.255/rule.wasm");
         assert_valid("http://192.169.0.0/rule.wasm");
+    }
+
+    #[test]
+    fn test_check_ip() {
+        // Public IP
+        let public_ip: std::net::IpAddr = "8.8.8.8".parse().unwrap();
+        assert!(check_ip(public_ip).is_ok());
+
+        // Private IP
+        let private_ip: std::net::IpAddr = "192.168.1.1".parse().unwrap();
+        assert!(check_ip(private_ip).is_err());
     }
 }
