@@ -187,8 +187,9 @@ pub fn lint_file_internal(
                                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                     }
                                     if timings_enabled {
-                                        *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
-                                            start.elapsed();
+                                        *timings
+                                            .entry(rule.clone())
+                                            .or_insert(Duration::new(0, 0)) += start.elapsed();
                                     }
                                 }
                             } else {

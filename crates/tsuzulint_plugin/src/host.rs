@@ -526,4 +526,31 @@ mod tests {
         assert_eq!(guest_request.node, node_data);
         assert_eq!(guest_request.helpers, None);
     }
+
+    #[test]
+    fn test_prepare_lint_request_reusability() {
+        let host = PluginHost::new();
+        let node_data = serde_json::json!({"type": "Doc", "children": []});
+        let tokens = vec![];
+        let sentences = vec![];
+        let source = "test content";
+        let file_path = Some("test.md");
+
+        let prepared = host
+            .prepare_lint_request(&node_data, source, &tokens, &sentences, file_path)
+            .expect("Failed to prepare request");
+
+        let bytes = prepared.as_bytes();
+        assert!(!bytes.is_empty());
+
+        // Verify it can be deserialized back to a LintRequest-like structure
+        use serde::Deserialize;
+        #[derive(Debug, Deserialize)]
+        struct PdkLintRequest {
+            pub source: String,
+        }
+
+        let deserialized: PdkLintRequest = rmp_serde::from_slice(bytes).unwrap();
+        assert_eq!(deserialized.source, source);
+    }
 }
