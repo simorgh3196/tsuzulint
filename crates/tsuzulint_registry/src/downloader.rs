@@ -2,7 +2,7 @@
 
 use crate::hash::HashVerifier;
 use crate::manifest::ExternalRuleManifest;
-use crate::security::{check_ip, validate_url, SecurityError};
+use crate::security::{SecurityError, check_ip, validate_url};
 use futures_util::StreamExt;
 use reqwest::Url;
 use std::time::Duration;
@@ -135,7 +135,10 @@ impl WasmDownloader {
     }
 
     /// Download WASM from a resolved URL using streaming.
-    async fn download_from_url(&self, initial_url_str: &str) -> Result<DownloadResult, DownloadError> {
+    async fn download_from_url(
+        &self,
+        initial_url_str: &str,
+    ) -> Result<DownloadResult, DownloadError> {
         let mut current_url_str = initial_url_str.to_string();
         let mut redirect_count = 0;
         const MAX_REDIRECTS: u32 = 10;
@@ -152,7 +155,9 @@ impl WasmDownloader {
             validate_url(&url, self.allow_local)?;
 
             // 2. DNS Resolution and IP Validation (SSRF protection)
-            if !self.allow_local && let Some(host) = url.host_str() {
+            if !self.allow_local
+                && let Some(host) = url.host_str()
+            {
                 let port = url.port_or_known_default().unwrap_or(80);
                 // This uses the system resolver (via tokio/std)
                 let addrs = lookup_host((host, port)).await?;
@@ -162,7 +167,12 @@ impl WasmDownloader {
             }
 
             // 3. Perform Request (without following redirects)
-            let response = self.client.get(url.clone()).timeout(self.timeout).send().await?;
+            let response = self
+                .client
+                .get(url.clone())
+                .timeout(self.timeout)
+                .send()
+                .await?;
 
             // 4. Handle Redirects
             if response.status().is_redirection()
@@ -176,7 +186,10 @@ impl WasmDownloader {
 
                 // Resolve relative URLs
                 let next_url = url.join(location_str).map_err(|e| {
-                    DownloadError::InvalidRedirectUrl(format!("Failed to parse redirect URL: {}", e))
+                    DownloadError::InvalidRedirectUrl(format!(
+                        "Failed to parse redirect URL: {}",
+                        e
+                    ))
                 })?;
 
                 current_url_str = next_url.to_string();
@@ -496,10 +509,10 @@ mod tests {
         // Redirect from /redirect to /rule.wasm
         Mock::given(method("GET"))
             .and(path("/redirect"))
-            .respond_with(
-                ResponseTemplate::new(301)
-                    .insert_header("Location", format!("{}/rule.wasm", mock_server.uri()).as_str()),
-            )
+            .respond_with(ResponseTemplate::new(301).insert_header(
+                "Location",
+                format!("{}/rule.wasm", mock_server.uri()).as_str(),
+            ))
             .mount(&mock_server)
             .await;
 
