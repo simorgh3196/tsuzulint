@@ -568,7 +568,9 @@ mod tests {
 
         let mut host = PluginHost::new();
         let node_data = serde_json::json!({});
-        let prepared = host.prepare_lint_request(&node_data, "", &[], &[], None).unwrap();
+        let prepared = host
+            .prepare_lint_request(&node_data, "", &[], &[], None)
+            .unwrap();
 
         // We expect an error because no rule is loaded, but this confirms
         // run_rule_with_prepared attempts to run.
