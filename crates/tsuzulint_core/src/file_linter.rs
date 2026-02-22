@@ -218,9 +218,7 @@ pub fn lint_file_internal(
         .map(|s| s.as_str())
         .collect();
 
-    if !global_rule_ids.is_empty() {
-        local_diagnostics.retain(|d| !global_rule_ids.contains(d.rule_id.as_str()));
-    }
+    filter_overridden_diagnostics(&mut local_diagnostics, &global_rule_ids);
 
     local_diagnostics.sort_unstable();
     local_diagnostics.dedup();
@@ -320,9 +318,49 @@ fn get_rule_names_by_isolation(
     names
 }
 
+fn filter_overridden_diagnostics(
+    local_diagnostics: &mut Vec<tsuzulint_plugin::Diagnostic>,
+    global_rule_ids: &HashSet<&str>,
+) {
+    if !global_rule_ids.is_empty() {
+        local_diagnostics.retain(|d| !global_rule_ids.contains(d.rule_id.as_str()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tsuzulint_ast::Span;
+    use tsuzulint_plugin::Diagnostic;
+
+    #[test]
+    fn test_filter_overridden_diagnostics() {
+        let global_id = "global-rule";
+        let local_id = "local-rule";
+
+        let mut diagnostics = vec![
+            Diagnostic::new(global_id, "Global msg", Span::new(0, 10)),
+            Diagnostic::new(local_id, "Local msg", Span::new(20, 30)),
+        ];
+
+        let mut global_rule_ids = HashSet::new();
+        global_rule_ids.insert(global_id);
+
+        filter_overridden_diagnostics(&mut diagnostics, &global_rule_ids);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule_id, local_id);
+    }
+
+    #[test]
+    fn test_filter_overridden_diagnostics_empty_global_set() {
+        let mut diagnostics = vec![Diagnostic::new("rule", "msg", Span::new(0, 10))];
+        let global_rule_ids = HashSet::new();
+
+        filter_overridden_diagnostics(&mut diagnostics, &global_rule_ids);
+
+        assert_eq!(diagnostics.len(), 1);
+    }
 
     #[test]
     fn test_select_parser_markdown() {
