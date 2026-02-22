@@ -394,4 +394,5 @@ mod tests {
         let parser_txt = select_parser("TXT");
         assert_eq!(parser_txt.name(), "text");
     }
+
 }
