@@ -363,6 +363,18 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_overridden_diagnostics_no_match() {
+        let mut diagnostics = vec![Diagnostic::new("local-rule", "msg", Span::new(0, 10))];
+        let mut global_rule_ids = HashSet::new();
+        global_rule_ids.insert("other-global-rule");
+
+        filter_overridden_diagnostics(&mut diagnostics, &global_rule_ids);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule_id, "local-rule");
+    }
+
+    #[test]
     fn test_select_parser_markdown() {
         let parser = select_parser("md");
         assert_eq!(parser.name(), "markdown");
@@ -394,5 +406,4 @@ mod tests {
         let parser_txt = select_parser("TXT");
         assert_eq!(parser_txt.name(), "text");
     }
-
 }
