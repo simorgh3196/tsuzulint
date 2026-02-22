@@ -62,6 +62,7 @@ struct LintResponse {
 ///
 /// This struct holds the serialized message that will be passed to WASM plugins.
 /// Creating this once and reusing it across multiple rules avoids redundant serialization overhead.
+#[derive(Debug)]
 pub struct PreparedLintRequest(Vec<u8>);
 
 impl PreparedLintRequest {
@@ -569,5 +570,33 @@ mod tests {
 
         let result = host.run_rule_with_prepared("nonexistent", &prepared);
         assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    fn test_prepare_lint_request_serialization_failure() {
+        let host = PluginHost::new();
+
+        // Create a type that fails to serialize
+        struct FailSerialize;
+        impl serde::Serialize for FailSerialize {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("Simulated serialization failure"))
+            }
+        }
+
+        let node_data = FailSerialize;
+        let tokens = vec![];
+        let sentences = vec![];
+        let source = "test content";
+        let file_path = Some("test.md");
+
+        let result = host.prepare_lint_request(&node_data, source, &tokens, &sentences, file_path);
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Failed to serialize request"));
     }
 }
