@@ -553,4 +553,21 @@ mod tests {
         let deserialized: PdkLintRequest = rmp_serde::from_slice(bytes).unwrap();
         assert_eq!(deserialized.source, source);
     }
+
+    #[test]
+    fn test_run_rule_with_prepared_not_found() {
+        let mut host = PluginHost::new();
+        let node_data = serde_json::json!({"type": "Doc", "children": []});
+        let tokens = vec![];
+        let sentences = vec![];
+        let source = "test content";
+        let file_path = Some("test.md");
+
+        let prepared = host
+            .prepare_lint_request(&node_data, source, &tokens, &sentences, file_path)
+            .expect("Failed to prepare request");
+
+        let result = host.run_rule_with_prepared("nonexistent", &prepared);
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
 }
