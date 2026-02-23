@@ -5,7 +5,7 @@
 # =============================================================================
 
 # Default: format, lint, and test
-all: fmt lint test
+all: fmt lint test test-doc
 
 # Build host (debug)
 build:

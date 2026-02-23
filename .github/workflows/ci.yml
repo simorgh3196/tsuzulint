@@ -125,7 +125,7 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@nextest
       - name: Generate coverage report
-        run: cargo llvm-cov nextest --workspace --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --all-features --profile ci --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
