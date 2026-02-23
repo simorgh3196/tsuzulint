@@ -67,7 +67,7 @@ pub async fn handle_initialized(client: &tower_lsp::Client) {
 }
 
 /// Handles the `shutdown` LSP request.
-pub async fn handle_shutdown() -> Result<()> {
+pub fn handle_shutdown() -> Result<()> {
     info!("TsuzuLint LSP server shutting down...");
     Ok(())
 }

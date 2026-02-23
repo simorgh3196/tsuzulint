@@ -151,7 +151,7 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        handle_shutdown().await
+        handle_shutdown()
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {

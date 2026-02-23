@@ -21,7 +21,7 @@ pub fn handle_did_open(
             Ok(guard) => guard,
             Err(e) => {
                 error!("Documents lock poisoned: {}", e);
-                return (uri, String::new(), None);
+                return (uri, text, Some(version));
             }
         };
         docs.insert(
