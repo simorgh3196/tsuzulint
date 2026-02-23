@@ -2,7 +2,14 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum OutputFormat {
+    Text,
+    Json,
+    Sarif,
+}
 
 /// TsuzuLint - High-performance natural language linter
 #[derive(Parser)]
@@ -33,9 +40,9 @@ pub enum Commands {
         #[arg(required = true)]
         patterns: Vec<String>,
 
-        /// Output format (text, json, sarif)
-        #[arg(short, long, default_value = "text")]
-        format: String,
+        /// Output format
+        #[arg(short, long, default_value = "text", value_enum)]
+        format: OutputFormat,
 
         /// Auto-fix errors
         #[arg(long)]
