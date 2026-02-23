@@ -285,13 +285,47 @@ pub fn lint_content(
     Ok(diagnostics)
 }
 
-fn select_parser(extension: &str) -> Box<dyn Parser> {
+/// Enum wrapper for parsers to avoid heap allocation (Box<dyn Parser>) and dynamic dispatch.
+/// This improves performance in the hot path of file linting.
+enum FileParser {
+    Markdown(MarkdownParser),
+    Text(PlainTextParser),
+}
+
+impl Parser for FileParser {
+    fn name(&self) -> &str {
+        match self {
+            Self::Markdown(p) => p.name(),
+            Self::Text(p) => p.name(),
+        }
+    }
+
+    fn extensions(&self) -> &[&str] {
+        match self {
+            Self::Markdown(p) => p.extensions(),
+            Self::Text(p) => p.extensions(),
+        }
+    }
+
+    fn parse<'a>(
+        &self,
+        arena: &'a AstArena,
+        source: &str,
+    ) -> Result<tsuzulint_ast::TxtNode<'a>, tsuzulint_parser::ParseError> {
+        match self {
+            Self::Markdown(p) => p.parse(arena, source),
+            Self::Text(p) => p.parse(arena, source),
+        }
+    }
+}
+
+fn select_parser(extension: &str) -> FileParser {
     let md_parser = MarkdownParser::new();
 
     if md_parser.can_parse(extension) {
-        Box::new(md_parser)
+        FileParser::Markdown(md_parser)
     } else {
-        Box::new(PlainTextParser::new())
+        FileParser::Text(PlainTextParser::new())
     }
 }
 
