@@ -213,6 +213,30 @@ fn generate_minimal_manifest(
     })
 }
 
+#[allow(dead_code)]
+fn copy_plugin_files(
+    wasm_path: &Path,
+    manifest: &tsuzulint_manifest::ExternalRuleManifest,
+    target_dir: &Path,
+) -> Result<(), AddRuleError> {
+    std::fs::create_dir_all(target_dir).map_err(AddRuleError::CreateDirError)?;
+
+    let target_wasm = target_dir.join("rule.wasm");
+    let target_manifest = target_dir.join("tsuzulint-rule.json");
+
+    std::fs::copy(wasm_path, &target_wasm).map_err(AddRuleError::CopyError)?;
+
+    let manifest_json = serde_json::to_string_pretty(manifest).map_err(|e| {
+        AddRuleError::ManifestParseError(tsuzulint_manifest::ManifestError::ValidationError(
+            e.to_string(),
+        ))
+    })?;
+
+    std::fs::write(&target_manifest, manifest_json).map_err(AddRuleError::CopyError)?;
+
+    Ok(())
+}
+
 pub fn run_add_rule(
     path: &Path,
     _alias: Option<&str>,
@@ -417,5 +441,21 @@ mod manifest_tests {
         let wasm_path = PathBuf::from("/nonexistent/rule.wasm");
         let result = generate_minimal_manifest(&wasm_path, "my-alias");
         assert!(matches!(result, Err(AddRuleError::WasmReadError(_))));
+    }
+
+    #[test]
+    fn test_copy_plugin_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        std::fs::write(&wasm_path, b"wasm content").unwrap();
+
+        let manifest = generate_minimal_manifest(&wasm_path, "test-rule").unwrap();
+        let target_dir = dir.path().join("plugins/test-rule");
+
+        let result = copy_plugin_files(&wasm_path, &manifest, &target_dir);
+        assert!(result.is_ok());
+
+        assert!(target_dir.join("rule.wasm").exists());
+        assert!(target_dir.join("tsuzulint-rule.json").exists());
     }
 }
