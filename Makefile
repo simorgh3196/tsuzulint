@@ -19,7 +19,7 @@ test:
 
 # Run doctests
 test-doc:
-	cargo test --workspace --doc
+	cargo test --workspace --all-features --doc
 
 # Run tests with output (falls back to cargo test for --nocapture)
 test-verbose:

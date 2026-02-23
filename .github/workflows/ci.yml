@@ -78,7 +78,7 @@ jobs:
           target: wasm32-wasip1
 
       - name: Run doctests
-        run: cargo test --workspace --doc
+        run: cargo test --workspace --all-features --doc
 
   build:
     name: Build (${{ matrix.os }})
