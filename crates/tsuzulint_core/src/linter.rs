@@ -647,6 +647,8 @@ mod tests {
             crate::config::RuleOption::Enabled(true),
         );
 
+        config.timings = true;
+
         let linter = Linter::new(config).unwrap();
 
         let mut rule_loaded = false;
@@ -784,6 +786,8 @@ mod tests {
             crate::config::RuleOption::Enabled(true),
         );
 
+        config.timings = true;
+
         let linter = Linter::new(config).unwrap();
         linter.load_rule(&wasm_path).expect("Failed to load rule");
 
@@ -919,6 +923,8 @@ mod tests {
             crate::config::RuleOption::Enabled(true),
         );
 
+        config.timings = true;
+
         let linter = Linter::new(config).unwrap();
 
         if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
@@ -941,5 +947,134 @@ mod tests {
 
         assert!(diags[0].span.start < diags[1].span.start);
         assert!(diags[1].span.start < diags[2].span.start);
+    }
+
+    #[test]
+    fn test_lint_file_multiple_global_rules() {
+        let (mut config, temp_dir) = test_config();
+
+        // Register two global rules
+        config.rules.push(crate::config::RuleDefinition::Simple(
+            "test-rule".to_string(),
+        ));
+        config.rules.push(crate::config::RuleDefinition::Simple(
+            "test-rule-2".to_string(),
+        ));
+        config.options.insert(
+            "test-rule".to_string(),
+            crate::config::RuleOption::Enabled(true),
+        );
+        config.options.insert(
+            "test-rule-2".to_string(),
+            crate::config::RuleOption::Enabled(true),
+        );
+
+        config.timings = true;
+
+        let linter = Linter::new(config).unwrap();
+
+        if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
+            // Load rule initially (registers as "test-rule" based on internal manifest)
+            linter
+                .load_rule(&wasm_path)
+                .expect("Failed to load test rule");
+
+            // Rename it to "test-rule-2" to free up "test-rule" slot
+            {
+                let mut host = linter.plugin_host.lock().unwrap();
+                host.rename_rule("test-rule", "test-rule-2", None).unwrap();
+            }
+
+            // Load it again to populate "test-rule"
+            linter
+                .load_rule(&wasm_path)
+                .expect("Failed to load test rule 2");
+        } else {
+            println!("WASM build failed, skipping test");
+            return;
+        }
+
+        let file_path = temp_dir.path().join("test_multi.md");
+        let content = "error";
+        fs::write(&file_path, content).unwrap();
+
+        let result = linter.lint_file(&file_path).unwrap();
+
+        // Both rules should have been executed and logged in timings
+        // Each rule produces a diagnostic with its own rule_id, so no deduplication
+        assert!(
+            result.timings.contains_key("test-rule"),
+            "Missing timing for test-rule"
+        );
+        assert!(
+            result.timings.contains_key("test-rule-2"),
+            "Missing timing for test-rule-2"
+        );
+        assert_eq!(
+            result.diagnostics.len(),
+            2,
+            "Each rule should produce one diagnostic"
+        );
+    }
+
+    #[test]
+    fn test_lint_file_block_rule() {
+        use crate::Linter;
+        use crate::config::{LinterConfig, RuleDefinition, RuleOption};
+        use tsuzulint_plugin::{IsolationLevel, RuleManifest};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config = LinterConfig::new();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: temp_dir.path().to_string_lossy().to_string(),
+        });
+
+        // Register a block rule
+        config
+            .rules
+            .push(RuleDefinition::Simple("block-rule".to_string()));
+        config
+            .options
+            .insert("block-rule".to_string(), RuleOption::Enabled(true));
+
+        config.timings = true;
+
+        let linter = Linter::new(config).unwrap();
+
+        if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
+            // Load rule initially
+            linter
+                .load_rule(&wasm_path)
+                .expect("Failed to load test rule");
+
+            // Change it to be a block rule
+            {
+                let mut host = linter.plugin_host.lock().unwrap();
+                let manifest = RuleManifest::new("block-rule", "1.0.0")
+                    .with_isolation_level(IsolationLevel::Block);
+
+                // Rename "test-rule" to "block-rule" and update manifest
+                host.rename_rule("test-rule", "block-rule", Some(manifest))
+                    .unwrap();
+            }
+        } else {
+            println!("WASM build failed, skipping test");
+            return;
+        }
+
+        let file_path = temp_dir.path().join("test_block.md");
+        // Ensure there are some blocks (paragraphs)
+        let content = "Block 1.\n\nBlock 2 with error.";
+        fs::write(&file_path, content).unwrap();
+
+        let result = linter.lint_file(&file_path).unwrap();
+
+        // The rule checks for "error". It should be found in the second block.
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].rule_id, "block-rule");
+
+        // Check timings to verify it ran as a block rule
+        assert!(result.timings.contains_key("block-rule"));
     }
 }

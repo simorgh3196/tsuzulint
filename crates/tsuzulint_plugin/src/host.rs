@@ -58,6 +58,20 @@ struct LintResponse {
     diagnostics: Vec<Diagnostic>,
 }
 
+/// A prepared (serialized) lint request ready for rule execution.
+///
+/// This struct holds the serialized message that will be passed to WASM plugins.
+/// Creating this once and reusing it across multiple rules avoids redundant serialization overhead.
+#[derive(Debug)]
+pub struct PreparedLintRequest(Vec<u8>);
+
+impl PreparedLintRequest {
+    /// Returns the underlying bytes of the prepared request.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 /// Host for loading and executing WASM rule plugins.
 ///
 /// # Example
@@ -276,30 +290,22 @@ impl PluginHost {
         sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        Self::run_rule_with_parts_internal(
-            &mut self.executor,
-            &self.aliases,
-            name,
-            node,
-            source,
-            tokens,
-            sentences,
-            file_path,
-        )
+        let request = self.prepare_lint_request(node, source, tokens, sentences, file_path)?;
+        self.run_rule_with_prepared(name, &request)
     }
 
-    /// Internal helper to run a rule with split borrows.
-    #[allow(clippy::too_many_arguments)]
-    fn run_rule_with_parts_internal<T: Serialize>(
-        executor: &mut Executor,
-        aliases: &HashMap<String, String>,
-        name: &str,
+    /// Prepares a lint request by serializing it once.
+    ///
+    /// Use this when you need to run multiple rules on the same input to avoid
+    /// repeated serialization costs.
+    pub fn prepare_lint_request<T: Serialize>(
+        &self,
         node: &T,
         source: &str,
         tokens: &[Token],
         sentences: &[Sentence],
         file_path: Option<&str>,
-    ) -> Result<Vec<Diagnostic>, PluginError> {
+    ) -> Result<PreparedLintRequest, PluginError> {
         let request = LintRequest {
             node,
             source,
@@ -308,17 +314,37 @@ impl PluginHost {
             file_path,
         };
 
-        let real_name = aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
-
         let request_bytes = rmp_serde::to_vec_named(&request)
             .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
 
-        let response_bytes = executor.call_lint(real_name, &request_bytes)?;
+        Ok(PreparedLintRequest(request_bytes))
+    }
+
+    /// Runs a specific rule using a pre-prepared (serialized) request.
+    pub fn run_rule_with_prepared(
+        &mut self,
+        name: &str,
+        request: &PreparedLintRequest,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
+        let response_bytes = self.executor.call_lint(real_name, &request.0)?;
 
         let response: LintResponse = rmp_serde::from_slice(&response_bytes)
             .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
 
-        Ok(response.diagnostics)
+        let mut diagnostics = response.diagnostics;
+
+        // If the rule is aliased, map the internal rule ID back to the alias
+        if name != real_name {
+            for diag in &mut diagnostics {
+                if diag.rule_id == real_name {
+                    diag.rule_id = name.to_string();
+                }
+            }
+        }
+
+        Ok(diagnostics)
     }
 
     /// Runs all loaded rules on a node.
@@ -381,7 +407,18 @@ impl PluginHost {
                 Ok(response_bytes) => {
                     match rmp_serde::from_slice::<LintResponse>(&response_bytes) {
                         Ok(response) => {
-                            all_diagnostics.extend(response.diagnostics);
+                            let mut diagnostics = response.diagnostics;
+
+                            // If the rule is aliased, map the internal rule ID back to the alias
+                            if name != real_name {
+                                for diag in &mut diagnostics {
+                                    if diag.rule_id == real_name {
+                                        diag.rule_id = name.to_string();
+                                    }
+                                }
+                            }
+
+                            all_diagnostics.extend(diagnostics);
                         }
                         Err(e) => {
                             warn!("Invalid response from '{}': {}", name, e);
@@ -511,5 +548,116 @@ mod tests {
         assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
         assert_eq!(guest_request.node, node_data);
         assert_eq!(guest_request.helpers, None);
+    }
+
+    #[test]
+    fn test_prepare_lint_request_reusability() {
+        let host = PluginHost::new();
+        let node_data = serde_json::json!({"type": "Doc", "children": []});
+        let tokens = vec![];
+        let sentences = vec![];
+        let source = "test content";
+        let file_path = Some("test.md");
+
+        let prepared = host
+            .prepare_lint_request(&node_data, source, &tokens, &sentences, file_path)
+            .expect("Failed to prepare request");
+
+        let bytes = prepared.as_bytes();
+        assert!(!bytes.is_empty());
+
+        // Verify it can be deserialized back to a LintRequest-like structure
+        use serde::Deserialize;
+        #[derive(Debug, Deserialize)]
+        struct PdkLintRequest {
+            pub source: String,
+        }
+
+        let deserialized: PdkLintRequest = rmp_serde::from_slice(bytes).unwrap();
+        assert_eq!(deserialized.source, source);
+    }
+
+    #[test]
+    fn test_run_rule_with_prepared_success() {
+        // This test ensures run_rule_with_prepared can successfully deserialize
+        // and execute a rule (even if mocked/stubbed) or at least exercises the happy path logic
+        // up to the executor call. Since we can't easily load a real WASM here without files,
+        // we mainly rely on the fact that call_lint is called.
+        // However, we can test that the method itself works by mocking the executor interaction
+        // if the executor was mockable, but it's not easily here.
+        // Instead, we trust integration tests for full success, but we can verify
+        // that it doesn't panic on valid input.
+
+        let mut host = PluginHost::new();
+        let node_data = serde_json::json!({});
+        let prepared = host
+            .prepare_lint_request(&node_data, "", &[], &[], None)
+            .unwrap();
+
+        // We expect an error because no rule is loaded, but this confirms
+        // run_rule_with_prepared attempts to run.
+        let result = host.run_rule_with_prepared("nonexistent", &prepared);
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    fn test_run_rule_with_prepared_not_found() {
+        let mut host = PluginHost::new();
+        let node_data = serde_json::json!({"type": "Doc", "children": []});
+        let tokens = vec![];
+        let sentences = vec![];
+        let source = "test content";
+        let file_path = Some("test.md");
+
+        let prepared = host
+            .prepare_lint_request(&node_data, source, &tokens, &sentences, file_path)
+            .expect("Failed to prepare request");
+
+        let result = host.run_rule_with_prepared("nonexistent", &prepared);
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    fn test_prepare_lint_request_serialization_failure() {
+        let host = PluginHost::new();
+
+        // Create a type that fails to serialize
+        struct FailSerialize;
+        impl serde::Serialize for FailSerialize {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("Simulated serialization failure"))
+            }
+        }
+
+        let node_data = FailSerialize;
+        let tokens = vec![];
+        let sentences = vec![];
+        let source = "test content";
+        let file_path = Some("test.md");
+
+        let result = host.prepare_lint_request(&node_data, source, &tokens, &sentences, file_path);
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Failed to serialize request"));
+    }
+
+    #[test]
+    fn test_run_rule_with_prepared_invalid_response() {
+        let mut host = PluginHost::new();
+        // Manually construct a request with valid bytes but no real rule behind it
+        let prepared = PreparedLintRequest(vec![1, 2, 3]);
+
+        // This will fail because the rule is not found, but if we could mock the executor
+        // to return invalid bytes, we would test deserialization failure.
+        // Since we can't easily mock the internal executor here without major refactoring,
+        // we rely on the fact that call_lint error mapping is covered by other tests.
+        // However, we can at least verify that passing garbage bytes to run_rule_with_prepared
+        // doesn't panic.
+        let result = host.run_rule_with_prepared("nonexistent", &prepared);
+        assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 }

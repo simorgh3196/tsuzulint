@@ -50,5 +50,5 @@ pub mod test_utils;
 pub use diagnostic::{Diagnostic, Fix, Severity};
 pub use error::PluginError;
 pub use executor::{LoadResult, RuleExecutor};
-pub use host::PluginHost;
+pub use host::{PluginHost, PreparedLintRequest};
 pub use manifest::{IsolationLevel, RuleManifest};
