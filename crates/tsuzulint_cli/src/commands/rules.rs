@@ -1,10 +1,29 @@
 //! Rules command implementation
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use miette::{IntoDiagnostic, Result};
 use tracing::{info, warn};
 use tsuzulint_registry::resolver::PluginSpec;
+
+#[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
+pub enum AddRuleError {
+    #[error("WASM file not found: {0}")]
+    FileNotFound(PathBuf),
+    #[error("Invalid file extension: expected .wasm, got {0:?}")]
+    InvalidExtension(Option<String>),
+    #[error("Rule '{0}' already exists at {1}. Use a different alias with --as.")]
+    AlreadyExists(String, PathBuf),
+    #[error("Failed to create plugin directory: {0}")]
+    CreateDirError(#[source] std::io::Error),
+    #[error("Failed to copy WASM file: {0}")]
+    CopyError(#[source] std::io::Error),
+    #[error("Failed to read manifest: {0}")]
+    ManifestReadError(#[source] std::io::Error),
+    #[error("Failed to parse manifest: {0}")]
+    ManifestParseError(#[source] tsuzulint_manifest::ManifestError),
+}
 
 pub fn run_create_rule(name: &str) -> Result<()> {
     let rule_dir = std::path::PathBuf::from(name);
@@ -128,7 +147,11 @@ pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {{
     Ok(())
 }
 
-pub fn run_add_rule(path: &Path) -> Result<()> {
+pub fn run_add_rule(
+    path: &Path,
+    _alias: Option<&str>,
+    _config_path: Option<PathBuf>,
+) -> Result<()> {
     if !path.exists() {
         return Err(miette::miette!("File not found: {}", path.display()));
     }

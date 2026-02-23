@@ -4463,11 +4463,13 @@ dependencies = [
  "regex",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "tsuzulint_core",
  "tsuzulint_lsp",
+ "tsuzulint_manifest",
  "tsuzulint_registry",
  "wiremock",
 ]
