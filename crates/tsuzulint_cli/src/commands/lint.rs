@@ -4,14 +4,14 @@ use miette::{IntoDiagnostic, Result};
 use tracing::{info, warn};
 use tsuzulint_core::{Linter, LinterConfig, RuleDefinition, RuleDefinitionDetail};
 
-use crate::cli::Cli;
+use crate::cli::{Cli, OutputFormat};
 use crate::fix::{apply_fixes, output_fix_summary};
 use crate::output::output_results;
 
 pub fn run_lint(
     cli: &Cli,
     patterns: &[String],
-    format: &str,
+    format: OutputFormat,
     fix: bool,
     dry_run: bool,
     timings: bool,
