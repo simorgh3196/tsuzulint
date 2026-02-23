@@ -221,6 +221,9 @@ fn copy_plugin_files(
     std::fs::copy(wasm_path, &target_wasm).map_err(AddRuleError::CopyError)?;
 
     manifest.artifacts.wasm = "rule.wasm".to_string();
+    let wasm_content = std::fs::read(&target_wasm).map_err(AddRuleError::WasmReadError)?;
+    manifest.artifacts.sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
+
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| {
         AddRuleError::ManifestParseError(tsuzulint_manifest::ManifestError::ValidationError(
             e.to_string(),
@@ -493,5 +496,60 @@ mod manifest_tests {
         )
         .unwrap();
         assert_eq!(saved_manifest["artifacts"]["wasm"], "rule.wasm");
+    }
+
+    #[test]
+    fn test_copy_plugin_files_recomputes_sha256() {
+        let dir = tempfile::tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        let wasm_content = b"actual wasm content";
+        std::fs::write(&wasm_path, wasm_content).unwrap();
+
+        let manifest_with_wrong_hash = {
+            use tsuzulint_manifest::{Artifacts, IsolationLevel, RuleMetadata};
+            tsuzulint_manifest::ExternalRuleManifest {
+                rule: RuleMetadata {
+                    name: "test-rule".to_string(),
+                    version: "1.0.0".to_string(),
+                    description: None,
+                    repository: None,
+                    license: None,
+                    authors: vec![],
+                    keywords: vec![],
+                    fixable: false,
+                    node_types: vec![],
+                    isolation_level: IsolationLevel::Global,
+                },
+                artifacts: Artifacts {
+                    wasm: "old-name.wasm".to_string(),
+                    sha256: "wrong_hash_that_should_be_replaced".to_string(),
+                },
+                permissions: None,
+                tsuzulint: None,
+                options: None,
+            }
+        };
+
+        let target_dir = dir.path().join("plugins/test-rule");
+        let result = copy_plugin_files(&wasm_path, manifest_with_wrong_hash, &target_dir);
+        assert!(result.is_ok());
+
+        let saved_manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(target_dir.join("tsuzulint-rule.json")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(saved_manifest["artifacts"]["wasm"], "rule.wasm");
+
+        let expected_hash = tsuzulint_registry::HashVerifier::compute(wasm_content);
+        assert_eq!(
+            saved_manifest["artifacts"]["sha256"].as_str().unwrap(),
+            expected_hash
+        );
+
+        assert_ne!(
+            saved_manifest["artifacts"]["sha256"].as_str().unwrap(),
+            "wrong_hash_that_should_be_replaced"
+        );
     }
 }
