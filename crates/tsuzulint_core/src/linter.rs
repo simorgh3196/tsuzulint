@@ -185,7 +185,10 @@ impl Linter {
 
         for pattern in patterns {
             let path = Path::new(pattern);
-            if path.exists() && path.is_file() {
+            if path
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_file())
+            {
                 if let Ok(abs_path) = path.canonicalize() {
                     if self.should_ignore(&abs_path) {
                         continue;
@@ -209,7 +212,7 @@ impl Linter {
 
             for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
-                if path.is_file() && glob_set.is_match(path) {
+                if entry.file_type().is_file() && glob_set.is_match(path) {
                     if self.should_ignore(path) {
                         continue;
                     }
@@ -1076,5 +1079,36 @@ mod tests {
 
         // Check timings to verify it ran as a block rule
         assert!(result.timings.contains_key("block-rule"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_discover_files_ignores_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = tempdir().unwrap();
+        let target_file = temp_dir.path().join("target.md");
+        let link_file = temp_dir.path().join("link.md");
+
+        fs::write(&target_file, "# Target").unwrap();
+        symlink(&target_file, &link_file).unwrap();
+
+        let mut config = LinterConfig::new();
+        config.base_dir = Some(temp_dir.path().to_path_buf());
+        let linter = Linter::new(config).unwrap();
+
+        let files = linter
+            .discover_files(&["*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        // Should only contain target.md, NOT link.md
+        assert_eq!(
+            files.len(),
+            1,
+            "Should ignore symlinks, but found: {:?}",
+            files
+        );
+        assert!(files.iter().any(|f| f.ends_with("target.md")));
+        assert!(!files.iter().any(|f| f.ends_with("link.md")));
     }
 }
