@@ -2,7 +2,7 @@
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
-use tracing::info;
+use tracing::{error, info};
 
 use crate::config::reload_config;
 use crate::state::BackendState;
@@ -21,7 +21,7 @@ pub async fn handle_initialize(
                 *root = Some(path);
             }
             Err(e) => {
-                tracing::error!("Workspace root lock poisoned: {}", e);
+                error!("Workspace root lock poisoned: {}", e);
                 return Ok(InitializeResult::default());
             }
         }
@@ -67,7 +67,7 @@ pub async fn handle_initialized(client: &tower_lsp::Client) {
 }
 
 /// Handles the `shutdown` LSP request.
-pub async fn handle_shutdown() -> Result<()> {
+pub fn handle_shutdown() -> Result<()> {
     info!("TsuzuLint LSP server shutting down...");
     Ok(())
 }
