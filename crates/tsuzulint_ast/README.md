@@ -141,19 +141,18 @@ let paragraph = arena.alloc(TxtNode::new_parent(
 ### Visitor Usage Example
 
 ```rust
-use tsuzulint_ast::{Visitor, TxtNode, walk_node};
-use std::ops::ControlFlow;
+use tsuzulint_ast::{Visitor, VisitResult, TxtNode};
 
 struct TextCollector<'a> {
     texts: Vec<&'a str>,
 }
 
 impl<'a> Visitor<'a> for TextCollector<'a> {
-    fn visit_str(&mut self, node: &TxtNode<'a>) -> ControlFlow<()> {
+    fn visit_str(&mut self, node: &TxtNode<'a>) -> VisitResult {
         if let Some(text) = node.value {
             self.texts.push(text);
         }
-        ControlFlow::Continue(())
+        VisitResult::Continue(())
     }
 }
 ```

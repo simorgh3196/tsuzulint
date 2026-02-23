@@ -117,8 +117,8 @@ let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
     .par_iter()
     .map_init(
         || create_plugin_host(config, dynamic_rules),
-        |host_result, path| {
-            lint_file_internal(path, file_host, ...)
+        |host, path| {
+            lint_file_internal(path, host, ...)
         }
     )
     .collect();

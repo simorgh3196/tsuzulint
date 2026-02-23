@@ -117,10 +117,10 @@ const linter = new TextLinter();
       //   {
       //     ruleId: "no-todo",
       //     message: "Found TODO keyword",
-      //     start: 0,
-      //     end: 4,
+      //     start: 19,
+      //     end: 23,
       //     severity: "warning",
-      //     fix: { start: 0, end: 4, text: "DONE" }
+      //     fix: { start: 19, end: 23, text: "DONE" }
       //   }
       // ]
     }
