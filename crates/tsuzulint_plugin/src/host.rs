@@ -333,7 +333,18 @@ impl PluginHost {
         let response: LintResponse = rmp_serde::from_slice(&response_bytes)
             .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
 
-        Ok(response.diagnostics)
+        let mut diagnostics = response.diagnostics;
+
+        // If the rule is aliased, map the internal rule ID back to the alias
+        if name != real_name {
+            for diag in &mut diagnostics {
+                if diag.rule_id == real_name {
+                    diag.rule_id = name.to_string();
+                }
+            }
+        }
+
+        Ok(diagnostics)
     }
 
     /// Runs all loaded rules on a node.
@@ -396,7 +407,18 @@ impl PluginHost {
                 Ok(response_bytes) => {
                     match rmp_serde::from_slice::<LintResponse>(&response_bytes) {
                         Ok(response) => {
-                            all_diagnostics.extend(response.diagnostics);
+                            let mut diagnostics = response.diagnostics;
+
+                            // If the rule is aliased, map the internal rule ID back to the alias
+                            if name != real_name {
+                                for diag in &mut diagnostics {
+                                    if diag.rule_id == real_name {
+                                        diag.rule_id = name.to_string();
+                                    }
+                                }
+                            }
+
+                            all_diagnostics.extend(diagnostics);
                         }
                         Err(e) => {
                             warn!("Invalid response from '{}': {}", name, e);
