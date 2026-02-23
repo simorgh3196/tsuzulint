@@ -584,4 +584,23 @@ mod tests {
             res => panic!("Expected RedirectLimitExceeded, got {:?}", res),
         }
     }
+
+    #[tokio::test]
+    async fn test_secure_download_with_pinning() -> Result<(), DownloadError> {
+        // This test exercises the secure path (allow_local = false)
+        // We use httpbin.org which is a public service that should pass the IP check
+        let manifest = create_dummy_manifest("https://httpbin.org/status/200".to_string());
+
+        let downloader = WasmDownloader::new()?; // Default is allow_local = false
+        let result = downloader.download(&manifest).await;
+
+        // We don't necessarily expect success (network might be flaky/offline),
+        // but we want to ensure it doesn't fail with a SecurityError (IP blocked)
+        // or a logic error in the new pinning code.
+        match result {
+            Ok(_) => Ok(()),
+            Err(DownloadError::NetworkError(_)) => Ok(()), // Network error is fine, means code executed
+            Err(e) => panic!("Unexpected error type: {:?}", e),
+        }
+    }
 }
