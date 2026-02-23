@@ -28,31 +28,25 @@
 use extism_pdk::*;
 use serde::Deserialize;
 use tsuzulint_rule_pdk::{
-    Diagnostic, Fix, LintRequest, LintResponse, RuleManifest, Span, extract_node_text, is_node_type,
+    Diagnostic, Fix, LintRequest, LintResponse, RuleManifest, Span, Token, extract_node_text,
+    is_node_type,
 };
 
 const RULE_ID: &str = "no-doubled-joshi";
-const VERSION: &str = "1.0.0";
+const VERSION: &str = "1.1.0";
 
-/// Common Japanese particles (助詞).
 const DEFAULT_PARTICLES: &[&str] = &[
     "は", "が", "を", "に", "で", "と", "も", "の", "へ", "や", "か", "ね", "よ", "な", "ぞ", "わ",
 ];
 
-/// Configuration for the no-doubled-joshi rule.
 #[derive(Debug, Deserialize)]
 struct Config {
-    /// Particles to check (default: common particles).
     #[serde(default)]
     particles: Vec<String>,
-    /// Minimum distance (in characters) between same particles to report.
-    /// Default 0 means only consecutive particles are reported.
     #[serde(default)]
     min_interval: usize,
-    /// Particles to allow even if doubled.
     #[serde(default)]
     allow: Vec<String>,
-    /// Whether to provide auto-fix suggestions.
     #[serde(default)]
     suggest_fix: bool,
 }
@@ -69,7 +63,6 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Returns the particles to check, filtering out allowed ones.
     fn effective_particles(&self) -> Vec<String> {
         let base_particles: Vec<String> = if self.particles.is_empty() {
             DEFAULT_PARTICLES.iter().map(|s| (*s).to_string()).collect()
@@ -84,21 +77,44 @@ impl Config {
     }
 }
 
-/// Represents a found particle with its position.
 #[derive(Debug, Clone)]
 struct ParticleMatch {
-    /// The particle string.
     particle: String,
-    /// Byte start offset in source.
     byte_start: usize,
-    /// Byte end offset in source.
     byte_end: usize,
-    /// Character index in the text.
     char_index: usize,
 }
 
-/// Finds all particles in the text.
-fn find_particles(text: &str, particles: &[String], base_offset: usize) -> Vec<ParticleMatch> {
+fn find_particles_from_tokens(
+    tokens: &[Token],
+    config: &Config,
+    _node_start: u32,
+) -> Vec<ParticleMatch> {
+    let mut matches = Vec::new();
+    let mut char_idx = 0usize;
+    let particles = config.effective_particles();
+
+    for token in tokens {
+        let is_joshi = token.has_pos("助詞");
+        if is_joshi && particles.iter().any(|p| p == &token.surface) {
+            matches.push(ParticleMatch {
+                particle: token.surface.clone(),
+                byte_start: token.span.start as usize,
+                byte_end: token.span.end as usize,
+                char_index: char_idx,
+            });
+        }
+        char_idx += token.surface.chars().count();
+    }
+
+    matches
+}
+
+fn find_particles_from_text(
+    text: &str,
+    particles: &[String],
+    base_offset: usize,
+) -> Vec<ParticleMatch> {
     let mut matches = Vec::new();
     let mut char_idx = 0;
     let mut byte_offset = 0;
@@ -123,33 +139,23 @@ fn find_particles(text: &str, particles: &[String], base_offset: usize) -> Vec<P
     matches
 }
 
-/// Checks for doubled particles and returns diagnostics.
-fn check_doubled_particles(
-    matches: &[ParticleMatch],
-    config: &Config,
-    _text: &str,
-) -> Vec<Diagnostic> {
+fn check_doubled_particles(matches: &[ParticleMatch], config: &Config) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-
-    // We need to track which matches we've already reported to avoid duplicate reports
     let mut reported_indices: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
     for i in 1..matches.len() {
         let prev = &matches[i - 1];
         let curr = &matches[i];
 
-        // Check if same particle
         if prev.particle != curr.particle {
             continue;
         }
 
-        // Check interval
         let interval = curr.char_index.saturating_sub(prev.char_index + 1);
         if interval > config.min_interval {
             continue;
         }
 
-        // Skip if already reported
         if reported_indices.contains(&(i - 1)) {
             continue;
         }
@@ -157,7 +163,6 @@ fn check_doubled_particles(
         reported_indices.insert(i - 1);
         reported_indices.insert(i);
 
-        // Found doubled particle
         let mut diagnostic = Diagnostic::new(
             RULE_ID,
             format!(
@@ -167,9 +172,7 @@ fn check_doubled_particles(
             Span::new(prev.byte_start as u32, curr.byte_end as u32),
         );
 
-        // Provide fix suggestion if enabled
         if config.suggest_fix {
-            // Suggest removing the second particle
             diagnostic = diagnostic.with_fix(Fix::delete(Span::new(
                 curr.byte_start as u32,
                 curr.byte_end as u32,
@@ -182,7 +185,6 @@ fn check_doubled_particles(
     diagnostics
 }
 
-/// Returns the rule manifest.
 #[plugin_fn]
 pub fn get_manifest() -> FnResult<String> {
     let manifest = RuleManifest::new(RULE_ID, VERSION)
@@ -192,7 +194,6 @@ pub fn get_manifest() -> FnResult<String> {
     Ok(serde_json::to_string(&manifest)?)
 }
 
-/// Lints a node for doubled particles.
 #[plugin_fn]
 pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
     lint_impl(input)
@@ -202,25 +203,36 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
     let request: LintRequest = rmp_serde::from_slice(&input)?;
     let mut diagnostics = Vec::new();
 
-    // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
         return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
     }
 
-    // Parse configuration
     let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
+    let tokens = request.get_tokens();
 
-    // Get effective particles
-    let particles = config.effective_particles();
+    let node_range = request.node.get("range").and_then(|r| r.as_array());
+    let node_start = node_range
+        .and_then(|r| r.first().and_then(|v| v.as_u64()))
+        .unwrap_or(0) as u32;
+    let node_end = node_range
+        .and_then(|r| r.get(1).and_then(|v| v.as_u64()))
+        .unwrap_or(0) as u32;
 
-    // Extract text from node
-    if let Some((start, _end, text)) = extract_node_text(&request.node, &request.source) {
-        // Find all particles
-        let particle_matches = find_particles(text, &particles, start);
+    let particle_matches = if !tokens.is_empty() && node_start < node_end {
+        let node_tokens: Vec<Token> = tokens
+            .iter()
+            .filter(|t| t.span.start >= node_start && t.span.end <= node_end)
+            .cloned()
+            .collect();
+        find_particles_from_tokens(&node_tokens, &config, node_start)
+    } else if let Some((start, _end, text)) = extract_node_text(&request.node, &request.source) {
+        let particles = config.effective_particles();
+        find_particles_from_text(text, &particles, start)
+    } else {
+        Vec::new()
+    };
 
-        // Check for doubled particles
-        diagnostics = check_doubled_particles(&particle_matches, &config, text);
-    }
+    diagnostics = check_doubled_particles(&particle_matches, &config);
 
     Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
 }
@@ -229,6 +241,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use tsuzulint_rule_pdk::TextSpan;
 
     #[test]
     fn config_default_particles() {
@@ -263,9 +276,9 @@ mod tests {
     }
 
     #[test]
-    fn find_particles_basic() {
+    fn find_particles_from_text_basic() {
         let particles = vec!["は".to_string(), "が".to_string()];
-        let matches = find_particles("私はは学生", &particles, 0);
+        let matches = find_particles_from_text("私はは学生", &particles, 0);
 
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].particle, "は");
@@ -273,9 +286,9 @@ mod tests {
     }
 
     #[test]
-    fn find_particles_different() {
+    fn find_particles_from_text_different() {
         let particles = vec!["は".to_string(), "が".to_string()];
-        let matches = find_particles("私は学生が", &particles, 0);
+        let matches = find_particles_from_text("私は学生が", &particles, 0);
 
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].particle, "は");
@@ -283,33 +296,78 @@ mod tests {
     }
 
     #[test]
-    fn find_particles_with_offset() {
+    fn find_particles_from_text_with_offset() {
         let particles = vec!["は".to_string()];
-        let matches = find_particles("私は", &particles, 100);
+        let matches = find_particles_from_text("私は", &particles, 100);
 
         assert_eq!(matches.len(), 1);
-        // "私" is 3 bytes in UTF-8, so "は" starts at offset 100 + 3 = 103
         assert_eq!(matches[0].byte_start, 103);
-        // "は" is 3 bytes in UTF-8, so end is 103 + 3 = 106
         assert_eq!(matches[0].byte_end, 106);
     }
 
     #[test]
-    fn find_particles_char_indices() {
+    fn find_particles_from_text_char_indices() {
         let particles = vec!["は".to_string()];
-        let matches = find_particles("私はは学生", &particles, 0);
+        let matches = find_particles_from_text("私はは学生", &particles, 0);
 
         assert_eq!(matches[0].char_index, 1);
         assert_eq!(matches[1].char_index, 2);
     }
 
     #[test]
+    fn find_particles_from_tokens_joshi() {
+        let config = Config::default();
+        let tokens = vec![
+            Token::new("私", vec!["名詞".to_string()], TextSpan::new(0, 3)),
+            Token::new("は", vec!["助詞".to_string()], TextSpan::new(3, 6)),
+            Token::new("は", vec!["助詞".to_string()], TextSpan::new(6, 9)),
+            Token::new("学生", vec!["名詞".to_string()], TextSpan::new(9, 15)),
+        ];
+
+        let matches = find_particles_from_tokens(&tokens, &config, 0);
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].particle, "は");
+        assert_eq!(matches[0].byte_start, 3);
+        assert_eq!(matches[1].particle, "は");
+        assert_eq!(matches[1].byte_start, 6);
+    }
+
+    #[test]
+    fn find_particles_from_tokens_non_joshi() {
+        let config = Config::default();
+        let tokens = vec![
+            Token::new("私", vec!["名詞".to_string()], TextSpan::new(0, 3)),
+            Token::new("は", vec!["名詞".to_string()], TextSpan::new(3, 6)),
+        ];
+
+        let matches = find_particles_from_tokens(&tokens, &config, 0);
+
+        assert_eq!(matches.len(), 0);
+    }
+
+    #[test]
+    fn find_particles_from_tokens_with_node_offset() {
+        let config = Config::default();
+        let tokens = vec![
+            Token::new("は", vec!["助詞".to_string()], TextSpan::new(10, 13)),
+            Token::new("は", vec!["助詞".to_string()], TextSpan::new(13, 16)),
+        ];
+
+        let matches = find_particles_from_tokens(&tokens, &config, 10);
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].char_index, 0);
+        assert_eq!(matches[1].char_index, 1);
+    }
+
+    #[test]
     fn check_doubled_consecutive() {
         let particles = vec!["は".to_string()];
-        let matches = find_particles("私はは学生", &particles, 0);
+        let matches = find_particles_from_text("私はは学生", &particles, 0);
         let config = Config::default();
 
-        let diagnostics = check_doubled_particles(&matches, &config, "私はは学生");
+        let diagnostics = check_doubled_particles(&matches, &config);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("は"));
     }
@@ -317,57 +375,55 @@ mod tests {
     #[test]
     fn check_doubled_not_consecutive() {
         let particles = vec!["は".to_string()];
-        let matches = find_particles("私は学生は", &particles, 0);
+        let matches = find_particles_from_text("私は学生は", &particles, 0);
         let config = Config {
-            min_interval: 0, // Only consecutive
+            min_interval: 0,
             ..Default::default()
         };
 
-        let diagnostics = check_doubled_particles(&matches, &config, "私は学生は");
+        let diagnostics = check_doubled_particles(&matches, &config);
         assert_eq!(diagnostics.len(), 0);
     }
 
     #[test]
     fn check_doubled_with_interval() {
         let particles = vec!["は".to_string()];
-        let matches = find_particles("私は学生は", &particles, 0);
+        let matches = find_particles_from_text("私は学生は", &particles, 0);
         let config = Config {
-            min_interval: 5, // Allow up to 5 characters between
+            min_interval: 5,
             ..Default::default()
         };
 
-        let diagnostics = check_doubled_particles(&matches, &config, "私は学生は");
+        let diagnostics = check_doubled_particles(&matches, &config);
         assert_eq!(diagnostics.len(), 1);
     }
 
     #[test]
     fn check_doubled_different_particles() {
         let particles = vec!["は".to_string(), "が".to_string()];
-        let matches = find_particles("私はが学生", &particles, 0);
+        let matches = find_particles_from_text("私はが学生", &particles, 0);
         let config = Config::default();
 
-        let diagnostics = check_doubled_particles(&matches, &config, "私はが学生");
-        // は and が are different, so no error
+        let diagnostics = check_doubled_particles(&matches, &config);
         assert_eq!(diagnostics.len(), 0);
     }
 
     #[test]
     fn check_doubled_with_fix() {
         let particles = vec!["に".to_string()];
-        let matches = find_particles("東京にに行く", &particles, 0);
+        let matches = find_particles_from_text("東京にに行く", &particles, 0);
         let config = Config {
             suggest_fix: true,
             ..Default::default()
         };
 
-        let diagnostics = check_doubled_particles(&matches, &config, "東京にに行く");
+        let diagnostics = check_doubled_particles(&matches, &config);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].fix.is_some());
     }
 
     #[test]
     fn manifest_contains_required_fields() {
-        // Test manifest structure directly (plugin_fn macro changes signature at compile time)
         let manifest = RuleManifest::new(RULE_ID, VERSION)
             .with_description("Detect repeated Japanese particles (助詞)")
             .with_fixable(true)
@@ -379,7 +435,6 @@ mod tests {
         assert!(manifest.fixable);
         assert!(manifest.node_types.contains(&"Str".to_string()));
 
-        // Verify it serializes correctly
         let json = serde_json::to_string(&manifest).unwrap();
         assert!(json.contains(RULE_ID));
     }
@@ -387,14 +442,19 @@ mod tests {
     #[test]
     fn no_particles_found() {
         let particles = vec!["は".to_string()];
-        let matches = find_particles("Hello World", &particles, 0);
+        let matches = find_particles_from_text("Hello World", &particles, 0);
         assert!(matches.is_empty());
     }
 
     #[test]
     fn empty_text() {
         let particles = vec!["は".to_string()];
-        let matches = find_particles("", &particles, 0);
+        let matches = find_particles_from_text("", &particles, 0);
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn version_bumped() {
+        assert_eq!(VERSION, "1.1.0");
     }
 }

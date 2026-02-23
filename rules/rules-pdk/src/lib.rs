@@ -87,6 +87,12 @@ pub struct LintRequest {
     /// Pre-computed helper information for easier rule development.
     #[serde(default)]
     pub helpers: Option<LintHelpers>,
+    /// Morphological tokens (from host).
+    #[serde(default)]
+    pub tokens: Vec<Token>,
+    /// Sentences (from host).
+    #[serde(default)]
+    pub sentences: Vec<TextSentence>,
 }
 
 impl LintRequest {
@@ -99,6 +105,8 @@ impl LintRequest {
             source,
             file_path: None,
             helpers: None,
+            tokens: Vec::new(),
+            sentences: Vec::new(),
         }
     }
 
@@ -111,6 +119,8 @@ impl LintRequest {
             source,
             file_path: None,
             helpers: None,
+            tokens: Vec::new(),
+            sentences: Vec::new(),
         }
     }
 
@@ -147,6 +157,37 @@ impl LintRequest {
         self.helpers = Some(helpers);
         self
     }
+
+    /// Sets the text analysis tokens and sentences.
+    pub fn with_text_analysis(mut self, tokens: Vec<Token>, sentences: Vec<TextSentence>) -> Self {
+        self.tokens = tokens;
+        self.sentences = sentences;
+        self
+    }
+
+    /// Returns tokens, preferring helpers.text_context if available.
+    pub fn get_tokens(&self) -> &[Token] {
+        if let Some(ref helpers) = self.helpers {
+            if let Some(ref ctx) = helpers.text_context {
+                if !ctx.tokens.is_empty() {
+                    return &ctx.tokens;
+                }
+            }
+        }
+        &self.tokens
+    }
+
+    /// Returns sentences, preferring helpers.text_context if available.
+    pub fn get_sentences(&self) -> &[TextSentence] {
+        if let Some(ref helpers) = self.helpers {
+            if let Some(ref ctx) = helpers.text_context {
+                if !ctx.sentences.is_empty() {
+                    return &ctx.sentences;
+                }
+            }
+        }
+        &self.sentences
+    }
 }
 
 /// Pre-computed helper information for lint rules.
@@ -167,6 +208,10 @@ pub struct LintHelpers {
     /// Flags indicating the node's position in the document structure.
     #[serde(default)]
     pub flags: LintFlags,
+
+    /// Text analysis context (tokens and sentences).
+    #[serde(default)]
+    pub text_context: Option<TextContext>,
 }
 
 /// Line and column location information.
@@ -241,6 +286,125 @@ pub struct LintFlags {
     /// Whether the node is inside a table.
     #[serde(default)]
     pub in_table: bool,
+}
+
+// ============================================================================
+// Text Analysis Types (from Core)
+// ============================================================================
+
+/// Byte span for text analysis results.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TextSpan {
+    /// Start byte offset (0-indexed, inclusive).
+    pub start: u32,
+    /// End byte offset (0-indexed, exclusive).
+    pub end: u32,
+}
+
+impl TextSpan {
+    /// Creates a new text span.
+    pub fn new(start: u32, end: u32) -> Self {
+        Self { start, end }
+    }
+
+    /// Returns the length of the span in bytes.
+    pub fn len(&self) -> u32 {
+        self.end.saturating_sub(self.start)
+    }
+
+    /// Returns true if the span is empty.
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
+}
+
+/// A morphological token from text analysis.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Token {
+    /// The surface form of the token (the text itself).
+    pub surface: String,
+    /// Part of speech tags (e.g., ["名詞", "一般"]).
+    pub pos: Vec<String>,
+    /// Detailed morphological information.
+    #[serde(default)]
+    pub detail: Vec<String>,
+    /// Byte span in the source text.
+    pub span: TextSpan,
+}
+
+impl Token {
+    /// Creates a new token.
+    pub fn new(surface: impl Into<String>, pos: Vec<String>, span: TextSpan) -> Self {
+        Self {
+            surface: surface.into(),
+            pos,
+            detail: Vec::new(),
+            span,
+        }
+    }
+
+    /// Adds detailed information.
+    pub fn with_detail(mut self, detail: Vec<String>) -> Self {
+        self.detail = detail;
+        self
+    }
+
+    /// Returns true if this token has the given part of speech.
+    pub fn has_pos(&self, pos_tag: &str) -> bool {
+        self.pos.iter().any(|p| p == pos_tag)
+    }
+}
+
+/// A sentence from text analysis.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TextSentence {
+    /// The text content of the sentence.
+    pub text: String,
+    /// Byte span in the source text.
+    pub span: TextSpan,
+}
+
+impl TextSentence {
+    /// Creates a new sentence.
+    pub fn new(text: impl Into<String>, span: TextSpan) -> Self {
+        Self {
+            text: text.into(),
+            span,
+        }
+    }
+}
+
+/// Text analysis context provided by the linter core.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TextContext {
+    /// Morphological tokens from text analysis.
+    #[serde(default)]
+    pub tokens: Vec<Token>,
+    /// Sentences from text analysis.
+    #[serde(default)]
+    pub sentences: Vec<TextSentence>,
+}
+
+impl TextContext {
+    /// Creates an empty text context.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a text context with tokens and sentences.
+    pub fn with_analysis(tokens: Vec<Token>, sentences: Vec<TextSentence>) -> Self {
+        Self { tokens, sentences }
+    }
+
+    /// Returns tokens that have the given part of speech.
+    pub fn tokens_with_pos(&self, pos_tag: &str) -> Vec<&Token> {
+        self.tokens.iter().filter(|t| t.has_pos(pos_tag)).collect()
+    }
+
+    /// Returns true if there are no tokens or sentences.
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty() && self.sentences.is_empty()
+    }
 }
 
 /// Response from a rule's lint function.
@@ -1335,6 +1499,8 @@ mod tests {
             source: "test".to_string(),
             file_path: None,
             helpers: None,
+            tokens: Vec::new(),
+            sentences: Vec::new(),
         };
 
         assert!(request.nodes.is_empty());
@@ -1360,5 +1526,192 @@ mod tests {
         assert_eq!(decoded.all_nodes().len(), 1);
         assert_eq!(decoded.all_nodes()[0]["type"], "Str");
         assert!(!decoded.is_batch());
+    }
+
+    // ============================================================================
+    // Tests for TextContext types
+    // ============================================================================
+
+    #[test]
+    fn text_span_new() {
+        let span = TextSpan::new(10, 20);
+        assert_eq!(span.start, 10);
+        assert_eq!(span.end, 20);
+        assert_eq!(span.len(), 10);
+        assert!(!span.is_empty());
+    }
+
+    #[test]
+    fn text_span_empty() {
+        let span = TextSpan::new(5, 5);
+        assert!(span.is_empty());
+        assert_eq!(span.len(), 0);
+    }
+
+    #[test]
+    fn token_new() {
+        let token = Token::new("は", vec!["助詞".to_string()], TextSpan::new(0, 3));
+        assert_eq!(token.surface, "は");
+        assert_eq!(token.pos, vec!["助詞"]);
+        assert!(token.detail.is_empty());
+        assert!(token.has_pos("助詞"));
+        assert!(!token.has_pos("名詞"));
+    }
+
+    #[test]
+    fn token_with_detail() {
+        let token = Token::new("は", vec!["助詞".to_string()], TextSpan::new(0, 3))
+            .with_detail(vec!["係助詞".to_string(), "*".to_string()]);
+        assert_eq!(token.detail, vec!["係助詞", "*"]);
+    }
+
+    #[test]
+    fn text_sentence_new() {
+        let sentence = TextSentence::new("こんにちは。", TextSpan::new(0, 18));
+        assert_eq!(sentence.text, "こんにちは。");
+        assert_eq!(sentence.span.start, 0);
+        assert_eq!(sentence.span.end, 18);
+    }
+
+    #[test]
+    fn text_context_new() {
+        let ctx = TextContext::new();
+        assert!(ctx.is_empty());
+        assert!(ctx.tokens.is_empty());
+        assert!(ctx.sentences.is_empty());
+    }
+
+    #[test]
+    fn text_context_with_analysis() {
+        let tokens = vec![Token::new(
+            "は",
+            vec!["助詞".to_string()],
+            TextSpan::new(0, 3),
+        )];
+        let sentences = vec![TextSentence::new("テスト。", TextSpan::new(0, 12))];
+        let ctx = TextContext::with_analysis(tokens.clone(), sentences.clone());
+
+        assert!(!ctx.is_empty());
+        assert_eq!(ctx.tokens.len(), 1);
+        assert_eq!(ctx.sentences.len(), 1);
+    }
+
+    #[test]
+    fn text_context_tokens_with_pos() {
+        let tokens = vec![
+            Token::new("私", vec!["名詞".to_string()], TextSpan::new(0, 3)),
+            Token::new("は", vec!["助詞".to_string()], TextSpan::new(3, 6)),
+            Token::new("学生", vec!["名詞".to_string()], TextSpan::new(6, 12)),
+        ];
+        let ctx = TextContext::with_analysis(tokens, vec![]);
+
+        let nouns = ctx.tokens_with_pos("名詞");
+        assert_eq!(nouns.len(), 2);
+
+        let particles = ctx.tokens_with_pos("助詞");
+        assert_eq!(particles.len(), 1);
+    }
+
+    #[test]
+    fn text_span_msgpack_roundtrip() {
+        let span = TextSpan::new(10, 25);
+        let bytes = rmp_serde::to_vec_named(&span).unwrap();
+        let decoded: TextSpan = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded, span);
+    }
+
+    #[test]
+    fn token_msgpack_roundtrip() {
+        let token = Token::new(
+            "は",
+            vec!["助詞".to_string(), "係助詞".to_string()],
+            TextSpan::new(3, 6),
+        )
+        .with_detail(vec!["*".to_string(), "*".to_string()]);
+        let bytes = rmp_serde::to_vec_named(&token).unwrap();
+        let decoded: Token = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.surface, token.surface);
+        assert_eq!(decoded.pos, token.pos);
+        assert_eq!(decoded.span, token.span);
+    }
+
+    #[test]
+    fn text_sentence_msgpack_roundtrip() {
+        let sentence = TextSentence::new("こんにちは世界。", TextSpan::new(0, 24));
+        let bytes = rmp_serde::to_vec_named(&sentence).unwrap();
+        let decoded: TextSentence = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.text, sentence.text);
+        assert_eq!(decoded.span, sentence.span);
+    }
+
+    #[test]
+    fn text_context_msgpack_roundtrip() {
+        let tokens = vec![
+            Token::new("私", vec!["名詞".to_string()], TextSpan::new(0, 3)),
+            Token::new("は", vec!["助詞".to_string()], TextSpan::new(3, 6)),
+        ];
+        let sentences = vec![TextSentence::new("私は学生。", TextSpan::new(0, 18))];
+        let ctx = TextContext::with_analysis(tokens, sentences);
+
+        let bytes = rmp_serde::to_vec_named(&ctx).unwrap();
+        let decoded: TextContext = rmp_serde::from_slice(&bytes).unwrap();
+
+        assert_eq!(decoded.tokens.len(), 2);
+        assert_eq!(decoded.sentences.len(), 1);
+        assert_eq!(decoded.tokens[0].surface, "私");
+        assert_eq!(decoded.tokens[1].surface, "は");
+    }
+
+    #[test]
+    fn lint_helpers_with_text_context() {
+        let text_ctx = TextContext::with_analysis(
+            vec![Token::new(
+                "は",
+                vec!["助詞".to_string()],
+                TextSpan::new(0, 3),
+            )],
+            vec![],
+        );
+        let helpers = LintHelpers {
+            text: Some("テスト".to_string()),
+            text_context: Some(text_ctx),
+            ..Default::default()
+        };
+
+        assert!(helpers.text_context.is_some());
+        let ctx = helpers.text_context.unwrap();
+        assert_eq!(ctx.tokens.len(), 1);
+        assert!(ctx.tokens[0].has_pos("助詞"));
+    }
+
+    #[test]
+    fn lint_request_with_text_context_msgpack_roundtrip() {
+        let text_ctx = TextContext::with_analysis(
+            vec![Token::new(
+                "は",
+                vec!["助詞".to_string()],
+                TextSpan::new(3, 6),
+            )],
+            vec![TextSentence::new("私は学生。", TextSpan::new(0, 18))],
+        );
+        let helpers = LintHelpers {
+            text_context: Some(text_ctx),
+            ..Default::default()
+        };
+        let request = LintRequest::single(
+            serde_json::json!({"type": "Str", "range": [0, 18]}),
+            serde_json::json!({}),
+            "私は学生。".to_string(),
+        )
+        .with_helpers(helpers);
+
+        let bytes = rmp_serde::to_vec_named(&request).unwrap();
+        let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
+
+        assert!(decoded.helpers.is_some());
+        let ctx = decoded.helpers.unwrap().text_context.unwrap();
+        assert_eq!(ctx.tokens.len(), 1);
+        assert_eq!(ctx.sentences.len(), 1);
+        assert_eq!(ctx.tokens[0].surface, "は");
     }
 }
