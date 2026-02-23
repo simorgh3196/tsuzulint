@@ -164,7 +164,10 @@ impl Linter {
 
         for pattern in patterns {
             let path = Path::new(pattern);
-            if path.exists() && path.is_file() {
+            if path
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_file())
+            {
                 if let Ok(abs_path) = path.canonicalize() {
                     if self
                         .exclude_globs
@@ -907,9 +910,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_discover_files_ignores_symlinks() {
-        use std::fs;
         use std::os::unix::fs::symlink;
-        use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
         let target_file = temp_dir.path().join("target.md");
