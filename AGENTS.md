@@ -29,11 +29,14 @@ TsuzuLint is a high-performance natural language linter written in Rust, inspire
 # Build all crates
 make build
 
-# Run all tests
+# Run all tests (uses cargo-nextest for faster execution)
 make test
 
 # Run specific crate tests
-cargo test -p tsuzulint_ast
+cargo nextest run -p tsuzulint_ast
+
+# Run doctests
+make test-doc
 
 # Format code
 make fmt
