@@ -976,8 +976,8 @@ mod tests {
 
     #[test]
     fn test_lint_file_block_rule() {
-        use crate::config::{LinterConfig, RuleDefinition, RuleOption};
         use crate::Linter;
+        use crate::config::{LinterConfig, RuleDefinition, RuleOption};
         use tsuzulint_plugin::{IsolationLevel, RuleManifest};
 
         let temp_dir = tempfile::tempdir().unwrap();
