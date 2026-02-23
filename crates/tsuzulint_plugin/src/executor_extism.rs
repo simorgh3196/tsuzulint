@@ -114,11 +114,7 @@ impl ExtismExecutor {
         manifest
     }
 
-    fn create_plugin(
-        &self,
-        source: &RuleSource,
-        config_json: &str,
-    ) -> Result<(Plugin, RuleManifest), PluginError> {
+    fn build_plugin(&self, source: &RuleSource, config_json: &str) -> Result<Plugin, PluginError> {
         let wasm = source.to_wasm();
         let manifest = Manifest::new([wasm]);
         let mut manifest = self.configure_manifest(manifest);
@@ -145,23 +141,24 @@ impl ExtismExecutor {
             builder = builder.with_fuel_limit(limit);
         }
 
-        let mut plugin = builder
+        builder
             .build()
-            .map_err(|e| PluginError::load(format!("Failed to create plugin: {}", e)))?;
+            .map_err(|e| PluginError::load(format!("Failed to create plugin: {}", e)))
+    }
 
+    fn fetch_manifest(plugin: &mut Plugin) -> Result<RuleManifest, PluginError> {
         // Get the rule manifest by calling get_manifest()
         let manifest_json: String = plugin
             .call("get_manifest", "")
             .map_err(|e| PluginError::call(format!("Failed to get manifest: {}", e)))?;
 
-        let rule_manifest: RuleManifest = serde_json::from_str(&manifest_json)
-            .map_err(|e| PluginError::invalid_manifest(e.to_string()))?;
-
-        Ok((plugin, rule_manifest))
+        serde_json::from_str(&manifest_json)
+            .map_err(|e| PluginError::invalid_manifest(e.to_string()))
     }
 
     fn load_rule(&mut self, source: RuleSource) -> Result<LoadResult, PluginError> {
-        let (plugin, rule_manifest) = self.create_plugin(&source, "{}")?; // Default config
+        let mut plugin = self.build_plugin(&source, "{}")?; // Default config
+        let rule_manifest = Self::fetch_manifest(&mut plugin)?;
 
         debug!(
             "Loaded rule: {} v{}",
@@ -229,7 +226,7 @@ impl RuleExecutor for ExtismExecutor {
         let config_json = serde_json::to_string(config)
             .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
 
-        let (plugin, _manifest) = self.create_plugin(&source, &config_json)?;
+        let plugin = self.build_plugin(&source, &config_json)?;
 
         if let Some(rule) = self.rules.get_mut(rule_name) {
             rule.plugin = plugin;
@@ -467,7 +464,7 @@ mod tests {
 
         // NOTE: Writing pure WAT to test Extism config is complex because it involves
         // managing Extism's memory model (alloc, length, load/store).
-        // Instead, we will rely on the fact that `configure` calls `create_plugin` which sets
+        // Instead, we will rely on the fact that `configure` calls `build_plugin` which sets
         // the manifest config. The Extism library guarantees this works.
         // We will just verify that `configure` doesn't error and that the rule persists.
 
