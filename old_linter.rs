@@ -15,9 +15,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tracing::warn;
+use tracing::{info, warn};
 use tsuzulint_cache::CacheManager;
 use tsuzulint_text::Tokenizer;
+
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use walkdir::WalkDir;
 
 use tsuzulint_plugin::PluginHost;
 
@@ -41,7 +44,8 @@ pub struct Linter {
     plugin_host: Mutex<PluginHost>,
     cache: Mutex<CacheManager>,
     dynamic_rules: Mutex<Vec<PathBuf>>,
-    file_finder: crate::file_finder::FileFinder,
+    include_globs: Option<GlobSet>,
+    exclude_globs: Option<GlobSet>,
 }
 
 impl Linter {
@@ -61,11 +65,13 @@ impl Linter {
             LinterError::Internal(format!("Failed to initialize tokenizer: {}", e))
         })?);
 
+        let include_globs = Self::build_globset(&config.include)?;
+        let exclude_globs = Self::build_globset(&config.exclude)?;
+
         let mut host = PluginHost::new();
         load_configured_rules(&config, &mut host);
 
         let config_hash = config.hash()?;
-        let file_finder = crate::file_finder::FileFinder::new(&config.include, &config.exclude)?;
 
         Ok(Self {
             tokenizer,
@@ -74,8 +80,28 @@ impl Linter {
             plugin_host: Mutex::new(host),
             cache: Mutex::new(cache),
             dynamic_rules: Mutex::new(Vec::new()),
-            file_finder,
+            include_globs,
+            exclude_globs,
         })
+    }
+
+    fn build_globset(patterns: &[String]) -> Result<Option<GlobSet>, LinterError> {
+        if patterns.is_empty() {
+            return Ok(None);
+        }
+
+        let mut builder = GlobSetBuilder::new();
+        for pattern in patterns {
+            let glob = Glob::new(pattern)
+                .map_err(|e| LinterError::config(format!("Invalid glob pattern: {}", e)))?;
+            builder.add(glob);
+        }
+
+        let globset = builder
+            .build()
+            .map_err(|e| LinterError::config(format!("Failed to build globset: {}", e)))?;
+
+        Ok(Some(globset))
     }
 
     pub fn load_rule(&self, path: impl AsRef<Path>) -> Result<(), LinterError> {
@@ -97,6 +123,27 @@ impl Linter {
             list.push(path_buf);
         }
         Ok(())
+    }
+
+    /// Checks if a file path should be ignored based on include/exclude patterns.
+    fn should_ignore(&self, path: &Path) -> bool {
+        if self
+            .exclude_globs
+            .as_ref()
+            .is_some_and(|excludes| excludes.is_match(path))
+        {
+            return true;
+        }
+
+        if self
+            .include_globs
+            .as_ref()
+            .is_some_and(|includes| !includes.is_match(path))
+        {
+            return true;
+        }
+
+        false
     }
 
     #[allow(dead_code)]
@@ -122,8 +169,64 @@ impl Linter {
 
     pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
         let base_dir = self.config.base_dir.as_deref().unwrap_or(Path::new("."));
-        let files = self.file_finder.discover_files(patterns, base_dir)?;
+        let files = self.discover_files(patterns, base_dir)?;
         self.lint_files(&files)
+    }
+
+    fn discover_files(
+        &self,
+        patterns: &[String],
+        base_dir: &Path,
+    ) -> Result<Vec<PathBuf>, LinterError> {
+        let mut files = Vec::new();
+
+        let mut glob_builder = GlobSetBuilder::new();
+        let mut has_globs = false;
+
+        for pattern in patterns {
+            let path = Path::new(pattern);
+            if path
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_file())
+            {
+                if let Ok(abs_path) = path.canonicalize() {
+                    if self.should_ignore(&abs_path) {
+                        continue;
+                    }
+
+                    files.push(abs_path);
+                }
+            } else {
+                let glob = Glob::new(pattern).map_err(|e| {
+                    LinterError::config(format!("Invalid pattern '{}': {}", pattern, e))
+                })?;
+                glob_builder.add(glob);
+                has_globs = true;
+            }
+        }
+
+        if has_globs {
+            let glob_set = glob_builder
+                .build()
+                .map_err(|e| LinterError::config(format!("Failed to build globset: {}", e)))?;
+
+            for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if entry.file_type().is_file() && glob_set.is_match(path) {
+                    if self.should_ignore(path) {
+                        continue;
+                    }
+
+                    files.push(path.to_path_buf());
+                }
+            }
+        }
+
+        files.sort();
+        files.dedup();
+
+        info!("Discovered {} files to lint", files.len());
+        Ok(files)
     }
 
     pub fn lint_files(&self, paths: &[PathBuf]) -> LintFilesResult {
@@ -171,11 +274,45 @@ mod tests {
         (config, temp_dir)
     }
 
+    fn test_config_in(base: &Path) -> LinterConfig {
+        let cache_dir = base.join(".cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        let mut config = LinterConfig::new();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: cache_dir.to_string_lossy().to_string(),
+        });
+        config
+    }
+
     #[test]
     fn test_linter_new() {
         let (config, _temp) = test_config();
         let linter = Linter::new(config);
         assert!(linter.is_ok());
+    }
+
+    #[test]
+    fn test_build_globset() {
+        let patterns = vec!["**/*.md".to_string(), "*.txt".to_string()];
+        let result = Linter::build_globset(&patterns);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[test]
+    fn test_build_globset_empty() {
+        let patterns: Vec<String> = vec![];
+        let result = Linter::build_globset(&patterns);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_build_globset_invalid_pattern() {
+        let patterns = vec!["[invalid".to_string()];
+        let result = Linter::build_globset(&patterns);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -197,6 +334,40 @@ mod tests {
             !result2.from_cache,
             "cache disabled: second lint should not be from cache"
         );
+    }
+
+    #[test]
+    fn test_linter_with_include_patterns() {
+        let (mut config, _temp) = test_config();
+        config.include = vec!["**/*.md".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+        assert!(linter.include_globs.is_some());
+    }
+
+    #[test]
+    fn test_linter_with_exclude_patterns() {
+        let (mut config, _temp) = test_config();
+        config.exclude = vec!["**/node_modules/**".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+        assert!(linter.exclude_globs.is_some());
+    }
+
+    #[test]
+    fn test_build_globset_multiple_patterns() {
+        let patterns = vec![
+            "**/*.md".to_string(),
+            "**/*.txt".to_string(),
+            "docs/**/*".to_string(),
+        ];
+        let result = Linter::build_globset(&patterns);
+        assert!(result.is_ok());
+
+        let globset = result.unwrap().unwrap();
+        assert!(globset.is_match("file.md"));
+        assert!(globset.is_match("dir/file.txt"));
+        assert!(globset.is_match("docs/readme.md"));
     }
 
     #[test]
@@ -287,6 +458,117 @@ mod tests {
     }
 
     #[test]
+    fn test_discover_files_respects_exclude() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let node_modules = temp_dir.path().join("node_modules");
+        fs::create_dir(&node_modules).unwrap();
+        let excluded_file = node_modules.join("excluded.md");
+
+        fs::write(&test_file, "# Test").unwrap();
+        fs::write(&excluded_file, "# Excluded").unwrap();
+
+        let mut config = test_config_in(temp_dir.path());
+        config.exclude = vec!["**/node_modules/**".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+
+        let files = linter
+            .discover_files(&["**/*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        assert!(files.iter().any(|f| f.ends_with("test.md")));
+        assert!(
+            !files
+                .iter()
+                .any(|f| f.to_string_lossy().contains("node_modules"))
+        );
+    }
+
+    #[test]
+    fn test_discover_files_respects_include() {
+        let temp_dir = tempdir().unwrap();
+        let md_file = temp_dir.path().join("test.md");
+        let txt_file = temp_dir.path().join("test.txt");
+
+        fs::write(&md_file, "# Test").unwrap();
+        fs::write(&txt_file, "Test").unwrap();
+
+        let mut config = test_config_in(temp_dir.path());
+        config.include = vec!["**/*.md".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+
+        let files = linter
+            .discover_files(&["**/*".to_string()], temp_dir.path())
+            .unwrap();
+
+        assert!(files.iter().any(|f| f.ends_with("test.md")));
+        assert!(!files.iter().any(|f| f.ends_with("test.txt")));
+    }
+
+    #[test]
+    fn test_discover_files_deduplicates() {
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        fs::write(&test_file, "# Test").unwrap();
+
+        let config = test_config_in(temp_dir.path());
+        let linter = Linter::new(config).unwrap();
+
+        let files = linter
+            .discover_files(&["*.md".to_string(), "*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_discover_files_multiple_glob_patterns() {
+        let temp_dir = tempdir().unwrap();
+        let md_file = temp_dir.path().join("test.md");
+        let txt_file = temp_dir.path().join("test.txt");
+        let rs_file = temp_dir.path().join("test.rs");
+
+        fs::write(&md_file, "# Test").unwrap();
+        fs::write(&txt_file, "Test").unwrap();
+        fs::write(&rs_file, "fn main() {}").unwrap();
+
+        let config = test_config_in(temp_dir.path());
+        let linter = Linter::new(config).unwrap();
+
+        let files = linter
+            .discover_files(
+                &["**/*.md".to_string(), "**/*.txt".to_string()],
+                temp_dir.path(),
+            )
+            .unwrap();
+
+        assert!(
+            files.iter().any(|f| f.ends_with("test.md")),
+            "Should find .md file"
+        );
+        assert!(
+            files.iter().any(|f| f.ends_with("test.txt")),
+            "Should find .txt file"
+        );
+        assert!(
+            !files.iter().any(|f| f.ends_with("test.rs")),
+            "Should not find .rs file"
+        );
+        assert_eq!(files.len(), 2, "Should find exactly 2 files");
+    }
+
+    #[test]
+    fn test_discover_files_invalid_glob() {
+        let (config, _temp) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let result = linter.discover_files(&["[invalid-glob".to_string()], Path::new("."));
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_linter_with_multiple_patterns() {
         let (config, _temp) = test_config();
         let linter = Linter::new(config).unwrap();
@@ -329,8 +611,6 @@ mod tests {
             "test-rule".to_string(),
             crate::config::RuleOption::Enabled(true),
         );
-
-        config.timings = true;
 
         let linter = Linter::new(config).unwrap();
 
@@ -469,8 +749,6 @@ mod tests {
             crate::config::RuleOption::Enabled(true),
         );
 
-        config.timings = true;
-
         let linter = Linter::new(config).unwrap();
         linter.load_rule(&wasm_path).expect("Failed to load rule");
 
@@ -606,8 +884,6 @@ mod tests {
             crate::config::RuleOption::Enabled(true),
         );
 
-        config.timings = true;
-
         let linter = Linter::new(config).unwrap();
 
         if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
@@ -633,125 +909,36 @@ mod tests {
     }
 
     #[test]
-    fn test_lint_file_multiple_global_rules() {
-        let (mut config, temp_dir) = test_config();
+    #[cfg(unix)]
+    fn test_discover_files_ignores_symlinks() {
+        use std::os::unix::fs::symlink;
 
-        // Register two global rules
-        config.rules.push(crate::config::RuleDefinition::Simple(
-            "test-rule".to_string(),
-        ));
-        config.rules.push(crate::config::RuleDefinition::Simple(
-            "test-rule-2".to_string(),
-        ));
-        config.options.insert(
-            "test-rule".to_string(),
-            crate::config::RuleOption::Enabled(true),
-        );
-        config.options.insert(
-            "test-rule-2".to_string(),
-            crate::config::RuleOption::Enabled(true),
-        );
+        let temp_dir = tempdir().unwrap();
+        let target_file = temp_dir.path().join("target.md");
+        let link_file = temp_dir.path().join("link.md");
 
-        config.timings = true;
+        fs::write(&target_file, "# Target").unwrap();
+        symlink(&target_file, &link_file).unwrap();
 
+        let mut config = LinterConfig::new();
+        config.base_dir = Some(temp_dir.path().to_path_buf());
         let linter = Linter::new(config).unwrap();
 
-        if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
-            // Load rule initially (registers as "test-rule" based on internal manifest)
-            linter
-                .load_rule(&wasm_path)
-                .expect("Failed to load test rule");
+        let files = linter
+            .discover_files(&["*.md".to_string()], temp_dir.path())
+            .unwrap();
 
-            // Rename it to "test-rule-2" to free up "test-rule" slot
-            {
-                let mut host = linter.plugin_host.lock().unwrap();
-                host.rename_rule("test-rule", "test-rule-2", None).unwrap();
-            }
-
-            // Load it again to populate "test-rule"
-            linter
-                .load_rule(&wasm_path)
-                .expect("Failed to load test rule 2");
-        } else {
-            println!("WASM build failed, skipping test");
-            return;
-        }
-
-        let file_path = temp_dir.path().join("test_multi.md");
-        let content = "error";
-        fs::write(&file_path, content).unwrap();
-
-        let result = linter.lint_file(&file_path).unwrap();
-
-        // Both rules should have been executed and logged in timings
-        // Each rule produces a diagnostic with its own rule_id, so no deduplication
-        assert!(
-            result.timings.contains_key("test-rule"),
-            "Missing timing for test-rule"
-        );
-        assert!(
-            result.timings.contains_key("test-rule-2"),
-            "Missing timing for test-rule-2"
-        );
+        // Should only contain target.md, NOT link.md
         assert_eq!(
-            result.diagnostics.len(),
-            2,
-            "Each rule should produce one diagnostic"
+            files.len(),
+            1,
+            "Should ignore symlinks, but found: {:?}",
+            files
         );
-    }
-
-    #[test]
-    fn test_lint_file_block_rule() {
-        use tsuzulint_plugin::{IsolationLevel, RuleManifest};
-
-        let (mut config, temp_dir) = test_config();
-
-        // Register a block rule
-        config.rules.push(crate::config::RuleDefinition::Simple(
-            "block-rule".to_string(),
-        ));
-        config.options.insert(
-            "block-rule".to_string(),
-            crate::config::RuleOption::Enabled(true),
-        );
-
-        config.timings = true;
-
-        let linter = Linter::new(config).unwrap();
-
-        if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
-            // Load rule initially
-            linter
-                .load_rule(&wasm_path)
-                .expect("Failed to load test rule");
-
-            // Change it to be a block rule
-            {
-                let mut host = linter.plugin_host.lock().unwrap();
-                let manifest = RuleManifest::new("block-rule", "1.0.0")
-                    .with_isolation_level(IsolationLevel::Block);
-
-                // Rename "test-rule" to "block-rule" and update manifest
-                host.rename_rule("test-rule", "block-rule", Some(manifest))
-                    .unwrap();
-            }
-        } else {
-            println!("WASM build failed, skipping test");
-            return;
-        }
-
-        let file_path = temp_dir.path().join("test_block.md");
-        // Ensure there are some blocks (paragraphs)
-        let content = "Block 1.\n\nBlock 2 with error.";
-        fs::write(&file_path, content).unwrap();
-
-        let result = linter.lint_file(&file_path).unwrap();
-
-        // The rule checks for "error". It should be found in the second block.
-        assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(result.diagnostics[0].rule_id, "block-rule");
-
-        // Check timings to verify it ran as a block rule
-        assert!(result.timings.contains_key("block-rule"));
+        // Canonicalize target_file because discover_files might return absolute paths or relative
+        // Actually discover_files returns paths as yielded by WalkDir (absolute if base_dir is absolute)
+        // temp_dir.path() is absolute.
+        assert!(files.iter().any(|f| f.ends_with("target.md")));
+        assert!(!files.iter().any(|f| f.ends_with("link.md")));
     }
 }

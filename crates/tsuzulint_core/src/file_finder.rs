@@ -76,12 +76,17 @@ impl FileFinder {
                 .symlink_metadata()
                 .is_ok_and(|m| m.file_type().is_file())
             {
-                if let Ok(abs_path) = path.canonicalize() {
-                    if self.should_ignore(&abs_path) {
+                match path.canonicalize() {
+                    Ok(abs_path) => {
+                        if self.should_ignore(&abs_path) {
+                            continue;
+                        }
+                        files.push(abs_path);
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = ?path, error = %e, "Failed to canonicalize direct file path");
                         continue;
                     }
-
-                    files.push(abs_path);
                 }
             } else {
                 let glob = Glob::new(pattern).map_err(|e| {
@@ -97,14 +102,27 @@ impl FileFinder {
                 .build()
                 .map_err(|e| LinterError::config(format!("Failed to build globset: {}", e)))?;
 
-            for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
-                let path = entry.path();
-                if entry.file_type().is_file() && glob_set.is_match(path) {
-                    if self.should_ignore(path) {
-                        continue;
+            for entry_res in WalkDir::new(base_dir).into_iter() {
+                match entry_res {
+                    Ok(entry) => {
+                        let path = entry.path();
+                        if entry.file_type().is_file() && glob_set.is_match(path) {
+                            match path.canonicalize() {
+                                Ok(abs_path) => {
+                                    if self.should_ignore(&abs_path) {
+                                        continue;
+                                    }
+                                    files.push(abs_path);
+                                }
+                                Err(e) => {
+                                    tracing::debug!(path = ?path, error = %e, "Failed to canonicalize discovered file path");
+                                }
+                            }
+                        }
                     }
-
-                    files.push(path.to_path_buf());
+                    Err(err) => {
+                        tracing::debug!(error = ?err, "WalkDir error scanning base_dir");
+                    }
                 }
             }
         }
