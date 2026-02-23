@@ -158,6 +158,14 @@ impl WasmDownloader {
             // 2. DNS Resolution and IP Validation (SSRF protection)
             // Note: validate_url restricts to http/https when allow_local is false,
             // so a None host (e.g., file://) cannot reach this branch.
+            //
+            // SECURITY LIMITATION: DNS resolution is validated here, but the subsequent
+            // HTTP request performs its own DNS lookup. This creates a theoretical window
+            // for DNS rebinding attacks. However, this risk is considered acceptable because:
+            // - The timing window is extremely small (milliseconds between validation and request)
+            // - The attacker would need to control a DNS server and synchronize timing
+            // - Full mitigation would require pinning IPs to the HTTP client, which is
+            //   complex and not supported by the current reqwest API on RequestBuilder
             if !self.allow_local
                 && let Some(host) = url.host_str()
             {
@@ -225,7 +233,10 @@ impl WasmDownloader {
             // Stream the body while checking size
             let mut stream = response.bytes_stream();
             let mut bytes = if let Some(len) = content_length {
-                Vec::with_capacity(len as usize)
+                // Safely convert u64 to usize with fallback for 32-bit platforms
+                let capacity = usize::try_from(len)
+                    .unwrap_or_else(|_| usize::try_from(self.max_size.min(len)).unwrap_or(0));
+                Vec::with_capacity(capacity)
             } else {
                 Vec::new()
             };
