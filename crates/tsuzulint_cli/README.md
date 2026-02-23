@@ -15,7 +15,7 @@ Command-line interface (CLI) application for TsuzuLint. The binary name is `tzli
 ## Installation
 
 ```bash
-cargo install tsuzulint_cli
+cargo install --git https://github.com/simorgh3196/tsuzulint --bin tzlint
 ```
 
 Or build from source:
@@ -150,8 +150,8 @@ tzlint plugin install owner/repo@v1.0.0
 # With alias
 tzlint plugin install owner/repo --as my-rule
 
-# From URL
-tzlint plugin install --url https://example.com/rule.wasm --as external-rule
+# From URL (manifest JSON)
+tzlint plugin install --url https://example.com/tsuzulint-rule.json --as external-rule
 ```
 
 ## Output Formats

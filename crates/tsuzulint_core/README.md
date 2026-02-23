@@ -195,8 +195,7 @@ let config = LinterConfig::from_file(".tsuzulint.json")?;
 let linter = Linter::new(config)?;
 
 // Lint by pattern
-let results = linter.lint_patterns(&["src/**/*.md".to_string()])?;
-let (successes, failures) = results?;
+let (successes, failures) = linter.lint_patterns(&["src/**/*.md".to_string()])?;
 
 for result in successes {
     println!("{}: {} issues", result.path.display(), result.diagnostics.len());

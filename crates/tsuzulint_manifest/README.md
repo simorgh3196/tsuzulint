@@ -213,7 +213,7 @@ let json = serde_json::to_string_pretty(&manifest)?;
 
 1. **Single Responsibility**: Focused solely on manifest type definitions and validation
 2. **Schema-Centric**: Treats JSON Schema as the single source of truth
-3. **Zero-Copy Design**: Schema reuse via `OnceLock`
+3. **Thread-safe Lazy Initialization**: Schema reuse via `OnceLock` for thread-safe one-time initialization
 4. **Extensibility**: Allows arbitrary JSON Schema via the `options` field
 
 ## Integration with Other Crates

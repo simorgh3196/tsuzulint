@@ -58,7 +58,9 @@ pub trait Parser {
     fn parse<'a>(&self, arena: &'a AstArena, source: &str) -> Result<TxtNode<'a>, ParseError>;
 
     /// Determines if the specified extension can be processed (default implementation, case-insensitive)
-    fn can_parse(&self, extension: &str) -> bool;
+    fn can_parse(&self, extension: &str) -> bool {
+        self.extensions().iter().any(|ext| ext.eq_ignore_ascii_case(extension))
+    }
 }
 ```
 

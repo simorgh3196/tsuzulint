@@ -67,10 +67,10 @@ impl Tokenizer {
 ### Usage Example
 
 ```rust
-use tsuzulint-text::Tokenizer;
+use tsuzulint_text::Tokenizer;
 
 let tokenizer = Tokenizer::new()?;
-let tokens = tokenizer.tokenize("こんにちは世界");
+let tokens = tokenizer.tokenize("こんにちは世界")?;
 
 for token in tokens {
     println!("{}: {:?}", token.surface, token.pos);

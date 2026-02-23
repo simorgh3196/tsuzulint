@@ -168,13 +168,19 @@ if let Some(entry) = manager.get("path/to/file.md") {
 }
 
 // Cache miss - run lint, then cache results
+use std::time::{SystemTime, UNIX_EPOCH};
+let created_at = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap()
+    .as_secs();
+
 let entry = CacheEntry {
     content_hash,
     config_hash,
     rule_versions,
     diagnostics,
     blocks: vec![],
-    created_at: timestamp(),
+    created_at,
 };
 manager.set("path/to/file.md", entry);
 
