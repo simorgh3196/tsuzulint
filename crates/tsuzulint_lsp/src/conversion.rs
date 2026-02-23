@@ -32,6 +32,20 @@ pub fn offset_to_range(start: usize, end: usize, text: &str) -> Option<Range> {
 }
 
 /// Converts a byte offset to an LSP position.
+///
+/// This function converts a UTF-8 byte offset to a line/column position
+/// as expected by the LSP protocol (UTF-16 code units).
+///
+/// # Preconditions
+///
+/// - The offset must be at a valid UTF-8 character boundary. If the offset
+///   splits a multi-byte character, the behavior is undefined and may produce
+///   incorrect results.
+///
+/// # Returns
+///
+/// - `Some(Position)` if the offset is valid (≤ text length)
+/// - `None` if the offset exceeds the text length
 pub fn offset_to_position(offset: usize, text: &str) -> Option<Position> {
     if offset > text.len() {
         return None;
@@ -67,6 +81,7 @@ pub fn positions_le(p1: Position, p2: Position) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tsuzulint_ast::Span;
 
     #[test]
     fn test_offset_to_position_basic_ascii() {
@@ -123,5 +138,90 @@ mod tests {
         let p5 = Position::new(0, 5);
         let p6 = Position::new(0, 5);
         assert!(positions_le(p5, p6));
+    }
+
+    #[test]
+    fn test_to_lsp_diagnostic_basic() {
+        let diag = TsuzuLintDiagnostic::new("test-rule", "Test message", Span::new(0, 5));
+        let text = "Hello World";
+
+        let lsp_diag = to_lsp_diagnostic(&diag, text).unwrap();
+
+        assert_eq!(
+            lsp_diag.range,
+            Range::new(Position::new(0, 0), Position::new(0, 5))
+        );
+        assert_eq!(lsp_diag.message, "Test message");
+        assert_eq!(
+            lsp_diag.code,
+            Some(NumberOrString::String("test-rule".to_string()))
+        );
+        assert_eq!(lsp_diag.source, Some("tsuzulint".to_string()));
+    }
+
+    #[test]
+    fn test_to_lsp_diagnostic_severity() {
+        let text = "Hello World";
+
+        let error_diag = TsuzuLintDiagnostic::new("r", "m", Span::new(0, 1))
+            .with_severity(TsuzuLintSeverity::Error);
+        let lsp_error = to_lsp_diagnostic(&error_diag, text).unwrap();
+        assert_eq!(lsp_error.severity, Some(DiagnosticSeverity::ERROR));
+
+        let warning_diag = TsuzuLintDiagnostic::new("r", "m", Span::new(0, 1))
+            .with_severity(TsuzuLintSeverity::Warning);
+        let lsp_warning = to_lsp_diagnostic(&warning_diag, text).unwrap();
+        assert_eq!(lsp_warning.severity, Some(DiagnosticSeverity::WARNING));
+
+        let info_diag = TsuzuLintDiagnostic::new("r", "m", Span::new(0, 1))
+            .with_severity(TsuzuLintSeverity::Info);
+        let lsp_info = to_lsp_diagnostic(&info_diag, text).unwrap();
+        assert_eq!(lsp_info.severity, Some(DiagnosticSeverity::INFORMATION));
+    }
+
+    #[test]
+    fn test_to_lsp_diagnostic_invalid_offset() {
+        let diag = TsuzuLintDiagnostic::new("test-rule", "Test", Span::new(0, 100));
+        let text = "Hello";
+
+        assert!(to_lsp_diagnostic(&diag, text).is_none());
+    }
+
+    #[test]
+    fn test_offset_to_range_basic() {
+        let text = "Hello World";
+
+        let range = offset_to_range(0, 5, text).unwrap();
+        assert_eq!(range, Range::new(Position::new(0, 0), Position::new(0, 5)));
+
+        let range = offset_to_range(6, 11, text).unwrap();
+        assert_eq!(range, Range::new(Position::new(0, 6), Position::new(0, 11)));
+    }
+
+    #[test]
+    fn test_offset_to_range_multiline() {
+        let text = "Line 1\nLine 2\nLine 3";
+
+        let range = offset_to_range(0, 12, text).unwrap();
+        assert_eq!(range, Range::new(Position::new(0, 0), Position::new(1, 5)));
+
+        let range = offset_to_range(7, 14, text).unwrap();
+        assert_eq!(range, Range::new(Position::new(1, 0), Position::new(2, 0)));
+    }
+
+    #[test]
+    fn test_offset_to_range_unicode() {
+        let text = "あいうえお";
+
+        let range = offset_to_range(0, 6, text).unwrap();
+        assert_eq!(range, Range::new(Position::new(0, 0), Position::new(0, 2)));
+    }
+
+    #[test]
+    fn test_offset_to_range_invalid() {
+        let text = "Hello";
+
+        assert!(offset_to_range(0, 100, text).is_none());
+        assert!(offset_to_range(100, 200, text).is_none());
     }
 }

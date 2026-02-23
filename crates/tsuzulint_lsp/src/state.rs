@@ -1,6 +1,7 @@
 //! LSP Backend state management.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::{Arc, RwLock};
 
 use tower_lsp::lsp_types::Url;
@@ -8,6 +9,7 @@ use tower_lsp::lsp_types::Url;
 use tsuzulint_core::Linter;
 
 /// Document content and version cache.
+#[derive(Debug)]
 pub(crate) struct DocumentData {
     pub text: String,
     pub version: i32,
@@ -21,6 +23,16 @@ pub(crate) struct BackendState {
     pub linter: RwLock<Option<Linter>>,
     /// Workspace root path.
     pub workspace_root: RwLock<Option<std::path::PathBuf>>,
+}
+
+impl fmt::Debug for BackendState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BackendState")
+            .field("documents", &"<HashMap<Url, DocumentData>>")
+            .field("linter", &"<Option<Linter>>")
+            .field("workspace_root", &self.workspace_root)
+            .finish()
+    }
 }
 
 impl BackendState {
