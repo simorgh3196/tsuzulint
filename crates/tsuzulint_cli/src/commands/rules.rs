@@ -6,8 +6,7 @@ use miette::{IntoDiagnostic, Result};
 use tracing::{info, warn};
 use tsuzulint_registry::resolver::PluginSpec;
 
-#[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
+#[derive(Debug, thiserror::Error, miette::Diagnostic)]
 pub enum AddRuleError {
     #[error("WASM file not found: {0}")]
     FileNotFound(PathBuf),
@@ -149,7 +148,6 @@ pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {{
     Ok(())
 }
 
-#[allow(dead_code)]
 fn validate_wasm_path(path: &Path) -> Result<PathBuf, AddRuleError> {
     if !path.exists() {
         return Err(AddRuleError::FileNotFound(path.to_path_buf()));
@@ -164,7 +162,6 @@ fn validate_wasm_path(path: &Path) -> Result<PathBuf, AddRuleError> {
         .map_err(|_| AddRuleError::FileNotFound(path.to_path_buf()))
 }
 
-#[allow(dead_code)]
 fn find_manifest(wasm_path: &Path) -> Option<PathBuf> {
     let manifest_path = wasm_path.with_file_name("tsuzulint-rule.json");
     if manifest_path.exists() {
@@ -173,14 +170,12 @@ fn find_manifest(wasm_path: &Path) -> Option<PathBuf> {
     None
 }
 
-#[allow(dead_code)]
 fn load_manifest(path: &Path) -> Result<tsuzulint_manifest::ExternalRuleManifest, AddRuleError> {
     let content = std::fs::read_to_string(path).map_err(AddRuleError::ManifestReadError)?;
 
     tsuzulint_manifest::validate_manifest(&content).map_err(AddRuleError::ManifestParseError)
 }
 
-#[allow(dead_code)]
 fn generate_minimal_manifest(
     wasm_path: &Path,
     alias: &str,
@@ -213,7 +208,6 @@ fn generate_minimal_manifest(
     })
 }
 
-#[allow(dead_code)]
 fn copy_plugin_files(
     wasm_path: &Path,
     manifest: &tsuzulint_manifest::ExternalRuleManifest,
@@ -237,18 +231,48 @@ fn copy_plugin_files(
     Ok(())
 }
 
-pub fn run_add_rule(
-    path: &Path,
-    _alias: Option<&str>,
-    _config_path: Option<PathBuf>,
-) -> Result<()> {
-    if !path.exists() {
-        return Err(miette::miette!("File not found: {}", path.display()));
+pub fn run_add_rule(path: &Path, alias: Option<&str>, config_path: Option<PathBuf>) -> Result<()> {
+    let wasm_path = validate_wasm_path(path)?;
+
+    let (manifest, rule_alias) = if let Some(manifest_path) = find_manifest(&wasm_path) {
+        let manifest = load_manifest(&manifest_path)?;
+        let alias_str = alias
+            .map(str::to_string)
+            .unwrap_or_else(|| manifest.rule.name.clone());
+        (manifest, alias_str)
+    } else {
+        let alias_str = alias.map(str::to_string).unwrap_or_else(|| {
+            wasm_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unnamed-rule".to_string())
+        });
+        warn!(
+            "Manifest not found for {}. Generating minimal manifest.",
+            wasm_path.display()
+        );
+        let manifest = generate_minimal_manifest(&wasm_path, &alias_str)?;
+        (manifest, alias_str)
+    };
+
+    let plugin_dir = PathBuf::from("rules/plugins").join(&rule_alias);
+
+    if plugin_dir.exists() {
+        return Err(AddRuleError::AlreadyExists(rule_alias.clone(), plugin_dir).into());
     }
 
-    info!("Rule added: {}", path.display());
-    info!("Add the rule to your .tsuzulint.jsonc to enable it");
+    copy_plugin_files(&wasm_path, &manifest, &plugin_dir)?;
 
+    info!("Rule files copied to: {}", plugin_dir.display());
+
+    let spec = PluginSpec {
+        source: tsuzulint_registry::resolver::PluginSource::Path(plugin_dir.clone()),
+        alias: Some(rule_alias.clone()),
+    };
+
+    crate::config::editor::update_config_with_plugin(&spec, &rule_alias, &manifest, config_path)?;
+
+    info!("Rule '{}' added successfully", rule_alias);
     Ok(())
 }
 

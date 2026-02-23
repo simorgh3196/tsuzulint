@@ -94,7 +94,7 @@ mod rules_commands {
             .arg("/nonexistent/rule.wasm")
             .assert()
             .failure()
-            .stderr(predicate::str::contains("File not found"));
+            .stderr(predicate::str::contains("WASM file not found"));
     }
 
     #[test]
@@ -109,9 +109,10 @@ mod rules_commands {
             .arg("rules")
             .arg("add")
             .arg(&wasm_file)
+            .current_dir(temp_dir.path())
             .assert()
             .success()
-            .stderr(predicate::str::contains("Rule added"));
+            .stderr(predicate::str::contains("added successfully"));
     }
 }
 
