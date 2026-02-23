@@ -10,7 +10,6 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/**"
-      - ".cargo/**"
   pull_request:
     branches: [main]
     paths:
@@ -20,14 +19,11 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/**"
-      - ".cargo/**"
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
 
 jobs:
   fmt:
@@ -52,8 +48,7 @@ jobs:
           target: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "clippy-v1"
-      - uses: mozilla-actions/sccache-action@v0.0.9
+          shared-key: "clippy-v2"
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --profile ci -- -D warnings
 
@@ -72,20 +67,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "test-${{ matrix.os }}-v1"
+          shared-key: "test-${{ matrix.os }}-v2"
           cache-on-failure: true
-      - uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
       - name: Run tests
         run: cargo nextest run --workspace --all-features --profile ci
-
-      - name: Show sccache stats
-        if: always()
-        run: sccache --show-stats
-        shell: bash
 
   doctest:
     name: Doctest
@@ -97,8 +86,7 @@ jobs:
           target: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "doctest-v1"
-      - uses: mozilla-actions/sccache-action@v0.0.9
+          shared-key: "doctest-v2"
       - name: Run doctests
         run: cargo test --workspace --all-features --doc
 
@@ -117,17 +105,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "build-${{ matrix.os }}-v1"
+          shared-key: "build-${{ matrix.os }}-v2"
           cache-on-failure: true
-      - uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Build
         run: cargo build --workspace --release
-
-      - name: Show sccache stats
-        if: always()
-        run: sccache --show-stats
-        shell: bash
 
   wasm:
     name: WASM Build
@@ -139,8 +121,7 @@ jobs:
           target: wasm32-unknown-unknown,wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "wasm-v1"
-      - uses: mozilla-actions/sccache-action@v0.0.9
+          shared-key: "wasm-v2"
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build WASM
@@ -157,8 +138,7 @@ jobs:
           target: wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "coverage-v1"
-      - uses: mozilla-actions/sccache-action@v0.0.9
+          shared-key: "coverage-v2"
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Install nextest
