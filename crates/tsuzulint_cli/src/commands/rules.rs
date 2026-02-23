@@ -12,8 +12,6 @@ pub enum AddRuleError {
     FileNotFound(PathBuf),
     #[error("Invalid file extension: expected .wasm, got {0:?}")]
     InvalidExtension(Option<String>),
-    #[error("Rule '{0}' already exists at {1}. Use a different alias with --as.")]
-    AlreadyExists(String, PathBuf),
     #[error("Failed to create plugin directory: {0}")]
     CreateDirError(#[source] std::io::Error),
     #[error("Failed to copy WASM file: {0}")]
@@ -258,7 +256,12 @@ pub fn run_add_rule(path: &Path, alias: Option<&str>, config_path: Option<PathBu
     let plugin_dir = PathBuf::from("rules/plugins").join(&rule_alias);
 
     if plugin_dir.exists() {
-        return Err(AddRuleError::AlreadyExists(rule_alias.clone(), plugin_dir).into());
+        info!(
+            "Rule '{}' already exists at {}. Skipping.",
+            rule_alias,
+            plugin_dir.display()
+        );
+        return Ok(());
     }
 
     copy_plugin_files(&wasm_path, &manifest, &plugin_dir)?;
