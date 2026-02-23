@@ -325,7 +325,7 @@ mod tests {
         }
 
         let mut diagnostics_count = 0;
-        let timeout = tokio::time::sleep(Duration::from_secs(5));
+        let timeout = tokio::time::sleep(Duration::from_millis(500));
         tokio::pin!(timeout);
 
         loop {
