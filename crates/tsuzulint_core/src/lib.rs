@@ -27,6 +27,7 @@ mod config;
 pub mod context;
 mod diagnostic_dist;
 mod error;
+pub mod file_finder;
 mod file_linter;
 mod fix;
 mod fixer;
