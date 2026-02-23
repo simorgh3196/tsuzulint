@@ -1,135 +1,135 @@
 # tsuzulint_ast
 
-TxtAST (textlint AST) の型定義と Arena アロケータを提供するクレート。
+A crate providing TxtAST (textlint AST) type definitions and an Arena allocator.
 
-## 概要
+## Overview
 
-`tsuzulint_ast` は、TsuzuLint プロジェクトの中核をなす **AST（抽象構文木）型定義**を提供します。textlint の TxtAST 仕様との互換性を保ちながら、Rust のメモリモデルに最適化された実装を提供します。
+`tsuzulint_ast` provides **AST (Abstract Syntax Tree) type definitions** that form the core of the TsuzuLint project. It maintains compatibility with textlint's TxtAST specification while offering an implementation optimized for Rust's memory model.
 
-## 主な機能
+## Key Features
 
-- **TxtAST 型定義**: 自然言語テキストの AST 表現
-- **Arena アロケーション**: bumpalo を使用した高速なメモリ管理
-- **Visitor パターン**: AST 走査と変換のためのトレイト
-- **JSON シリアライゼーション**: WASM ルールとのデータ受け渡し
+- **TxtAST Type Definitions**: AST representation for natural language text
+- **Arena Allocation**: High-performance memory management using bumpalo
+- **Visitor Pattern**: Traits for AST traversal and transformation
+- **JSON Serialization**: Data exchange with WASM rules
 
-## アーキテクチャ
+## Architecture
 
 ### Arena Allocation (bumpalo)
 
-Oxc にインスパイアされたアリーナアロケーションを採用:
+Arena allocation inspired by Oxc:
 
 ```rust
 pub struct AstArena {
-    bump: Bump,  // bumpalo のラッパー
+    bump: Bump,  // bumpalo wrapper
 }
 ```
 
-**利点:**
+**Benefits:**
 
-1. **アロケーションオーバーヘッドの最小化** - バンプアロケーションは非常に高速
-2. **キャッシュ局所性の向上** - 1ファイルの全ノードが連続メモリに配置
-3. **一括解放** - `reset()` で全メモリを一気に解放
-4. **ゼロコピー文字列** - `alloc_str()` でソーステキストを直接参照
+1. **Minimized Allocation Overhead** - Bump allocation is extremely fast
+2. **Improved Cache Locality** - All nodes of a single file are placed in contiguous memory
+3. **Bulk Deallocation** - Release all memory at once with `reset()`
+4. **Zero-Copy Strings** - Directly reference source text with `alloc_str()`
 
-### 主要な型
+### Core Types
 
-#### `TxtNode<'a>` - コア AST ノード型
+#### `TxtNode<'a>` - Core AST Node Type
 
 ```rust
 pub struct TxtNode<'a> {
-    pub node_type: NodeType,          // ノード種別
-    pub span: Span,                   // ソーステキスト内のバイト位置
-    pub children: &'a [TxtNode<'a>],  // 子ノード（アリーナ参照）
-    pub value: Option<&'a str>,       // テキスト値（Str, Code, CodeBlock 用）
-    pub data: NodeData<'a>,           // 追加データ
+    pub node_type: NodeType,          // Node type
+    pub span: Span,                   // Byte position in source text
+    pub children: &'a [TxtNode<'a>],  // Child nodes (arena reference)
+    pub value: Option<&'a str>,       // Text value (for Str, Code, CodeBlock)
+    pub data: NodeData<'a>,           // Additional data
 }
 ```
 
-- ライフタイム `'a` によりアリーナアロケータに紐付け
-- `Copy` トレイトを実装（コピーが安価）
-- 3種類のコンストラクタ: `new_parent()`, `new_text()`, `new_leaf()`
+- Lifetime `'a` ties the node to the arena allocator
+- Implements `Copy` trait (copying is cheap)
+- Three constructors: `new_parent()`, `new_text()`, `new_leaf()`
 
-#### `NodeType` - ノード種別の列挙型
+#### `NodeType` - Node Type Enumeration
 
 ```rust
 pub enum NodeType {
-    // ドキュメント構造
+    // Document structure
     Document, Paragraph, Header, BlockQuote, List, ListItem,
     CodeBlock, HorizontalRule, Html,
-    // インライン要素
+    // Inline elements
     Str, Break, Emphasis, Strong, Delete, Code, Link, Image,
-    // 参照要素 (textlint v14.5.0+)
+    // Reference elements (textlint v14.5.0+)
     LinkReference, ImageReference, Definition,
-    // GFM 拡張
+    // GFM extensions
     Table, TableRow, TableCell,
     FootnoteDefinition, FootnoteReference,
 }
 ```
 
-#### `NodeData<'a>` - ノード固有データ
+#### `NodeData<'a>` - Node-Specific Data
 
-従来の構造体アプローチと比較して **30%以上のメモリ削減**を実現:
+Achieves **over 30% memory reduction** compared to traditional struct approaches:
 
 ```rust
 pub enum NodeData<'a> {
-    None,                                    // データなし
-    Header(u8),                              // 見出しレベル (1-6)
-    List(bool),                              // ordered フラグ
-    CodeBlock(Option<&'a str>),              // 言語指定
-    Link(LinkData<'a>),                      // URL + タイトル
+    None,                                    // No data
+    Header(u8),                              // Heading level (1-6)
+    List(bool),                              // ordered flag
+    CodeBlock(Option<&'a str>),              // Language specification
+    Link(LinkData<'a>),                      // URL + title
     Image(LinkData<'a>),
-    Reference(ReferenceData<'a>),            // 識別子 + ラベル
+    Reference(ReferenceData<'a>),            // Identifier + label
     Definition(DefinitionData<'a>),
 }
 ```
 
-### Visitor パターン
+### Visitor Pattern
 
-#### `Visitor<'a>` - 読み取り専用走査
+#### `Visitor<'a>` - Read-Only Traversal
 
 ```rust
 pub trait Visitor<'a>: Sized {
     fn enter_node(&mut self, node: &TxtNode<'a>) -> VisitResult;
     fn exit_node(&mut self, node: &TxtNode<'a>) -> VisitResult;
     fn visit_str(&mut self, node: &TxtNode<'a>) -> VisitResult;
-    // ... 各ノードタイプ用の visit_* メソッド
+    // ... visit_* methods for each node type
 }
 ```
 
-**制御フロー:**
-- `ControlFlow::Continue(())` - 子ノードの走査を継続
-- `ControlFlow::Break(())` - 早期終了（`?` 演算子で伝播）
+**Control Flow:**
+- `ControlFlow::Continue(())` - Continue traversing child nodes
+- `ControlFlow::Break(())` - Early termination (propagated via `?` operator)
 
-#### `MutVisitor<'a>` - AST 変換
+#### `MutVisitor<'a>` - AST Transformation
 
 ```rust
 pub trait MutVisitor<'a>: Sized {
-    fn arena(&self) -> &'a AstArena;  // 新ノード割り当て用
+    fn arena(&self) -> &'a AstArena;  // For allocating new nodes
     fn visit_str_mut(&mut self, node: &TxtNode<'a>) -> VisitMutResult<'a>;
-    // ... 他すべてのノードタイプ
+    // ... for all other node types
 }
 ```
 
-## 使用例
+## Usage Examples
 
 ```rust
 use tsuzulint_ast::{AstArena, TxtNode, NodeType, Span, NodeData};
 
-// アリーナの作成
+// Create arena
 let arena = AstArena::new();
 
-// テキストノードの作成
+// Create text node
 let text = arena.alloc(TxtNode::new_text(
     NodeType::Str,
     Span::new(0, 5),
     arena.alloc_str("hello"),
 ));
 
-// 子ノードスライスの作成
+// Create child node slice
 let children = arena.alloc_slice_copy(&[*text]);
 
-// 親ノードの作成
+// Create parent node
 let paragraph = arena.alloc(TxtNode::new_parent(
     NodeType::Paragraph,
     Span::new(0, 5),
@@ -138,7 +138,7 @@ let paragraph = arena.alloc(TxtNode::new_parent(
 ));
 ```
 
-### Visitor の使用例
+### Visitor Usage Example
 
 ```rust
 use tsuzulint_ast::{Visitor, TxtNode, walk_node};
@@ -158,36 +158,36 @@ impl<'a> Visitor<'a> for TextCollector<'a> {
 }
 ```
 
-## 依存関係
+## Dependencies
 
-| 依存関係 | 用途 |
-| ------- | ------ |
-| **bumpalo** | アリーナアロケーション |
-| **serde** | シリアライゼーション（WASM ルールへの JSON 受け渡し） |
-| **rkyv** (optional) | ゼロコピーシリアライゼーション（キャッシュ用） |
+| Dependency | Purpose |
+| ---------- | ------- |
+| **bumpalo** | Arena allocation |
+| **serde** | Serialization (JSON exchange with WASM rules) |
+| **rkyv** (optional) | Zero-copy serialization (for caching) |
 
-## textlint TxtAST との互換性
+## Compatibility with textlint TxtAST
 
-TxtAST 仕様 に準拠:
+Conforms to TxtAST specification:
 
-- `type` フィールド: ノード種別（PascalCase）
-- `range` フィールド: `[start, end]` バイトオフセット
-- `children` フィールド: 子ノード配列（親ノードのみ）
-- `value` フィールド: テキスト値（テキストノードのみ）
-- 追加フィールド: `depth`, `ordered`, `lang`, `url`, `title`, `identifier`, `label`
+- `type` field: Node type (PascalCase)
+- `range` field: `[start, end]` byte offsets
+- `children` field: Child node array (parent nodes only)
+- `value` field: Text value (text nodes only)
+- Additional fields: `depth`, `ordered`, `lang`, `url`, `title`, `identifier`, `label`
 
-## モジュール構成
+## Module Structure
 
 ```text
 src/
-├── lib.rs           # 公開API、クレートドキュメント
-├── arena.rs         # AstArena（bumpaloラッパー）
-├── node.rs          # TxtNode, NodeData, LinkData等
-├── node_type.rs     # NodeType列挙型
+├── lib.rs           # Public API, crate documentation
+├── arena.rs         # AstArena (bumpalo wrapper)
+├── node.rs          # TxtNode, NodeData, LinkData, etc.
+├── node_type.rs     # NodeType enumeration
 ├── span.rs          # Span, Position, Location
 └── visitor/
-    ├── mod.rs       # Visitorモジュール定義
-    ├── visit.rs     # Visitor trait（読み取り）
-    ├── visit_mut.rs # MutVisitor trait（変換）
-    └── walk.rs      # walk_node, walk_children関数
+    ├── mod.rs       # Visitor module definition
+    ├── visit.rs     # Visitor trait (read-only)
+    ├── visit_mut.rs # MutVisitor trait (transformation)
+    └── walk.rs      # walk_node, walk_children functions
 ```

@@ -1,24 +1,24 @@
 # tsuzulint_wasm
 
-ブラウザ向け WebAssembly バインディングを提供するクレート。Rust で実装されたリンターをブラウザ環境で動作可能にします。
+A crate that provides WebAssembly bindings for browsers, enabling the Rust-based linter to run in browser environments.
 
-## 概要
+## Overview
 
-**tsuzulint_wasm** は、TsuzuLint のブラウザ向け WebAssembly バインディングを提供するクレートです。Rust で実装された高機能なテキストリンターをブラウザ環境で動作可能にします。
+**tsuzulint_wasm** is a crate that provides WebAssembly bindings for TsuzuLint in browsers. It enables the feature-rich text linter implemented in Rust to run in browser environments.
 
-**プロジェクト内の位置づけ:**
+**Position in the project:**
 
-- TsuzuLint アーキテクチャの最上位層に位置
-- CLI 版（ネイティブ）とは別に、ブラウザ/Node.js 環境向けの独立したビルドを提供
-- npm パッケージとして公開可能な構造を持つ
+- Located at the top layer of the TsuzuLint architecture
+- Provides a separate build for browser/Node.js environments, distinct from the CLI (native) version
+- Structured to be publishable as an npm package
 
-## アーキテクチャ
+## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                      TextLinter (WASM)                      │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  wasm-bindgen エクスポート                           │    │
+│  │  wasm-bindgen exports                               │    │
 │  │  - new()                                            │    │
 │  │  - loadRule(wasm_bytes)                             │    │
 │  │  - configureRule(name, config)                      │    │
@@ -38,58 +38,58 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## ビルド
+## Build
 
-### ビルドターゲット
+### Build Targets
 
-`build.sh` は 3 種類のターゲットをサポート:
+`build.sh` supports three types of targets:
 
-- `web`: ブラウザ直接使用（ES Modules）
-- `nodejs`: Node.js 環境
-- `bundler`: Webpack/Vite 等のバンドラー用
+- `web`: Direct browser usage (ES Modules)
+- `nodejs`: Node.js environment
+- `bundler`: For bundlers like Webpack/Vite
 
 ```bash
-# ブラウザ向け
+# For browsers
 ./build.sh web
 
-# Node.js 向け
+# For Node.js
 ./build.sh nodejs
 
-# バンドラー向け
+# For bundlers
 ./build.sh bundler
 ```
 
-### クレートタイプ
+### Crate Type
 
 ```toml
 [lib]
 crate-type = ["cdylib", "rlib"]
 ```
 
-- `cdylib`: WebAssembly バイナリとしてエクスポート
-- `rlib`: Rust テスト用に通常のライブラリとしてもビルド可能
+- `cdylib`: Exported as a WebAssembly binary
+- `rlib`: Can also be built as a regular library for Rust testing
 
 ## API
 
-### コンストラクタ
+### Constructor
 
 ```javascript
 const linter = new TextLinter();
 ```
 
-### メソッド
+### Methods
 
-| Rust メソッド | JS 名 | 説明 |
-| -------------- | ------ | ------ |
-| `load_rule(&mut self, wasm_bytes: &[u8])` | `loadRule` | WASM ルールをバイト列からロード |
-| `configure_rule(&mut self, name: &str, config_json: JsValue)` | `configureRule` | ルールの設定 |
-| `loaded_rules(&self)` | `getLoadedRules` | ロード済みルール一覧取得 |
-| `lint(&mut self, content: &str, file_type: &str)` | `lint` | リント実行（JS オブジェクト返却） |
-| `lint_json(&mut self, content: &str, file_type: &str)` | `lintJson` | リント実行（JSON 文字列返却） |
+| Rust Method | JS Name | Description |
+| ------------ | ------ | ------ |
+| `load_rule(&mut self, wasm_bytes: &[u8])` | `loadRule` | Load a WASM rule from byte array |
+| `configure_rule(&mut self, name: &str, config_json: JsValue)` | `configureRule` | Configure a rule |
+| `loaded_rules(&self)` | `getLoadedRules` | Get list of loaded rules |
+| `lint(&mut self, content: &str, file_type: &str)` | `lint` | Run linting (returns JS object) |
+| `lint_json(&mut self, content: &str, file_type: &str)` | `lintJson` | Run linting (returns JSON string) |
 
-## 使用例
+## Usage Examples
 
-### ブラウザ
+### Browser
 
 ```html
 <!DOCTYPE html>
@@ -103,12 +103,12 @@ const linter = new TextLinter();
 
       const linter = new TextLinter();
 
-      // ルールをロード（WASM バイト列を fetch などで取得）
+      // Load a rule (fetch WASM bytes)
       const ruleResponse = await fetch('./rules/no-todo.wasm');
       const ruleBytes = await ruleResponse.arrayBuffer();
       linter.loadRule(new Uint8Array(ruleBytes));
 
-      // リント実行
+      // Run linting
       const content = '# Hello\n\nThis is a TODO item.';
       const diagnostics = linter.lint(content, 'markdown');
 
@@ -143,18 +143,18 @@ const fs = require('fs');
 
 const linter = new TextLinter();
 
-// ローカルファイルからルールをロード
+// Load a rule from a local file
 const ruleBytes = fs.readFileSync('./rules/no-todo.wasm');
 linter.loadRule(ruleBytes);
 
-// リント実行
+// Run linting
 const content = '# Hello\n\nThis is a TODO item.';
 const diagnostics = linter.lint(content, 'markdown');
 
 console.log(JSON.stringify(diagnostics, null, 2));
 ```
 
-## 診断結果の形式
+## Diagnostic Format
 
 ### JsDiagnostic
 
@@ -177,54 +177,54 @@ interface JsDiagnostic {
 }
 ```
 
-## 内部パイプライン
+## Internal Pipeline
 
 ```text
-1. 入力
-   ├── 引数: content: &str, file_type: &str
+1. Input
+   ├── Arguments: content: &str, file_type: &str
    
-2. パーサー選択
+2. Parser Selection
    ├── "markdown" | "md" → MarkdownParser
-   └── その他 → PlainTextParser
+   └── Other → PlainTextParser
    
-3. 解析
-   ├── AstArena で AST 構築
-   ├── JSON に変換
+3. Parsing
+   ├── Build AST with AstArena
+   ├── Convert to JSON
    └── prepare_text_analysis():
-       ├── Tokenizer でトークン化
-       └── SentenceSplitter で文分割
+       ├── Tokenize with Tokenizer
+       └── Split sentences with SentenceSplitter
    
-4. ルール実行
+4. Rule Execution
    └── host.run_all_rules_with_parts()
-       └── 各 WASM ルールを wasmi で実行
+       └── Execute each WASM rule with wasmi
    
-5. 出力変換
+5. Output Conversion
    ├── Diagnostic → JsDiagnostic
    └── serde_wasm_bindgen::to_value()
 ```
 
-## WASM-in-WASM 設計
+## WASM-in-WASM Design
 
-ブラウザ環境では、`tsuzulint_plugin` の `browser` フィーチャーを使用し、wasmi（純粋 Rust WASM インタープリタ）でルールを実行:
+In browser environments, the `browser` feature of `tsuzulint_plugin` is used, executing rules with wasmi (a pure Rust WASM interpreter):
 
-- ネイティブ版の Extism/wasmtime はブラウザ環境で動作しない
-- wasmi は自身を WASM にコンパイル可能 → **WASM-in-WASM** 実行が可能
+- The native Extism/wasmtime does not work in browser environments
+- wasmi can be compiled to WASM itself → **WASM-in-WASM** execution is possible
 
-## 依存関係
+## Dependencies
 
-| 依存クレート | 目的 |
+| Crate | Purpose |
 | ------------ | ------ |
-| `tsuzulint_ast` | AST データ構造 |
-| `tsuzulint_parser` | Markdown/PlainText パーサー |
-| `tsuzulint_plugin` (`browser` feature) | WASM ルール実行エンジン |
-| `tsuzulint_text` | トークナイザー・センテンス分割 |
-| `wasm-bindgen` | Rust ↔ JavaScript 間の FFI バインディング |
-| `serde-wasm-bindgen` | Serde 型を JsValue に変換 |
-| `serde / serde_json` | シリアライゼーション |
-| `js-sys` | JavaScript 標準オブジェクトへのアクセス |
-| `console_error_panic_hook` | panic 時にコンソールにスタックトレース出力 |
+| `tsuzulint_ast` | AST data structures |
+| `tsuzulint_parser` | Markdown/PlainText parsers |
+| `tsuzulint_plugin` (`browser` feature) | WASM rule execution engine |
+| `tsuzulint_text` | Tokenizer and sentence splitting |
+| `wasm-bindgen` | FFI bindings between Rust and JavaScript |
+| `serde-wasm-bindgen` | Convert Serde types to JsValue |
+| `serde / serde_json` | Serialization |
+| `js-sys` | Access to JavaScript standard objects |
+| `console_error_panic_hook` | Output stack trace to console on panic |
 
-## npm パッケージ構成
+## npm Package Structure
 
 ```json
 {
@@ -238,22 +238,22 @@ interface JsDiagnostic {
 }
 ```
 
-TypeScript 型定義（`.d.ts`）が自動生成され、型安全な利用が可能。
+TypeScript type definitions (`.d.ts`) are auto-generated, enabling type-safe usage.
 
-## テスト
+## Testing
 
 ```rust
 #[wasm_bindgen_test]
 fn test_lint_basic() {
     let mut linter = TextLinter::new().unwrap();
-    // ... テストロジック
+    // ... test logic
 }
 ```
 
-- `wasm-bindgen-test`: WASM 環境でのテスト実行
-- `build.rs`: テスト用の simple_rule WASM フィクスチャを自動ビルド
+- `wasm-bindgen-test`: Run tests in WASM environment
+- `build.rs`: Automatically builds simple_rule WASM fixtures for testing
 
-## 制限事項
+## Limitations
 
-- wasmi はインタプリタのため、ネイティブ版より低速
-- 大きなファイルの処理には時間がかかる可能性がある
+- wasmi is an interpreter, so it is slower than the native version
+- Processing large files may take longer

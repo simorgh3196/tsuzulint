@@ -1,70 +1,70 @@
 # tsuzulint_manifest
 
-外部ルールのマニフェストファイル（`tsuzulint-rule.json`）を定義・検証するための共有ライブラリ。
+A shared library for defining and validating external rule manifest files (`tsuzulint-rule.json`).
 
-## 概要
+## Overview
 
-`tsuzulint_manifest` は、TsuzuLint プロジェクトにおいて **外部ルールのマニフェストファイル** を定義・検証するための共有ライブラリです。
+`tsuzulint_manifest` is a shared library in the TsuzuLint project for **defining and validating external rule manifest files**.
 
-**主な役割:**
+**Key Responsibilities:**
 
-- 外部 WASM ルールの配布メタデータを表現する型定義の提供
-- JSON Schema に基づくマニフェスト検証機能の提供
-- 他のクレート（`tsuzulint_registry`, `tsuzulint_plugin` など）で共通利用される型の集約
+- Providing type definitions that represent distribution metadata for external WASM rules
+- Providing manifest validation functionality based on JSON Schema
+- Aggregating types shared across other crates (`tsuzulint_registry`, `tsuzulint_plugin`, etc.)
 
-このクレートは、ルールの配布・インストール時に使用され、ルールの名前、バージョン、WASM ファイルの場所、整合性チェック用ハッシュ、権限設定などの情報を一元管理します。
+This crate is used during rule distribution and installation, centrally managing information such as rule names, versions, WASM file locations, integrity check hashes, and permission settings.
 
-## マニフェスト構造
+## Manifest Structure
 
-### ExternalRuleManifest（ルート構造体）
+### ExternalRuleManifest (Root Structure)
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 | ---------- | -- | ---- | ---- |
-| `rule` | `RuleMetadata` | Yes | ルールのメタデータ |
-| `artifacts` | `Artifacts` | Yes | ダウンロード可能な成果物情報 |
-| `permissions` | `Option<Permissions>` | No | 必要な権限 |
-| `tsuzulint` | `Option<TsuzuLintCompatibility>` | No | TsuzuLint 互換性情報 |
-| `options` | `Option<Value>` | No | ルール設定オプションの JSON Schema |
+| `rule` | `RuleMetadata` | Yes | Rule metadata |
+| `artifacts` | `Artifacts` | Yes | Downloadable artifact information |
+| `permissions` | `Option<Permissions>` | No | Required permissions |
+| `tsuzulint` | `Option<TsuzuLintCompatibility>` | No | TsuzuLint compatibility information |
+| `options` | `Option<Value>` | No | JSON Schema for rule configuration options |
 
-### RuleMetadata（ルールメタデータ）
+### RuleMetadata
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 | ---------- | - | ---- | ---- |
-| `name` | `String` | Yes | ルール識別子。パターン: `^[a-z][a-z0-9-]*$` |
-| `version` | `String` | Yes | セマンティックバージョン |
-| `description` | `Option<String>` | No | ルールの説明 |
-| `repository` | `Option<String>` | No | GitHub リポジトリ URL |
-| `license` | `Option<String>` | No | ライセンス識別子（SPDX 形式推奨） |
-| `authors` | `Vec<String>` | No | 作者リスト |
-| `keywords` | `Vec<String>` | No | 検索用キーワード |
-| `fixable` | `bool` | No | 自動修正が可能かどうか（デフォルト: `false`） |
-| `node_types` | `Vec<String>` | No | 処理対象の AST ノードタイプ（空 = 全ノード） |
-| `isolation_level` | `IsolationLevel` | No | ルールの分離レベル（デフォルト: `Global`） |
+| `name` | `String` | Yes | Rule identifier. Pattern: `^[a-z][a-z0-9-]*$` |
+| `version` | `String` | Yes | Semantic version |
+| `description` | `Option<String>` | No | Rule description |
+| `repository` | `Option<String>` | No | GitHub repository URL |
+| `license` | `Option<String>` | No | License identifier (SPDX format recommended) |
+| `authors` | `Vec<String>` | No | List of authors |
+| `keywords` | `Vec<String>` | No | Keywords for search |
+| `fixable` | `bool` | No | Whether auto-fix is available (default: `false`) |
+| `node_types` | `Vec<String>` | No | AST node types to process (empty = all nodes) |
+| `isolation_level` | `IsolationLevel` | No | Rule isolation level (default: `Global`) |
 
 ### IsolationLevel
 
 ```rust
 pub enum IsolationLevel {
-    Global,  // ドキュメント全体が必要
-    Block,   // 個別ブロック単位で実行可能
+    Global,  // Full document required
+    Block,   // Can run on individual blocks
 }
 ```
 
-### Artifacts（成果物情報）
+### Artifacts
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 | ---------- | - | ---- | ---- |
-| `wasm` | `String` | Yes | WASM ファイルのダウンロード URL。`{version}` プレースホルダー使用可能 |
-| `sha256` | `String` | Yes | WASM ファイルの SHA256 ハッシュ（64文字の16進数） |
+| `wasm` | `String` | Yes | Download URL for WASM file. `{version}` placeholder can be used |
+| `sha256` | `String` | Yes | SHA256 hash of WASM file (64-character hex string) |
 
-### Permissions（権限設定）
+### Permissions
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 | ---------- | - | ---- |
-| `filesystem` | `Vec<FilesystemPermission>` | ファイルシステムアクセス権限 |
-| `network` | `Vec<NetworkPermission>` | ネットワークアクセス権限 |
+| `filesystem` | `Vec<FilesystemPermission>` | Filesystem access permissions |
+| `network` | `Vec<NetworkPermission>` | Network access permissions |
 
-## マニフェストファイルの例
+## Example Manifest File
 
 ```json
 {
@@ -104,53 +104,53 @@ pub enum IsolationLevel {
 }
 ```
 
-## JSON Schema 検証
+## JSON Schema Validation
 
-### 埋め込みスキーマ
+### Embedded Schema
 
 ```rust
 const RULE_SCHEMA_JSON: &str = include_str!("../../../schemas/v1/rule.json");
 ```
 
-- JSON Schema ファイルを **コンパイル時に埋め込み**
-- `include_str!` マクロにより、実行時のファイル I/O が不要
-- バイナリにスキーマが含まれるため、デプロイが簡素化
+- JSON Schema files are **embedded at compile time**
+- Using the `include_str!` macro eliminates runtime file I/O
+- Schema is included in the binary, simplifying deployment
 
-### 遅延初期化パターン
+### Lazy Initialization Pattern
 
 ```rust
 static SCHEMA: OnceLock<Validator> = OnceLock::new();
 ```
 
-- `OnceLock` を使用して、バリデーターを **スレッドセーフに一度だけ初期化**
-- 最初の検証時にのみスキーマをコンパイル
-- 以降の検証はコンパイル済みバリデーターを再利用
+- Uses `OnceLock` to initialize the validator **thread-safely, exactly once**
+- Schema is compiled only on the first validation
+- Subsequent validations reuse the compiled validator
 
-### 検証フロー
+### Validation Flow
 
 ```rust
 pub fn validate_manifest(json_str: &str) -> Result<ExternalRuleManifest, ManifestError>
 ```
 
-1. **JSON パース**: 入力文字列を `serde_json::Value` に変換
-2. **スキーマ検証**: JSON Schema Draft-07 に準拠して検証
-3. **構造体デシリアライズ**: 検証済み JSON を `ExternalRuleManifest` に変換
+1. **JSON Parse**: Convert input string to `serde_json::Value`
+2. **Schema Validation**: Validate against JSON Schema Draft-07
+3. **Struct Deserialization**: Convert validated JSON to `ExternalRuleManifest`
 
-## エラーハンドリング
+## Error Handling
 
 ```rust
 pub enum ManifestError {
-    ParseError(#[from] serde_json::Error),  // JSON パースエラー
-    ValidationError(String),                 // スキーマ検証エラー
+    ParseError(#[from] serde_json::Error),  // JSON parse error
+    ValidationError(String),                 // Schema validation error
 }
 ```
 
-- `thiserror` を使用したエラー定義
-- ユーザーフレンドリーなエラーメッセージ（エラー箇所のパスを含む）
+- Error definitions using `thiserror`
+- User-friendly error messages (including path to error location)
 
-## 使用例
+## Usage Examples
 
-### 基本的な使用方法
+### Basic Usage
 
 ```rust
 use tsuzulint_manifest::{validate_manifest, ExternalRuleManifest};
@@ -177,7 +177,7 @@ match validate_manifest(json) {
 }
 ```
 
-### 構造体から直接作成
+### Creating from Structs Directly
 
 ```rust
 use tsuzulint_manifest::{ExternalRuleManifest, RuleMetadata, Artifacts};
@@ -196,28 +196,28 @@ let manifest = ExternalRuleManifest {
     ..Default::default()
 };
 
-// JSON に変換
+// Convert to JSON
 let json = serde_json::to_string_pretty(&manifest)?;
 ```
 
-## 依存関係
+## Dependencies
 
-| 依存クレート | 用途 |
+| Crate | Purpose |
 | ------------ | ---- |
-| **`jsonschema`** | JSON Schema Draft-07 準拠のバリデーション |
-| **`serde`** | シリアライズ/デシリアライズフレームワーク |
-| **`serde_json`** | JSON パースと操作 |
-| **`thiserror`** | エラー型定義 |
+| **`jsonschema`** | JSON Schema Draft-07 compliant validation |
+| **`serde`** | Serialization/deserialization framework |
+| **`serde_json`** | JSON parsing and manipulation |
+| **`thiserror`** | Error type definitions |
 
-## 設計上の特徴
+## Design Features
 
-1. **単一責任**: マニフェストの型定義と検証のみに集中
-2. **スキーマ中心**: JSON Schema を唯一の真実のソースとして扱う
-3. **ゼロコピー設計**: `OnceLock` によるスキーマ再利用
-4. **拡張性**: `options` フィールドで任意の JSON Schema を許容
+1. **Single Responsibility**: Focused solely on manifest type definitions and validation
+2. **Schema-Centric**: Treats JSON Schema as the single source of truth
+3. **Zero-Copy Design**: Schema reuse via `OnceLock`
+4. **Extensibility**: Allows arbitrary JSON Schema via the `options` field
 
-## 他クレートとの連携
+## Integration with Other Crates
 
-- **`tsuzulint_registry`**: プラグインダウンロード時にマニフェストを検証
-- **`tsuzulint_plugin`**: ルールロード時にマニフェスト情報を使用
-- **`tsuzulint_core`**: ルール設定のバリデーションに使用
+- **`tsuzulint_registry`**: Validates manifests during plugin download
+- **`tsuzulint_plugin`**: Uses manifest information during rule loading
+- **`tsuzulint_core`**: Uses for rule configuration validation

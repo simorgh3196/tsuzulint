@@ -1,19 +1,19 @@
 # tsuzulint_cache
 
-ファイルレベルのキャッシングシステムを提供するクレート。BLAKE3 ハッシュによるインクリメンタルキャッシュを実装します。
+A crate that provides a file-level caching system. Implements incremental caching using BLAKE3 hashing.
 
-## 概要
+## Overview
 
-`tsuzulint_cache` は、TsuzuLint プロジェクトにおける **ファイルレベルのキャッシングシステム** を提供します。
+`tsuzulint_cache` provides a **file-level caching system** for the TsuzuLint project.
 
-### 主な役割
+### Key Responsibilities
 
-- **変更されていないファイルの再 lint 回避**: コンテンツハッシュを比較し、変更がないファイルの解析をスキップ
-- **設定変更時のキャッシュ無効化**: ルール設定が変更された場合、関連キャッシュを自動的に無効化
-- **ルールバージョン追跡**: WASM ルールのバージョンが変更された場合、キャッシュを無効化
-- **インクリメンタル更新**: ブロック単位での差分キャッシングをサポート
+- **Skip re-linting unchanged files**: Compare content hashes to skip parsing for unchanged files
+- **Invalidate cache on configuration changes**: Automatically invalidate relevant caches when rule settings change
+- **Track rule versions**: Invalidate cache when WASM rule versions change
+- **Incremental updates**: Support block-level differential caching
 
-## アーキテクチャ
+## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -43,9 +43,9 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## キャッシュキー生成 (BLAKE3)
+## Cache Key Generation (BLAKE3)
 
-### 実装
+### Implementation
 
 ```rust
 pub fn hash_content(content: &str) -> String {
@@ -53,22 +53,22 @@ pub fn hash_content(content: &str) -> String {
 }
 ```
 
-### BLAKE3 採用理由
+### Why BLAKE3?
 
-- **高速性**: SHA-256 よりも高速（SIMD 最適化対応）
-- **セキュリティ**: 暗号学的に安全なハッシュ関数
-- **一貫性**: 同一入力から常に同一の 256 ビット（64文字の16進数）ハッシュを生成
+- **High Performance**: Faster than SHA-256 (with SIMD optimization support)
+- **Security**: Cryptographically secure hash function
+- **Consistency**: Always generates the same 256-bit (64-character hexadecimal) hash from identical input
 
-### キャッシュキー構成要素
+### Cache Key Components
 
-1. **コンテンツハッシュ**: ファイル内容の BLAKE3 ハッシュ
-2. **設定ハッシュ**: lint 設定のハッシュ
-3. **ルールバージョン**: `HashMap<String, String>` 形式でルール名とバージョンを管理
-4. **ブロックハッシュ**: 32 バイト配列 (`[u8; 32]`) でブロック単位の差分検出
+1. **Content Hash**: BLAKE3 hash of file contents
+2. **Config Hash**: Hash of lint configuration
+3. **Rule Versions**: Manages rule names and versions in `HashMap<String, String>` format
+4. **Block Hash**: 32-byte array (`[u8; 32]`) for block-level differential detection
 
-## キャッシュ無効化戦略
+## Cache Invalidation Strategy
 
-### 検証ロジック
+### Validation Logic
 
 ```rust
 pub fn is_valid(
@@ -83,19 +83,19 @@ pub fn is_valid(
 }
 ```
 
-### 無効化トリガー
+### Invalidation Triggers
 
-| 条件 | 結果 |
-| ------ | ------ |
-| ファイル内容が変更 | キャッシュ無効化 |
-| 設定ファイルが変更 | キャッシュ無効化 |
-| ルールのバージョンが変更 | キャッシュ無効化 |
-| ルールの数が変更 | キャッシュ無効化 |
-| ルール名が変更 | キャッシュ無効化 |
+| Condition | Result |
+| --------- | ------ |
+| File content changed | Cache invalidated |
+| Configuration file changed | Cache invalidated |
+| Rule version changed | Cache invalidated |
+| Number of rules changed | Cache invalidated |
+| Rule name changed | Cache invalidated |
 
-## インクリメンタルブロックキャッシュ
+## Incremental Block Cache
 
-`reconcile_blocks()` メソッドにより、ブロック単位での差分再利用を実現:
+The `reconcile_blocks()` method enables block-level differential reuse:
 
 ```rust
 pub fn reconcile_blocks(
@@ -107,67 +107,67 @@ pub fn reconcile_blocks(
 ) -> (Vec<Diagnostic>, Vec<bool>)
 ```
 
-**動作原理:**
+**How It Works:**
 
-1. キャッシュされたブロックをハッシュ値でマッピング
-2. 現在のブロックとハッシュ値が一致する場合、診断結果を再利用
-3. **位置シフト補正**: ブロックが移動した場合、診断の Span を補正
-4. `find_best_match()` で最も近い位置の候補を選択（位置シフト最小化）
+1. Map cached blocks by hash value
+2. Reuse diagnostic results when current block hash matches
+3. **Position Shift Correction**: Correct diagnostic Spans when blocks have moved
+4. Use `find_best_match()` to select the candidate with the closest position (minimizing position shift)
 
-## キャッシュストレージ形式
+## Cache Storage Format
 
 ### Zero-Copy Deserialization (rkyv)
 
 ```rust
-// 保存
+// Save
 let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&self.entries)?;
 fs::write(&cache_file, bytes)?;
 
-// 読み込み
+// Load
 let content = fs::read(&cache_file)?;
 let entries: HashMap<String, CacheEntry> =
     rkyv::from_bytes::<_, rkyv::rancor::Error>(&content)?;
 ```
 
-### ファイル構造
+### File Structure
 
 ```text
 <cache_dir>/
-└── cache.rkyv    # rkyv 形式のバイナリファイル
+└── cache.rkyv    # rkyv format binary file
 ```
 
-### rkyv の利点
+### Benefits of rkyv
 
-| 特徴 | 説明 |
-| ------ | ------ |
-| **パース不要** | バイト列から直接アクセス |
-| **メモリ効率** | 追加割り当てなしでデータアクセス |
-| **高速起動** | キャッシュロード時のオーバーヘッド最小化 |
-| **アーカイブ型** | `rkyv::Archive` derive で自動生成 |
+| Feature | Description |
+| ------- | ----------- |
+| **No Parsing Required** | Direct access from byte sequence |
+| **Memory Efficient** | Data access without additional allocations |
+| **Fast Startup** | Minimal overhead when loading cache |
+| **Archive Types** | Auto-generated via `rkyv::Archive` derive |
 
-## 使用例
+## Usage Examples
 
-### 基本的な使用方法
+### Basic Usage
 
 ```rust
 use tsuzulint_cache::{CacheManager, CacheEntry};
 use std::collections::HashMap;
 
-// キャッシュマネージャーの作成
+// Create cache manager
 let mut manager = CacheManager::new(".cache/tsuzulint")?;
 
-// コンテンツハッシュの計算
+// Calculate content hash
 let content_hash = CacheManager::hash_content("source text");
 
-// キャッシュの確認
+// Check cache
 if let Some(entry) = manager.get("path/to/file.md") {
     if entry.is_valid(&content_hash, &config_hash, &rule_versions) {
-        // キャッシュヒット - 診断結果を再利用
+        // Cache hit - reuse diagnostic results
         return Ok(entry.diagnostics);
     }
 }
 
-// キャッシュミス - lint 実行後、結果をキャッシュ
+// Cache miss - run lint, then cache results
 let entry = CacheEntry {
     content_hash,
     config_hash,
@@ -178,14 +178,14 @@ let entry = CacheEntry {
 };
 manager.set("path/to/file.md", entry);
 
-// ディスクに保存
+// Save to disk
 manager.save()?;
 ```
 
-### インクリメンタルブロックキャッシュの使用例
+### Incremental Block Cache Usage
 
 ```rust
-// ブロック単位でキャッシュを活用
+// Utilize block-level cache
 let (cached_diagnostics, block_validity) = manager.reconcile_blocks(
     &path,
     &current_blocks,
@@ -193,15 +193,15 @@ let (cached_diagnostics, block_validity) = manager.reconcile_blocks(
     &rule_versions,
 );
 
-// 変更されたブロックのみ再 lint
+// Re-lint only changed blocks
 for (i, is_valid) in block_validity.iter().enumerate() {
     if !is_valid {
-        // このブロックを再 lint
+        // Re-lint this block
     }
 }
 ```
 
-## 公開 API
+## Public API
 
 ```rust
 pub use entry::CacheEntry;
@@ -209,20 +209,20 @@ pub use error::CacheError;
 pub use manager::CacheManager;
 ```
 
-### CacheManager 主なメソッド
+### CacheManager Main Methods
 
-| メソッド | 説明 |
-| ---------- | ------ |
-| `new(cache_dir)` | キャッシュマネージャー作成 |
-| `enable()` / `disable()` | キャッシュの有効/無効切り替え |
-| `get(path)` | キャッシュエントリ取得 |
-| `set(path, entry)` | キャッシュエントリ保存 |
-| `is_valid(...)` | キャッシュ有効性チェック |
-| `reconcile_blocks(...)` | ブロック単位の差分再利用 |
-| `load()` | ディスクからキャッシュ読み込み |
-| `save()` | ディスクへキャッシュ保存 |
-| `clear()` | 全キャッシュクリア |
-| `hash_content(content)` | コンテンツの BLAKE3 ハッシュ生成 |
+| Method | Description |
+| ------ | ----------- |
+| `new(cache_dir)` | Create cache manager |
+| `enable()` / `disable()` | Enable/disable caching |
+| `get(path)` | Get cache entry |
+| `set(path, entry)` | Store cache entry |
+| `is_valid(...)` | Check cache validity |
+| `reconcile_blocks(...)` | Block-level differential reuse |
+| `load()` | Load cache from disk |
+| `save()` | Save cache to disk |
+| `clear()` | Clear all cache |
+| `hash_content(content)` | Generate BLAKE3 hash of content |
 
 ## Feature Flags
 
@@ -233,17 +233,17 @@ native = ["tsuzulint_plugin/native"]
 browser = ["tsuzulint_plugin/browser"]
 ```
 
-- **native**: ネイティブ環境向け（CLI 使用）
-- **browser**: ブラウザ WASM 環境向け（tsuzulint_wasm 使用）
+- **native**: For native environments (CLI usage)
+- **browser**: For browser WASM environments (used by tsuzulint_wasm)
 
-## 依存関係
+## Dependencies
 
-| クレート | 用途 |
-| ---------- | ------ |
-| **blake3** | 高速な暗号学的ハッシュ関数。コンテンツ/ブロックのハッシュ生成 |
-| **rkyv** | Zero-copy シリアライゼーション。キャッシュの永続化 |
-| **serde / serde_json** | JSON シリアライゼーション |
-| **thiserror** | エラー型定義 |
-| **tracing** | ログ出力 |
-| **tsuzulint_plugin** | `Diagnostic` 型の共有 |
-| **tsuzulint_ast** | `Span` 型の共有 |
+| Crate | Usage |
+| ----- | ----- |
+| **blake3** | Fast cryptographic hash function. Generates content/block hashes |
+| **rkyv** | Zero-copy serialization. Cache persistence |
+| **serde / serde_json** | JSON serialization |
+| **thiserror** | Error type definitions |
+| **tracing** | Logging output |
+| **tsuzulint_plugin** | Shared `Diagnostic` type |
+| **tsuzulint_ast** | Shared `Span` type |

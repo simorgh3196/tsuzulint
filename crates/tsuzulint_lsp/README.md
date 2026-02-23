@@ -1,23 +1,23 @@
 # tsuzulint_lsp
 
-Language Server Protocol (LSP) サーバー実装。エディタ/IDE でのリアルタイムリンティング機能を提供します。
+Language Server Protocol (LSP) server implementation. Provides real-time linting functionality in editors/IDEs.
 
-## 概要
+## Overview
 
-**tsuzulint_lsp** は TsuzuLint の Language Server Protocol (LSP) サーバー実装です。エディタ/IDE でのリアルタイムリンティング機能を提供し、以下の役割を担います：
+**tsuzulint_lsp** is TsuzuLint's Language Server Protocol (LSP) server implementation. It provides real-time linting functionality in editors/IDEs and handles the following responsibilities:
 
-- エディタとの標準化された通信
-- ドキュメントのリアルタイム検証と診断の提供
-- 自動修正機能の提供
-- ドキュメントシンボル（アウトライン）の提供
-- 設定ファイルの動的リロード
+- Standardized communication with editors
+- Real-time document validation and diagnostic reporting
+- Auto-fix functionality
+- Document symbols (outline) support
+- Dynamic configuration file reloading
 
-## アーキテクチャ
+## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────┐
 │                    Backend                          │
-│  (tower-lsp LanguageServer trait 実装)              │
+│  (tower-lsp LanguageServer trait implementation)    │
 ├─────────────────────────────────────────────────────┤
 │  BackendState                                       │
 │  ├── documents: RwLock<HashMap<Url, DocumentData>>  │
@@ -32,42 +32,42 @@ Language Server Protocol (LSP) サーバー実装。エディタ/IDE でのリ�
 └─────────────────────────────────────────────────────┘
 ```
 
-## 実装されている LSP 機能
+## Implemented LSP Features
 
-### テキスト同期
+### Text Synchronization
 
-| メソッド | 機能 | 説明 |
+| Method | Feature | Description |
 | ------- | ------ | ------ |
-| `textDocument/didOpen` | ドキュメントオープン | ドキュメントをキャッシュに保存し、即座に検証実行 |
-| `textDocument/didChange` | ドキュメント変更 | 変更内容をキャッシュに反映、**300ms デバウンス**後に検証 |
-| `textDocument/didSave` | ドキュメント保存 | 保存時に再検証 |
-| `textDocument/didClose` | ドキュメントクローズ | キャッシュから削除、診断をクリア |
+| `textDocument/didOpen` | Document open | Stores document in cache, immediately runs validation |
+| `textDocument/didChange` | Document change | Updates cache with changes, validates after **300ms debounce** |
+| `textDocument/didSave` | Document save | Re-validates on save |
+| `textDocument/didClose` | Document close | Removes from cache, clears diagnostics |
 
-### 診断
+### Diagnostics
 
-- **リアルタイム診断**: ドキュメントオープン/変更時に自動的にリントを実行
-- **非ブロッキング実行**: `tokio::task::spawn_blocking` でリント処理をオフロード
-- **デバウンス**: `didChange` 時に 300ms の遅延で連続入力時の過剰なリントを防止
+- **Real-time diagnostics**: Automatically runs lint on document open/change
+- **Non-blocking execution**: Offloads lint processing via `tokio::task::spawn_blocking`
+- **Debounce**: 300ms delay on `didChange` to prevent excessive linting during continuous typing
 
-### コードアクション（自動修正）
+### Code Actions (Auto-fix)
 
-| 種類 | タイトル | 説明 |
+| Type | Title | Description |
 | ------ | --------- | ------ |
-| Quick Fix | "Fix: {診断メッセージ}" | 個別の診断に対する単一修正 |
-| Source Fix All | "Fix all TsuzuLint issues" | 一括で全ての修正可能な問題を修正 |
+| Quick Fix | "Fix: {diagnostic message}" | Single fix for individual diagnostics |
+| Source Fix All | "Fix all TsuzuLint issues" | Batch fix all fixable issues at once |
 
-### ドキュメントシンボル
+### Document Symbols
 
-Markdown ドキュメントから構造を抽出:
+Extracts structure from Markdown documents:
 
 - Header → `SymbolKind::STRING`
 - CodeBlock → `SymbolKind::FUNCTION`
 
-エディタのアウトラインビューで表示可能。
+Viewable in editor outline view.
 
-### ファイル監視
+### File Watching
 
-`workspace/didChangeWatchedFiles` で設定ファイルの変更を監視し、自動的にリロード。
+Monitors configuration file changes via `workspace/didChangeWatchedFiles` and automatically reloads.
 
 ## ServerCapabilities
 
@@ -85,15 +85,15 @@ ServerCapabilities {
 }
 ```
 
-## 使用方法
+## Usage
 
-### CLI から起動
+### Starting from CLI
 
 ```bash
 tzlint lsp
 ```
 
-### Neovim での設定例
+### Neovim Configuration Example
 
 ```lua
 local lspconfig = require('lspconfig')
@@ -106,9 +106,9 @@ lspconfig.tsuzulint.setup {
 }
 ```
 
-### VS Code 拡張機能
+### VS Code Extension
 
-拡張機能の `package.json`:
+Extension `package.json`:
 
 ```json
 {
@@ -127,7 +127,7 @@ lspconfig.tsuzulint.setup {
 }
 ```
 
-拡張機能の TypeScript:
+Extension TypeScript:
 
 ```typescript
 import * as vscode from 'vscode';
@@ -153,22 +153,22 @@ export function activate(context: vscode.ExtensionContext) {
 }
 ```
 
-## デバウンス動作
+## Debounce Behavior
 
-`textDocument/didChange` では、連続した入力時にリント処理が過剰に実行されないよう、300ms のデバウンスを適用:
+`textDocument/didChange` applies a 300ms debounce to prevent excessive lint execution during continuous typing:
 
-1. ドキュメント変更イベントを受信
-2. 300ms 待機
-3. 待機中に新しい変更がない場合 → リント実行
-4. 待機中に新しい変更があった場合 → 待機をリセット
+1. Receive document change event
+2. Wait 300ms
+3. If no new changes during wait → execute lint
+4. If new changes occur during wait → reset wait timer
 
-## エラーハンドリング
+## Error Handling
 
-- **RwLock poisoning**: ロック取得失敗時にログ出力して早期リターン
-- **Linter 初期化失敗**: `None` で格納し、リントなしで継続動作
-- **lint_text 失敗**: 空のベクタを返し、エラーログ出力
+- **RwLock poisoning**: Log error and return early on lock acquisition failure
+- **Linter initialization failure**: Store as `None` and continue operation without linting
+- **lint_text failure**: Return empty vector and log error
 
-## tower-lsp の使用
+## Using tower-lsp
 
 ```rust
 pub async fn run() {
@@ -180,26 +180,26 @@ pub async fn run() {
 }
 ```
 
-## 依存関係
+## Dependencies
 
-| 依存関係 | 用途 |
+| Dependency | Purpose |
 | ------- | ------ |
-| `tsuzulint_core` | リンター本体 |
-| `tsuzulint_parser` | パーサー |
-| `tsuzulint_ast` | AST 型 |
-| `tower-lsp` | LSP フレームワーク |
-| `tokio` | 非同期ランタイム |
-| `serde_json` | JSON シリアライズ |
-| `tracing` | ログ出力 |
+| `tsuzulint_core` | Linter core |
+| `tsuzulint_parser` | Parser |
+| `tsuzulint_ast` | AST types |
+| `tower-lsp` | LSP framework |
+| `tokio` | Async runtime |
+| `serde_json` | JSON serialization |
+| `tracing` | Logging |
 
-## 現状と制限事項
+## Current Status and Limitations
 
-- **基本的な実装**: 現在は基本的な LSP 機能のみ実装
-- **診断キャッシュなし**: `codeAction` で再リントを実行（最適化の余地あり）
-- **フラットなシンボルリスト**: ネストしたシンボル構造は未サポート
-- **単純なデバウンス**: 固定 300ms 遅延
+- **Basic implementation**: Currently only basic LSP features are implemented
+- **No diagnostic caching**: `codeAction` re-runs lint (optimization opportunity)
+- **Flat symbol list**: Nested symbol structures not yet supported
+- **Simple debounce**: Fixed 300ms delay
 
-## テスト
+## Testing
 
-- **ユニットテスト**: バイトオフセット → LSP Position 変換
-- **統合テスト**: デバウンス動作の検証
+- **Unit tests**: Byte offset → LSP Position conversion
+- **Integration tests**: Debounce behavior verification

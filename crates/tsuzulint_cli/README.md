@@ -1,24 +1,24 @@
 # tsuzulint_cli
 
-TsuzuLint のコマンドラインインターフェース（CLI）アプリケーション。バイナリ名は `tzlint` です。
+Command-line interface (CLI) application for TsuzuLint. The binary name is `tzlint`.
 
-## 概要
+## Overview
 
-`tsuzulint_cli` は、TsuzuLint プロジェクトの **コマンドラインインターフェース（CLI）アプリケーション** です。
+`tsuzulint_cli` is the **command-line interface (CLI) application** for the TsuzuLint project.
 
-**主な役割:**
+**Main responsibilities:**
 
-- ユーザーとの中核的な対話ポイントを提供
-- `tsuzulint_core` クレートをラップし、コマンドライン引数の解析と結果の出力を担当
-- 設定ファイルの管理、プラグインのインストール、LSP サーバーの起動など、開発者ワークフローをサポート
+- Provide the primary interaction point for users
+- Wrap the `tsuzulint_core` crate, handling command-line argument parsing and result output
+- Support developer workflows including configuration file management, plugin installation, and LSP server startup
 
-## インストール
+## Installation
 
 ```bash
 cargo install tsuzulint_cli
 ```
 
-または、ソースからビルド:
+Or build from source:
 
 ```bash
 git clone https://github.com/simorgh3196/tsuzulint
@@ -26,87 +26,87 @@ cd tsuzulint
 cargo build --release --bin tzlint
 ```
 
-## 使用方法
+## Usage
 
-### グローバルオプション
+### Global Options
 
-| オプション | 短縮形 | 説明 |
-| ---------- | ------- | ---- |
-| `--config <PATH>` | `-c` | 設定ファイルのパスを指定 |
-| `--verbose` | `-v` | 詳細なデバッグ出力を有効化 |
-| `--no-cache` | | キャッシュを無効化 |
+| Option | Short | Description |
+| ------ | ----- | ----------- |
+| `--config <PATH>` | `-c` | Specify configuration file path |
+| `--verbose` | `-v` | Enable verbose debug output |
+| `--no-cache` | | Disable caching |
 
-### サブコマンド
+### Subcommands
 
-#### `lint` - ファイルのリント実行
+#### `lint` - Run linting on files
 
 ```bash
 tzlint lint [OPTIONS] <PATTERNS>...
 ```
 
-| オプション | 説明 |
-| ---------- | ---- |
-| `--format <FORMAT>` | 出力形式（`text` / `json` / `sarif`）。デフォルト: `text` |
-| `--fix` | 自動修正を適用 |
-| `--dry-run` | 修正をプレビューのみ（`--fix` と併用必須） |
-| `--timings` | パフォーマンス計測を表示 |
-| `--fail-on-resolve-error` | ルール解決失敗時にエラーで終了 |
+| Option | Description |
+| ------ | ----------- |
+| `--format <FORMAT>` | Output format (`text` / `json` / `sarif`). Default: `text` |
+| `--fix` | Apply automatic fixes |
+| `--dry-run` | Preview fixes only (requires `--fix`) |
+| `--timings` | Display performance measurements |
+| `--fail-on-resolve-error` | Exit with error on rule resolution failure |
 
-**使用例:**
+**Examples:**
 
 ```bash
-# 基本的なリント
+# Basic linting
 tzlint lint src/**/*.md
 
-# JSON 形式で出力
+# Output in JSON format
 tzlint lint --format json src/**/*.md
 
-# 自動修正を適用
+# Apply automatic fixes
 tzlint lint --fix src/**/*.md
 
-# 修正をプレビュー
+# Preview fixes
 tzlint lint --fix --dry-run src/**/*.md
 
-# パフォーマンス計測付き
+# With performance timing
 tzlint lint --timings src/**/*.md
 
-# 複数パターン
+# Multiple patterns
 tzlint lint "src/**/*.md" "docs/**/*.md"
 ```
 
-#### `init` - 設定ファイルの初期化
+#### `init` - Initialize configuration file
 
 ```bash
 tzlint init [--force]
 ```
 
-- `.tsuzulint.jsonc` ファイルを作成
-- `--force`: 既存ファイルを上書き
+- Creates a `.tsuzulint.jsonc` file
+- `--force`: Overwrite existing file
 
-**生成されるファイル:**
+**Generated file:**
 
 ```jsonc
 {
-  // TsuzuLint 設定ファイル
+  // TsuzuLint configuration file
   "rules": [
-    // ここにルールを追加
+    // Add rules here
     // "owner/repo",
     // { "github": "owner/repo@v1.0", "as": "alias" }
   ],
   "options": {
-    // ルールごとのオプション
+    // Per-rule options
   }
 }
 ```
 
-#### `rules` - ルール管理
+#### `rules` - Rule management
 
 ```bash
-tzlint rules create <NAME>   # 新規ルールプロジェクト作成
-tzlint rules add <PATH>      # WASM ルールを追加
+tzlint rules create <NAME>   # Create new rule project
+tzlint rules add <PATH>      # Add WASM rule
 ```
 
-**ルールプロジェクト作成:**
+**Creating a rule project:**
 
 ```bash
 tzlint rules create my-rule
@@ -114,58 +114,58 @@ cd my-rule
 cargo build --release --target wasm32-wasip1
 ```
 
-生成される構造:
+Generated structure:
 
 ```text
 my-rule/
-├── Cargo.toml       # wasm32-wasip1 ターゲット用設定
+├── Cargo.toml       # Configuration for wasm32-wasip1 target
 └── src/
-    └── lib.rs       # ルールテンプレート
+    └── lib.rs       # Rule template
 ```
 
-#### `lsp` - LSP サーバー起動
+#### `lsp` - Start LSP server
 
 ```bash
 tzlint lsp
 ```
 
-エディタ統合用の Language Server Protocol サーバーを起動します。
+Starts a Language Server Protocol server for editor integration.
 
-#### `plugin` - プラグイン管理
+#### `plugin` - Plugin management
 
 ```bash
-tzlint plugin cache clean                          # キャッシュクリア
-tzlint plugin install [SPEC] [--url <URL>] [--as <ALIAS>]  # プラグインインストール
+tzlint plugin cache clean                          # Clear cache
+tzlint plugin install [SPEC] [--url <URL>] [--as <ALIAS>]  # Install plugin
 ```
 
-**インストール例:**
+**Installation examples:**
 
 ```bash
-# GitHub から
+# From GitHub
 tzlint plugin install owner/repo
 
-# 特定バージョン
+# Specific version
 tzlint plugin install owner/repo@v1.0.0
 
-# エイリアス付き
+# With alias
 tzlint plugin install owner/repo --as my-rule
 
-# URL から
+# From URL
 tzlint plugin install --url https://example.com/rule.wasm --as external-rule
 ```
 
-## 出力フォーマット
+## Output Formats
 
-### Text 形式（デフォルト）
+### Text format (default)
 
 ```text
 /path/to/file.md:
-  0:10 error [rule-id]: エラーメッセージ
+  0:10 error [rule-id]: Error message
 
 Checked 5 files (2 from cache), found 3 issues
 ```
 
-`--timings` オプション有効時:
+With `--timings` option enabled:
 
 ```text
 Performance Timings:
@@ -177,7 +177,7 @@ spell-check                     | 10ms            | 30.0%
 Total                           | 33ms
 ```
 
-### JSON 形式
+### JSON format
 
 ```json
 [
@@ -195,28 +195,28 @@ Total                           | 33ms
 ]
 ```
 
-### SARIF 形式
+### SARIF format
 
-SARIF（Static Analysis Results Interchange Format）は、GitHub Advanced Security などで使用される標準形式です。
+SARIF (Static Analysis Results Interchange Format) is a standard format used by GitHub Advanced Security and other tools.
 
 ```bash
 tzlint lint --format sarif src/**/*.md > results.sarif
 ```
 
-## 終了コード
+## Exit Codes
 
-| コード | 意味 |
-| ------ | ---- |
-| `0` | 成功（エラーなし） |
-| `1` | リントエラーあり |
-| `2` | 内部エラー（設定エラー、無効な glob 等） |
+| Code | Meaning |
+| ---- | ------- |
+| `0` | Success (no errors) |
+| `1` | Linting errors found |
+| `2` | Internal error (configuration error, invalid glob, etc.) |
 
-## エディタ統合
+## Editor Integration
 
 ### VS Code
 
-1. LSP サーバーを起動する拡張機能を作成
-2. `tzlint lsp` コマンドを使用
+1. Create an extension that starts the LSP server
+2. Use the `tzlint lsp` command
 
 ### Neovim
 
@@ -228,34 +228,34 @@ lspconfig.tsuzulint.setup {
 }
 ```
 
-## tsuzulint_core との統合
+## Integration with tsuzulint_core
 
-CLI は以下のコンポーネントを `tsuzulint_core` から利用:
+The CLI uses the following components from `tsuzulint_core`:
 
-| コンポーネント | 用途 |
-| ------------- | ---- |
-| `Linter` | メインのリントエンジン |
-| `LinterConfig` | 設定ファイルの読み込みと管理 |
-| `LintResult` | リント結果の格納 |
-| `Severity` | 診断の重要度 |
-| `apply_fixes_to_file` | 自動修正の適用 |
-| `generate_sarif` | SARIF 形式での出力生成 |
+| Component | Usage |
+| --------- | ----- |
+| `Linter` | Main linting engine |
+| `LinterConfig` | Configuration file loading and management |
+| `LintResult` | Lint result storage |
+| `Severity` | Diagnostic severity |
+| `apply_fixes_to_file` | Apply automatic fixes |
+| `generate_sarif` | Generate SARIF format output |
 
-## セキュリティ機能
+## Security Features
 
-- **シンボリックリンク保護**: `init` コマンドおよびプラグインインストール時の設定ファイル更新で、シンボリックリンクを検出して書き込みを拒否
-- **Unix システムでの保護**: `O_NOFOLLOW` フラグを使用して、シンボリックリンク経由での意図しないファイル上書きを防止
+- **Symbolic link protection**: Detects and refuses to write to symbolic links during `init` command and configuration file updates during plugin installation
+- **Unix system protection**: Uses `O_NOFOLLOW` flag to prevent unintended file overwrites via symbolic links
 
-## 依存関係
+## Dependencies
 
-| 依存クレート | 用途 |
-| ----------- | ---- |
-| `clap` | コマンドライン引数解析 |
-| `miette` | ユーザーフレンドリーなエラー表示 |
-| `tracing` | 構造化ロギング |
-| `serde_json` | JSON 出力と設定ファイルの処理 |
-| `jsonc-parser` | JSONC 設定ファイルの解析 |
-| `tokio` | 非同期ランタイム |
-| `tsuzulint_core` | コアリンター機能 |
-| `tsuzulint_lsp` | LSP サーバー実装 |
-| `tsuzulint_registry` | プラグインレジストリ |
+| Dependency Crate | Usage |
+| ---------------- | ----- |
+| `clap` | Command-line argument parsing |
+| `miette` | User-friendly error display |
+| `tracing` | Structured logging |
+| `serde_json` | JSON output and configuration file processing |
+| `jsonc-parser` | JSONC configuration file parsing |
+| `tokio` | Async runtime |
+| `tsuzulint_core` | Core linter functionality |
+| `tsuzulint_lsp` | LSP server implementation |
+| `tsuzulint_registry` | Plugin registry |

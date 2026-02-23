@@ -1,106 +1,106 @@
 # tsuzulint_registry
 
-プラグインレジストリとパッケージ管理を担当するクレート。GitHub、URL、ローカルパスからプラグインを取得・キャッシュします。
+A crate responsible for plugin registry and package management. Fetches and caches plugins from GitHub, URLs, and local paths.
 
-## 概要
+## Overview
 
-`tsuzulint_registry` は、TsuzuLint プロジェクトにおける **プラグインレジストリおよびパッケージ管理** を担当します。
+`tsuzulint_registry` handles **plugin registry and package management** for the TsuzuLint project.
 
-### 主な役割
+### Key Responsibilities
 
-1. **外部ルールプラグインの取得**: GitHub、URL、ローカルパスからプラグインマニフェストを取得
-2. **WASM アーティファクトのダウンロード**: プラグインの WASM バイナリを安全にダウンロード
-3. **キャッシュ管理**: ダウンロードしたプラグインをローカルにキャッシュし、再利用を効率化
-4. **セキュリティ保護**: SSRF 攻撃防止のための URL 検証、ハッシュ検証
+1. **External Rule Plugin Retrieval**: Fetch plugin manifests from GitHub, URLs, and local paths
+2. **WASM Artifact Downloads**: Safely download plugin WASM binaries
+3. **Cache Management**: Cache downloaded plugins locally for efficient reuse
+4. **Security Protection**: URL validation to prevent SSRF attacks, hash verification
 
-## アーキテクチャ
+## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                      PluginResolver                              │
-│  (プラグイン解決の中心的な調整役)                                   │
+│  (Central coordinator for plugin resolution)                     │
 └─────────────────────────────────────────────────────────────────┘
           │                    │                    │
           ▼                    ▼                    ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │ ManifestFetcher │  │  WasmDownloader │  │   PluginCache   │
-│ (マニフェスト取得) │  │ (WASMダウンロード) │  │   (キャッシュ管理) │
+│ (Manifest Fetch)│  │(WASM Download)  │  │ (Cache Manager) │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
           │                    │                    │
           ▼                    ▼                    ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  PluginSource   │  │ HashVerifier    │  │  ファイルシステム  │
-│ (取得元の種類)    │  │ (SHA256検証)     │  │  ~/.cache/...   │
+│  PluginSource   │  │ HashVerifier    │  │  File System    │
+│ (Source Type)   │  │ (SHA256 Verify) │  │  ~/.cache/...   │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
           │                    │
           ▼                    ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    validate_url (セキュリティ)                    │
-│           SSRF 防止: ループバック/プライベートIP検証               │
+│                    validate_url (Security)                       │
+│           SSRF Prevention: Loopback/Private IP Validation        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## PluginSource（プラグイン取得元）
+## PluginSource (Plugin Source)
 
-3 種類のソースをサポート:
+Supports 3 types of sources:
 
 ```rust
 pub enum PluginSource {
-    /// GitHub リポジトリ: `owner/repo` または `owner/repo@version`
+    /// GitHub repository: `owner/repo` or `owner/repo@version`
     GitHub { owner: String, repo: String, version: Option<String> },
-    /// 直接 URL
+    /// Direct URL
     Url(String),
-    /// ローカルファイルパス
+    /// Local file path
     Path(PathBuf),
 }
 ```
 
-### GitHub ソース
+### GitHub Source
 
-- `owner/repo` → 最新リリースから取得
-- `owner/repo@v1.2.3` → 特定バージョンから取得
-- URL 形式: `{base}/{owner}/{repo}/releases/download/v{version}/tsuzulint-rule.json`
+- `owner/repo` → Fetch from latest release
+- `owner/repo@v1.2.3` → Fetch from specific version
+- URL format: `{base}/{owner}/{repo}/releases/download/v{version}/tsuzulint-rule.json`
 
-## 解決フロー
+## Resolution Flow
 
 ```text
-PluginSpec 解析
+PluginSpec Parsing
     ↓
-キャッシュ確認
-    ├─ ヒット → ResolvedPlugin 返却
-    └─ ミス → 取得実行
+Cache Check
+    ├─ Hit → Return ResolvedPlugin
+    └─ Miss → Execute Fetch
            ↓
-       マニフェスト取得
+       Manifest Fetch
            ↓
-       WASM ダウンロード
+       WASM Download
            ↓
-       SHA256 ハッシュ検証
+       SHA256 Hash Verification
            ↓
-       キャッシュ保存
+       Cache Save
            ↓
-       ResolvedPlugin 返却
+       Return ResolvedPlugin
 ```
 
-### PluginSpec パース形式
+### PluginSpec Parse Formats
 
 ```json
-// 文字列形式
+// String format
 "owner/repo"
 "owner/repo@v1.0.0"
 
-// オブジェクト形式
+// Object format
 {"github": "owner/repo", "as": "my-rule"}
 {"url": "https://example.com/manifest.json", "as": "external-rule"}
 {"path": "./local/rule", "as": "local-rule"}
 ```
 
-## キャッシュ管理
+## Cache Management
 
-### キャッシュ場所
+### Cache Location
 
-`~/.cache/tsuzulint/plugins/`（Unix 系）
+`~/.cache/tsuzulint/plugins/` (Unix systems)
 
-### ディレクトリ構造
+### Directory Structure
 
 ```text
 ~/.cache/tsuzulint/plugins/
@@ -116,75 +116,75 @@ PluginSpec 解析
             └── tsuzulint-rule.json
 ```
 
-### 機能
+### Features
 
-- パストラバーサル攻撃防止
-- キャッシュされたマニフェストの `artifacts.wasm` をローカルパスに書き換え
-- URL ソースは URL の SHA256 ハッシュをキーとして使用
+- Path traversal attack prevention
+- Replace cached manifest's `artifacts.wasm` with local path
+- URL sources use SHA256 hash of URL as key
 
-## セキュリティ機能
+## Security Features
 
-### SSRF 対策 (`validate_url`)
+### SSRF Protection (`validate_url`)
 
-**デフォルトでブロック:**
+**Blocked by Default:**
 
-- `localhost` ドメイン
-- IPv4 ループバック (`127.0.0.0/8`)
-- IPv4 未指定 (`0.0.0.0`)
-- IPv4 プライベート (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
-- IPv4 リンクローカル (`169.254.0.0/16`)
-- IPv6 ループバック (`::1`)
-- IPv6 未指定 (`::`)
-- IPv6 ユニークローカル (`fc00::/7`)
-- IPv6 リンクローカル (`fe80::/10`)
-- 非 HTTP スキーム（`ftp://`, `file://` 等）
+- `localhost` domain
+- IPv4 loopback (`127.0.0.0/8`)
+- IPv4 unspecified (`0.0.0.0`)
+- IPv4 private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
+- IPv4 link-local (`169.254.0.0/16`)
+- IPv6 loopback (`::1`)
+- IPv6 unspecified (`::`)
+- IPv6 unique local (`fc00::/7`)
+- IPv6 link-local (`fe80::/10`)
+- Non-HTTP schemes (`ftp://`, `file://`, etc.)
 
-**テスト/開発用に許可:**
+**Allowed for Testing/Development:**
 
 ```rust
 let fetcher = ManifestFetcher::new().allow_local(true);
 let downloader = WasmDownloader::new().allow_local(true);
 ```
 
-### ハッシュ検証
+### Hash Verification
 
-- ダウンロードした WASM の SHA256 を自動計算
-- マニフェストの `artifacts.sha256` と照合
-- 不一致時は `HashError::Mismatch` を返却
+- Automatic SHA256 calculation of downloaded WASM
+- Comparison with manifest's `artifacts.sha256`
+- Returns `HashError::Mismatch` on mismatch
 
-### パストラバーサル対策
+### Path Traversal Protection
 
-**ローカルパスソース:**
+**Local Path Sources:**
 
-- 絶対パス禁止
-- `..` コンポーネント禁止
-- 正規化後のパスがマニフェストの親ディレクトリ内にあることを確認
+- Absolute paths prohibited
+- `..` components prohibited
+- Verify normalized path is within manifest's parent directory
 
-**キャッシュ:**
+**Cache:**
 
-- `owner`, `repo`, `version` が単一の正常なパスコンポーネントであることを検証
+- Validate `owner`, `repo`, `version` are single valid path components
 
 ## WasmDownloader
 
 ```rust
 pub struct WasmDownloader {
-    max_size: usize,          // デフォルト: 50MB
-    timeout: Duration,        // デフォルト: 60秒
-    allow_local: bool,        // デフォルト: false
+    max_size: usize,          // Default: 50MB
+    timeout: Duration,        // Default: 60 seconds
+    allow_local: bool,        // Default: false
 }
 ```
 
-**機能:**
+**Features:**
 
-- ストリーミングダウンロード（大容量ファイル対応）
-- サイズ制限チェック（事前・ストリーミング中の二段階）
-- タイムアウト設定
-- `{version}` プレースホルダー置換
-- 自動ハッシュ計算
+- Streaming download (supports large files)
+- Size limit checking (two-stage: pre-check and during streaming)
+- Timeout configuration
+- `{version}` placeholder substitution
+- Automatic hash calculation
 
-## 使用例
+## Usage Examples
 
-### 基本的な使用方法
+### Basic Usage
 
 ```rust
 use tsuzulint_registry::{PluginResolver, PluginSpec};
@@ -192,10 +192,10 @@ use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // リゾルバを作成
+    // Create resolver
     let resolver = PluginResolver::new()?;
     
-    // GitHub からプラグインを解決
+    // Resolve plugin from GitHub
     let spec = PluginSpec::parse(&json!("simorgh3196/tsuzulint-rule-no-todo@v1.0.0"))?;
     let resolved = resolver.resolve(&spec).await?;
     
@@ -207,7 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### カスタム設定
+### Custom Configuration
 
 ```rust
 use tsuzulint_registry::downloader::WasmDownloader;
@@ -219,48 +219,48 @@ let downloader = WasmDownloader::with_options(
 );
 ```
 
-### CLI からの使用
+### CLI Usage
 
 ```bash
-# GitHub からインストール
+# Install from GitHub
 tzlint plugin install owner/repo
 
-# 特定バージョン
+# Specific version
 tzlint plugin install owner/repo@v1.0.0
 
-# エイリアス付き
+# With alias
 tzlint plugin install owner/repo --as my-rule
 
-# URL から
+# From URL
 tzlint plugin install --url https://example.com/rule.wasm --as external-rule
 
-# キャッシュクリア
+# Clear cache
 tzlint plugin cache clean
 ```
 
-## モジュール構成
+## Module Structure
 
-| モジュール | 責務 |
-| ---------- | ---- |
-| `lib.rs` | エントリーポイント、公開 API の再エクスポート |
-| `fetcher.rs` | プラグインマニフェストの取得 |
-| `downloader.rs` | WASM バイナリのダウンロード |
-| `resolver.rs` | プラグイン解決の統合 |
-| `cache.rs` | プラグインのローカルキャッシュ |
-| `security.rs` | URL セキュリティ検証 |
-| `hash.rs` | SHA256 ハッシュ計算・検証 |
-| `error.rs` | エラー型の定義 |
+| Module | Responsibility |
+| ------ | -------------- |
+| `lib.rs` | Entry point, public API re-exports |
+| `fetcher.rs` | Plugin manifest fetching |
+| `downloader.rs` | WASM binary download |
+| `resolver.rs` | Plugin resolution integration |
+| `cache.rs` | Local plugin cache |
+| `security.rs` | URL security validation |
+| `hash.rs` | SHA256 hash calculation and verification |
+| `error.rs` | Error type definitions |
 
-## 依存関係
+## Dependencies
 
-| クレート | 用途 |
-| --------- | ---- |
-| `tsuzulint_manifest` | プラグインマニフェストの型定義 |
-| `reqwest` | HTTP クライアント（ストリーミング対応） |
-| `sha2` | SHA256 ハッシュ計算 |
-| `hex` | ハッシュ値の16進数エンコード |
-| `futures-util` | 非同期ストリーミング処理 |
-| `dirs` | キャッシュディレクトリ取得 |
-| `url` | URL パース |
-| `tokio` | 非同期ランタイム |
-| `tracing` | ログ出力 |
+| Crate | Purpose |
+| ----- | ------- |
+| `tsuzulint_manifest` | Plugin manifest type definitions |
+| `reqwest` | HTTP client (with streaming support) |
+| `sha2` | SHA256 hash calculation |
+| `hex` | Hexadecimal encoding of hash values |
+| `futures-util` | Async streaming processing |
+| `dirs` | Cache directory retrieval |
+| `url` | URL parsing |
+| `tokio` | Async runtime |
+| `tracing` | Logging |

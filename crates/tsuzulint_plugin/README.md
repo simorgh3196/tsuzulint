@@ -1,22 +1,22 @@
 # tsuzulint_plugin
 
-WASM プラグインシステムを提供するクレート。ルールを WASM にコンパイルし、サンドボックス環境で安全に実行します。
+A crate that provides a WASM plugin system. Compiles rules to WASM and executes them safely in a sandboxed environment.
 
-## 概要
+## Overview
 
-`tsuzulint_plugin` は、TsuzuLint の中核を担う **WASM プラグインシステム** です。このクレートは以下の役割を果たします：
+`tsuzulint_plugin` is the **WASM plugin system** at the core of TsuzuLint. This crate is responsible for:
 
-- **WASM ベースのルール実行**: リントルールを WASM にコンパイルし、サンドボックス環境で安全に実行
-- **プラグインのロード・管理**: WASM ファイルまたはバイト列からのルール読み込み、設定、アンロード
-- **ホスト関数の提供**: ルール実行時に必要なコンテキスト情報の提供
-- **診断情報の収集**: ルールから返される診断結果の集約
+- **WASM-based rule execution**: Compiles lint rules to WASM and executes them safely in a sandboxed environment
+- **Plugin loading and management**: Loading, configuring, and unloading rules from WASM files or byte arrays
+- **Host function provision**: Providing context information required during rule execution
+- **Diagnostic collection**: Aggregating diagnostic results returned by rules
 
-## アーキテクチャ
+## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                      PluginHost                              │
-│  (高レベル API)                                              │
+│  (High-level API)                                           │
 │  - load_rule(), configure_rule(), run_rule()                │
 │  - run_all_rules()                                          │
 └─────────────────────────────────────────────────────────────┘
@@ -24,7 +24,7 @@ WASM プラグインシステムを提供するクレート。ルールを WASM 
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    RuleExecutor trait                        │
-│  (バックエンド抽象化)                                         │
+│  (Backend abstraction)                                       │
 └─────────────────────────────────────────────────────────────┘
             │                           │
             ▼                           ▼
@@ -33,145 +33,145 @@ WASM プラグインシステムを提供するクレート。ルールを WASM 
 │   (native feature)  │     │  (browser feature)  │
 │                     │     │                     │
 │ - wasmtime (JIT)    │     │ - Pure Rust         │
-│ - 高速実行          │     │ - WASM-in-WASM      │
-│ - CLI/サーバー向け  │     │ - ブラウザ向け       │
+│ - Fast execution    │     │ - WASM-in-WASM      │
+│ - CLI/Server use    │     │ - Browser use       │
 └─────────────────────┘     └─────────────────────┘
 ```
 
-## プラグインインターフェース
+## Plugin Interface
 
-各ルールは以下の 2 つの関数をエクスポートする必要があります：
+Each rule must export the following two functions:
 
 ```rust
-// 1. ルールメタデータを返す（JSON）
+// 1. Returns rule metadata (JSON)
 fn get_manifest() -> String
 
-// 2. リントを実行し診断結果を返す（Msgpack）
+// 2. Performs linting and returns diagnostic results (Msgpack)
 fn lint(input_bytes: &[u8]) -> Vec<u8>
 ```
 
-### 入力データ構造
+### Input Data Structure
 
 ```rust
 struct LintRequest {
-    tokens: Vec<Token>,       // 形態素解析結果
-    sentences: Vec<Sentence>, // 文境界情報
-    node: T,                  // AST ノード（シリアライズ済み）
-    source: &str,             // ソーステキスト
-    file_path: Option<&str>,  // ファイルパス
+    tokens: Vec<Token>,       // Morphological analysis results
+    sentences: Vec<Sentence>, // Sentence boundary information
+    node: T,                  // AST node (serialized)
+    source: &str,             // Source text
+    file_path: Option<&str>,  // File path
 }
 ```
 
-### 出力データ構造
+### Output Data Structure
 
 ```rust
 struct LintResponse {
-    diagnostics: Vec<Diagnostic>, // 診断結果のリスト
+    diagnostics: Vec<Diagnostic>, // List of diagnostic results
 }
 ```
 
-## Extism vs wasmi の比較
+## Extism vs wasmi Comparison
 
-| 特性 | Extism (native) | wasmi (browser) |
-| ------ | --------------- | --------------- |
-| **実行方式** | JIT コンパイル | インタプリタ |
-| **基盤技術** | wasmtime | 純粋 Rust |
-| **パフォーマンス** | 高速 | 低速 |
-| **使用環境** | CLI、Tauri、サーバー | ブラウザ WASM (WASM-in-WASM) |
-| **セキュリティ制御** | Extism Manifest | wasmi StoreLimiter |
+| Feature | Extism (native) | wasmi (browser) |
+| ------- | --------------- | --------------- |
+| **Execution method** | JIT compilation | Interpreter |
+| **Underlying tech** | wasmtime | Pure Rust |
+| **Performance** | Fast | Slow |
+| **Use environment** | CLI, Tauri, Server | Browser WASM (WASM-in-WASM) |
+| **Security control** | Extism Manifest | wasmi StoreLimiter |
 
 ## Feature Flags
 
 ```toml
 [features]
 default = ["native"]
-native = ["dep:extism", "dep:extism-manifest"]   # Extism バックエンド
-browser = ["dep:wasmi"]                           # wasmi バックエンド
-test-utils = ["dep:wat"]                          # テストユーティリティ
-rkyv = ["dep:rkyv", "tsuzulint_ast/rkyv"]         # 高速シリアライズ
+native = ["dep:extism", "dep:extism-manifest"]   # Extism backend
+browser = ["dep:wasmi"]                           # wasmi backend
+test-utils = ["dep:wat"]                          # Test utilities
+rkyv = ["dep:rkyv", "tsuzulint_ast/rkyv"]         # Fast serialization
 ```
 
-**重要な制約:**
+**Important constraints:**
 
-- `native` または `browser` のいずれかが必須（コンパイルエラーになる）
-- 両方有効な場合は `native` が優先
+- Either `native` or `browser` must be enabled (compilation error otherwise)
+- If both are enabled, `native` takes precedence
 
-## 主要な型
+## Key Types
 
-### RuleManifest（ルールメタデータ）
+### RuleManifest (Rule Metadata)
 
 ```rust
 pub struct RuleManifest {
-    pub name: String,                    // ルールID
-    pub version: String,                 // セマンティックバージョン
-    pub description: Option<String>,     // 説明
-    pub fixable: bool,                   // 自動修正可能か
-    pub node_types: Vec<String>,         // 対象ノード型
-    pub isolation_level: IsolationLevel, // 分離レベル
-    pub schema: Option<Value>,           // 設定の JSON Schema
+    pub name: String,                    // Rule ID
+    pub version: String,                 // Semantic version
+    pub description: Option<String>,     // Description
+    pub fixable: bool,                   // Auto-fixable
+    pub node_types: Vec<String>,         // Target node types
+    pub isolation_level: IsolationLevel, // Isolation level
+    pub schema: Option<Value>,           // Configuration JSON Schema
 }
 
 pub enum IsolationLevel {
-    Global,  // 文書全体を必要とするルール
-    Block,   // ブロック単位で独立実行可能
+    Global,  // Rules requiring the entire document
+    Block,   // Independently executable at block level
 }
 ```
 
-### Diagnostic（診断結果）
+### Diagnostic (Diagnostic Result)
 
 ```rust
 pub struct Diagnostic {
-    pub rule_id: String,          // ルールID
-    pub message: String,          // メッセージ
-    pub span: Span,               // バイト範囲
-    pub loc: Option<Location>,    // 行/列位置
-    pub severity: Severity,       // 重要度
-    pub fix: Option<Fix>,         // 自動修正
+    pub rule_id: String,          // Rule ID
+    pub message: String,          // Message
+    pub span: Span,               // Byte range
+    pub loc: Option<Location>,    // Line/column position
+    pub severity: Severity,       // Severity
+    pub fix: Option<Fix>,         // Auto-fix
 }
 
 pub enum Severity {
     Info,
     Warning,
-    Error,  // デフォルト
+    Error,  // Default
 }
 
 pub struct Fix {
-    pub span: Span,    // 置換範囲
-    pub text: String,  // 置換テキスト
+    pub span: Span,    // Replacement range
+    pub text: String,  // Replacement text
 }
 ```
 
-## セキュリティ機能
+## Security Features
 
-### リソース制限
+### Resource Limits
 
-- **メモリ**: 128MB 上限（DoS 防止）
-- **CPU**: Fuel 制限（10億命令 = 無限ループ防止）
-- **時間**: タイムアウト（5秒 = 応答なしルール防止）
+- **Memory**: 128MB limit (DoS prevention)
+- **CPU**: Fuel limit (1 billion instructions = infinite loop prevention)
+- **Time**: Timeout (5 seconds = unresponsive rule prevention)
 
-### アクセス制御
+### Access Control
 
-- ネットワークアクセス: 完全拒否
-- ファイルシステムアクセス: 完全拒否
-- 環境変数: クリア
+- Network access: Completely denied
+- Filesystem access: Completely denied
+- Environment variables: Cleared
 
-## 使用例
+## Usage Example
 
 ```rust
 use tsuzulint_plugin::PluginHost;
 
-// ホストの作成
+// Create host
 let mut host = PluginHost::new();
 
-// ルールのロード
+// Load rule
 host.load_rule("./rules/no-todo.wasm")?;
 
-// ルールの設定（オプション）
+// Configure rule (optional)
 host.configure_rule("no-todo", serde_json::json!({
     "allow": ["TODO", "FIXME"]
 }))?;
 
-// ルールの実行
+// Execute rule
 let diagnostics = host.run_rule(
     "no-todo",
     &ast_node,
@@ -181,7 +181,7 @@ let diagnostics = host.run_rule(
     Some("example.md")
 )?;
 
-// 全ルールの一括実行
+// Execute all rules at once
 let all_diagnostics = host.run_all_rules(
     &ast_node,
     "source content",
@@ -190,46 +190,46 @@ let all_diagnostics = host.run_all_rules(
     Some("example.md")
 )?;
 
-// 結果の処理
+// Process results
 for diag in diagnostics {
     println!("{}: {} at {:?}", diag.rule_id, diag.message, diag.span);
 }
 
-// ルールのアンロード
+// Unload rule
 host.unload_rule("no-todo");
 ```
 
-## 依存関係
+## Dependencies
 
-| 依存関係 | 用途 |
-| ---------- | ------ |
-| `extism` (optional) | ネイティブ環境での WASM 実行 |
-| `extism-manifest` (optional) | Extism プラグイン設定 |
-| `wasmi` (optional) | ブラウザ環境での WASM 実行（インタプリタ） |
-| `serde` / `serde_json` | JSON シリアライズ |
-| `rmp-serde` | MessagePack シリアライズ（高速化） |
-| `thiserror` | エラー型定義 |
-| `tracing` | ログ出力 |
-| `tsuzulint_ast` | AST 型定義 |
-| `tsuzulint_text` | Token/Sentence 型定義 |
+| Dependency | Purpose |
+| ---------- | ------- |
+| `extism` (optional) | WASM execution in native environment |
+| `extism-manifest` (optional) | Extism plugin configuration |
+| `wasmi` (optional) | WASM execution in browser environment (interpreter) |
+| `serde` / `serde_json` | JSON serialization |
+| `rmp-serde` | MessagePack serialization (performance) |
+| `thiserror` | Error type definition |
+| `tracing` | Logging |
+| `tsuzulint_ast` | AST type definitions |
+| `tsuzulint_text` | Token/Sentence type definitions |
 
-**なぜ MessagePack を使用するか:**
+**Why MessagePack is used:**
 
-- JSON より高速なシリアライズ/デシリアライズ
-- よりコンパクトなバイナリ形式
-- ホストと WASM 間のデータ転送を最適化
+- Faster serialization/deserialization than JSON
+- More compact binary format
+- Optimizes data transfer between host and WASM
 
-## モジュール構成
+## Module Structure
 
 ```text
 src/
-├── lib.rs              # クレートエントリーポイント
-├── executor.rs         # RuleExecutor トレイト
-├── executor_extism.rs  # Extism バックエンド（native feature）
-├── executor_wasmi.rs   # wasmi バックエンド（browser feature）
-├── host.rs             # PluginHost（高レベル API）
-├── manifest.rs         # RuleManifest 型
-├── diagnostic.rs       # Diagnostic/Severity/Fix 型
-├── error.rs            # PluginError 型
-└── test_utils.rs       # テストユーティリティ（test-utils feature）
+├── lib.rs              # Crate entry point
+├── executor.rs         # RuleExecutor trait
+├── executor_extism.rs  # Extism backend (native feature)
+├── executor_wasmi.rs   # wasmi backend (browser feature)
+├── host.rs             # PluginHost (high-level API)
+├── manifest.rs         # RuleManifest type
+├── diagnostic.rs       # Diagnostic/Severity/Fix types
+├── error.rs            # PluginError type
+└── test_utils.rs       # Test utilities (test-utils feature)
 ```
