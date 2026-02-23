@@ -158,30 +158,43 @@ impl WasmDownloader {
             // 2. DNS Resolution and IP Validation (SSRF protection)
             // Note: validate_url restricts to http/https when allow_local is false,
             // so a None host (e.g., file://) cannot reach this branch.
-            //
-            // SECURITY LIMITATION: DNS resolution is validated here, but the subsequent
-            // HTTP request performs its own DNS lookup. This creates a theoretical window
-            // for DNS rebinding attacks. However, this risk is considered acceptable because:
-            // - The timing window is extremely small (milliseconds between validation and request)
-            // - The attacker would need to control a DNS server and synchronize timing
-            // - Full mitigation would require pinning IPs to the HTTP client, which is
-            //   complex and not supported by the current reqwest API on RequestBuilder
-            if !self.allow_local
-                && let Some(host) = url.host_str()
-            {
-                let port = url.port_or_known_default().unwrap_or(80);
-                let addrs: Vec<_> = lookup_host((host, port)).await?.collect();
-                if addrs.is_empty() {
-                    return Err(DownloadError::DnsNoAddress(host.to_string()));
+
+            let client = if !self.allow_local {
+                if let Some(host) = url.host_str() {
+                    let port = url.port_or_known_default().unwrap_or(80);
+                    // Force a fresh resolution to avoid stale cache or rebinding
+                    let addrs: Vec<_> = lookup_host((host, port)).await?.collect();
+                    if addrs.is_empty() {
+                        return Err(DownloadError::DnsNoAddress(host.to_string()));
+                    }
+
+                    // Verify all resolved IPs
+                    for addr in &addrs {
+                        check_ip(addr.ip())?;
+                    }
+
+                    // Pin to the first safe IP
+                    // This prevents DNS rebinding attacks (TOCTOU) where the DNS record changes
+                    // between verification and the actual request.
+                    let safe_addr = addrs[0];
+
+                    // Create a new client pinned to this IP
+                    reqwest::Client::builder()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .resolve(host, safe_addr)
+                        .build()
+                        .map_err(|e| DownloadError::ClientBuildError(e.to_string()))?
+                } else {
+                    // Fallback for schemes without host (shouldn't happen for http/s due to validation)
+                    self.client.clone()
                 }
-                for addr in addrs {
-                    check_ip(addr.ip())?;
-                }
-            }
+            } else {
+                // Testing mode: allow local addresses, skip pinning
+                self.client.clone()
+            };
 
             // 3. Perform Request (without following redirects)
-            let response = self
-                .client
+            let response = client
                 .get(url.clone())
                 .timeout(self.timeout)
                 .send()
