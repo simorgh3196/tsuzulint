@@ -18,6 +18,8 @@ use crate::{ParseError, Parser};
 /// - Frontmatter (optional)
 pub struct MarkdownParser;
 
+const EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkdn", "mkd"];
+
 impl MarkdownParser {
     /// Creates a new Markdown parser with default options.
     pub fn new() -> Self {
@@ -31,7 +33,7 @@ impl MarkdownParser {
 
     /// Checks if the extension is supported by this parser.
     pub fn supports_extension(extension: &str) -> bool {
-        ["md", "markdown", "mdown", "mkdn", "mkd"]
+        EXTENSIONS
             .iter()
             .any(|ext| ext.eq_ignore_ascii_case(extension))
     }
@@ -288,7 +290,7 @@ impl Parser for MarkdownParser {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["md", "markdown", "mdown", "mkdn", "mkd"]
+        EXTENSIONS
     }
 
     fn can_parse(&self, extension: &str) -> bool {
