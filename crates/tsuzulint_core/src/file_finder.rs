@@ -1,12 +1,12 @@
 use crate::error::LinterError;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::path::{Path, PathBuf};
-use tracing::info;
+use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
 pub struct FileFinder {
-    pub include_globs: Option<GlobSet>,
-    pub exclude_globs: Option<GlobSet>,
+    include_globs: Option<GlobSet>,
+    exclude_globs: Option<GlobSet>,
 }
 
 impl FileFinder {
@@ -72,13 +72,21 @@ impl FileFinder {
 
         for pattern in patterns {
             let path = Path::new(pattern);
-            if path.exists() && path.is_file() {
-                if let Ok(abs_path) = path.canonicalize() {
-                    if self.should_ignore(&abs_path) {
+            if path
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_file())
+            {
+                match path.canonicalize() {
+                    Ok(abs_path) => {
+                        if self.should_ignore(&abs_path) {
+                            continue;
+                        }
+                        files.push(abs_path);
+                    }
+                    Err(e) => {
+                        warn!(path = ?path, error = %e, "Failed to canonicalize direct file path");
                         continue;
                     }
-
-                    files.push(abs_path);
                 }
             } else {
                 let glob = Glob::new(pattern).map_err(|e| {
@@ -94,14 +102,27 @@ impl FileFinder {
                 .build()
                 .map_err(|e| LinterError::config(format!("Failed to build globset: {}", e)))?;
 
-            for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
-                let path = entry.path();
-                if path.is_file() && glob_set.is_match(path) {
-                    if self.should_ignore(path) {
-                        continue;
+            for entry_res in WalkDir::new(base_dir).follow_links(false).into_iter() {
+                match entry_res {
+                    Ok(entry) => {
+                        let path = entry.path();
+                        if entry.file_type().is_file() && glob_set.is_match(path) {
+                            match path.canonicalize() {
+                                Ok(abs_path) => {
+                                    if self.should_ignore(&abs_path) {
+                                        continue;
+                                    }
+                                    files.push(abs_path);
+                                }
+                                Err(e) => {
+                                    debug!(path = ?path, error = %e, "Failed to canonicalize discovered file path");
+                                }
+                            }
+                        }
                     }
-
-                    files.push(path.to_path_buf());
+                    Err(err) => {
+                        debug!(error = ?err, "WalkDir error scanning base_dir");
+                    }
                 }
             }
         }
@@ -146,15 +167,20 @@ mod tests {
     #[test]
     fn test_file_finder_with_include_patterns() {
         let finder = FileFinder::new(&["**/*.md".to_string()], &[]).unwrap();
-        assert!(finder.include_globs.is_some());
-        assert!(finder.exclude_globs.is_none());
+        // Returns false (do not ignore) for matched inclusive files
+        assert!(!finder.should_ignore(Path::new("README.md")));
+        assert!(!finder.should_ignore(Path::new("docs/setup.md")));
+        // Returns true (ignore) for non-matched inclusive files
+        assert!(finder.should_ignore(Path::new("src/lib.rs")));
     }
 
     #[test]
     fn test_file_finder_with_exclude_patterns() {
         let finder = FileFinder::new(&[], &["**/node_modules/**".to_string()]).unwrap();
-        assert!(finder.include_globs.is_none());
-        assert!(finder.exclude_globs.is_some());
+        // Returns true (ignore) for excluded files
+        assert!(finder.should_ignore(Path::new("node_modules/pkg/index.js")));
+        // Returns false (do not ignore) for all other files
+        assert!(!finder.should_ignore(Path::new("src/code.js")));
     }
 
     #[test]
@@ -314,5 +340,37 @@ mod tests {
 
         let result = finder.discover_files(&["[invalid-glob".to_string()], Path::new("."));
         assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_discover_files_ignores_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = tempdir().unwrap();
+        let target_file = temp_dir.path().join("target.md");
+        let link_file = temp_dir.path().join("link.md");
+
+        fs::write(&target_file, "# Target").unwrap();
+        symlink(&target_file, &link_file).unwrap();
+
+        let finder = FileFinder::new(&[], &[]).unwrap();
+
+        let files = finder
+            .discover_files(&["*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        // Should only contain target.md, NOT link.md
+        assert_eq!(
+            files.len(),
+            1,
+            "Should ignore symlinks, but found: {:?}",
+            files
+        );
+        // Canonicalize target_file because discover_files might return absolute paths or relative
+        // Actually discover_files returns paths as yielded by WalkDir (absolute if base_dir is absolute)
+        // temp_dir.path() is absolute.
+        assert!(files.iter().any(|f| f.ends_with("target.md")));
+        assert!(!files.iter().any(|f| f.ends_with("link.md")));
     }
 }
