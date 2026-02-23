@@ -45,6 +45,14 @@ pub enum DownloadError {
     /// Invalid redirect URL.
     #[error("Invalid redirect URL: {0}")]
     InvalidRedirectUrl(String),
+
+    /// Failed to build HTTP client.
+    #[error("Failed to build HTTP client: {0}")]
+    ClientBuildError(String),
+
+    /// DNS resolution returned no addresses.
+    #[error("DNS resolution returned no addresses for host: {0}")]
+    DnsNoAddress(String),
 }
 
 /// Result of a successful WASM download.
@@ -64,41 +72,34 @@ pub struct WasmDownloader {
     allow_local: bool,
 }
 
-impl Default for WasmDownloader {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl WasmDownloader {
     /// Create a new WASM downloader with default settings.
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, DownloadError> {
         Self::create(DEFAULT_MAX_SIZE, DEFAULT_TIMEOUT, false)
     }
 
     /// Create a new WASM downloader with a custom maximum file size.
-    pub fn with_max_size(max_size: u64) -> Self {
+    pub fn with_max_size(max_size: u64) -> Result<Self, DownloadError> {
         Self::create(max_size, DEFAULT_TIMEOUT, false)
     }
 
     /// Create a new WASM downloader with custom settings.
-    pub fn with_options(max_size: u64, timeout: Duration) -> Self {
+    pub fn with_options(max_size: u64, timeout: Duration) -> Result<Self, DownloadError> {
         Self::create(max_size, timeout, false)
     }
 
-    fn create(max_size: u64, timeout: Duration, allow_local: bool) -> Self {
-        // We disable automatic redirects to manually validate each hop
+    fn create(max_size: u64, timeout: Duration, allow_local: bool) -> Result<Self, DownloadError> {
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .expect("Failed to create reqwest client");
+            .map_err(|e| DownloadError::ClientBuildError(e.to_string()))?;
 
-        Self {
+        Ok(Self {
             client,
             max_size,
             timeout,
             allow_local,
-        }
+        })
     }
 
     /// Configure whether to allow downloads from local network addresses.
@@ -144,7 +145,7 @@ impl WasmDownloader {
         const MAX_REDIRECTS: u32 = 10;
 
         loop {
-            if redirect_count > MAX_REDIRECTS {
+            if redirect_count >= MAX_REDIRECTS {
                 return Err(DownloadError::RedirectLimitExceeded);
             }
 
@@ -155,12 +156,16 @@ impl WasmDownloader {
             validate_url(&url, self.allow_local)?;
 
             // 2. DNS Resolution and IP Validation (SSRF protection)
+            // Note: validate_url restricts to http/https when allow_local is false,
+            // so a None host (e.g., file://) cannot reach this branch.
             if !self.allow_local
                 && let Some(host) = url.host_str()
             {
                 let port = url.port_or_known_default().unwrap_or(80);
-                // This uses the system resolver (via tokio/std)
-                let addrs = lookup_host((host, port)).await?;
+                let addrs: Vec<_> = lookup_host((host, port)).await?.collect();
+                if addrs.is_empty() {
+                    return Err(DownloadError::DnsNoAddress(host.to_string()));
+                }
                 for addr in addrs {
                     check_ip(addr.ip())?;
                 }
@@ -282,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn test_version_placeholder_replacement() {
+    fn test_version_placeholder_replacement() -> Result<(), DownloadError> {
         let manifest = ExternalRuleManifest {
             rule: crate::manifest::RuleMetadata {
                 name: "test-rule".to_string(),
@@ -305,33 +310,37 @@ mod tests {
             options: None,
         };
 
-        let downloader = WasmDownloader::new();
+        let downloader = WasmDownloader::new()?;
         let url = downloader.resolve_url(&manifest);
 
         assert_eq!(url, "https://example.com/releases/v1.2.3/rule.wasm");
+        Ok(())
     }
 
     #[test]
-    fn test_default_max_size_is_50mb() {
-        let downloader = WasmDownloader::new();
+    fn test_default_max_size_is_50mb() -> Result<(), DownloadError> {
+        let downloader = WasmDownloader::new()?;
         assert_eq!(downloader.max_size, 50 * 1024 * 1024);
+        Ok(())
     }
 
     #[test]
-    fn test_default_timeout_is_60_seconds() {
-        let downloader = WasmDownloader::new();
+    fn test_default_timeout_is_60_seconds() -> Result<(), DownloadError> {
+        let downloader = WasmDownloader::new()?;
         assert_eq!(downloader.timeout, Duration::from_secs(60));
+        Ok(())
     }
 
     #[test]
-    fn test_custom_options() {
-        let downloader = WasmDownloader::with_options(100 * 1024 * 1024, Duration::from_secs(60));
+    fn test_custom_options() -> Result<(), DownloadError> {
+        let downloader = WasmDownloader::with_options(100 * 1024 * 1024, Duration::from_secs(60))?;
         assert_eq!(downloader.max_size, 100 * 1024 * 1024);
         assert_eq!(downloader.timeout, Duration::from_secs(60));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_download_success() {
+    async fn test_download_success() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
 
         // Mock a valid WASM file (just some random bytes)
@@ -347,18 +356,16 @@ mod tests {
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
         // Explicitly allow local for tests
-        let downloader = WasmDownloader::new().allow_local(true);
-        let result = downloader
-            .download(&manifest)
-            .await
-            .expect("Download failed");
+        let downloader = WasmDownloader::new()?.allow_local(true);
+        let result = downloader.download(&manifest).await?;
 
         assert_eq!(result.bytes, wasm_content);
         assert_eq!(result.computed_hash, expected_hash);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_download_not_found() {
+    async fn test_download_not_found() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -369,17 +376,17 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::new().allow_local(true);
+        let downloader = WasmDownloader::new()?.allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::NotFound(_)) => {}
+            Err(DownloadError::NotFound(_)) => Ok(()),
             _ => panic!("Expected NotFound error"),
         }
     }
 
     #[tokio::test]
-    async fn test_download_server_error() {
+    async fn test_download_server_error() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -390,19 +397,20 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::new().allow_local(true);
+        let downloader = WasmDownloader::new()?.allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
             Err(DownloadError::NetworkError(e)) => {
-                assert!(e.status() == Some(reqwest::StatusCode::INTERNAL_SERVER_ERROR))
+                assert!(e.status() == Some(reqwest::StatusCode::INTERNAL_SERVER_ERROR));
+                Ok(())
             }
             _ => panic!("Expected NetworkError with 500 status"),
         }
     }
 
     #[tokio::test]
-    async fn test_download_too_large_content_length() {
+    async fn test_download_too_large_content_length() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
         let max_size = 10;
 
@@ -416,20 +424,21 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/large.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::with_max_size(max_size).allow_local(true);
+        let downloader = WasmDownloader::with_max_size(max_size)?.allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
             Err(DownloadError::TooLarge { size, max }) => {
                 assert_eq!(size, 20);
                 assert_eq!(max, max_size);
+                Ok(())
             }
             _ => panic!("Expected TooLarge error"),
         }
     }
 
     #[tokio::test]
-    async fn test_download_too_large_stream() {
+    async fn test_download_too_large_stream() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
         let max_size = 5;
 
@@ -441,19 +450,20 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/stream.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::with_max_size(max_size).allow_local(true);
+        let downloader = WasmDownloader::with_max_size(max_size)?.allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
             Err(DownloadError::TooLarge { size: _, max }) => {
                 assert_eq!(max, max_size);
+                Ok(())
             }
             _ => panic!("Expected TooLarge error"),
         }
     }
 
     #[tokio::test]
-    async fn test_download_no_content_length() {
+    async fn test_download_no_content_length() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
         let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
         let expected_hash = HashVerifier::compute(wasm_content);
@@ -472,37 +482,36 @@ mod tests {
         let manifest = create_dummy_manifest(format!("{}/chunked.wasm", mock_server.uri()));
 
         // Explicitly allow local because wiremock runs on localhost
-        let downloader = WasmDownloader::new().allow_local(true);
+        let downloader = WasmDownloader::new()?.allow_local(true);
 
-        let result = downloader
-            .download(&manifest)
-            .await
-            .expect("Download failed with no Content-Length");
+        let result = downloader.download(&manifest).await?;
 
         assert_eq!(result.bytes, wasm_content);
         assert_eq!(result.computed_hash, expected_hash);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_download_local_denied_by_default() {
+    async fn test_download_local_denied_by_default() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
 
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
         // Default downloader (deny local)
-        let downloader = WasmDownloader::new();
+        let downloader = WasmDownloader::new()?;
         let result = downloader.download(&manifest).await;
 
         match result {
             Err(DownloadError::SecurityError(SecurityError::LoopbackDenied(_))) => {
                 // Success - access denied
+                Ok(())
             }
             res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
         }
     }
 
     #[tokio::test]
-    async fn test_redirect_success() {
+    async fn test_redirect_success() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
         let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
 
@@ -524,17 +533,15 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/redirect", mock_server.uri()));
 
-        let downloader = WasmDownloader::new().allow_local(true);
-        let result = downloader
-            .download(&manifest)
-            .await
-            .expect("Download failed with redirect");
+        let downloader = WasmDownloader::new()?.allow_local(true);
+        let result = downloader.download(&manifest).await?;
 
         assert_eq!(result.bytes, wasm_content);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_redirect_limit_exceeded() {
+    async fn test_redirect_limit_exceeded() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
 
         // Redirect loop
@@ -549,11 +556,11 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/loop", mock_server.uri()));
 
-        let downloader = WasmDownloader::new().allow_local(true);
+        let downloader = WasmDownloader::new()?.allow_local(true);
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::RedirectLimitExceeded) => {}
+            Err(DownloadError::RedirectLimitExceeded) => Ok(()),
             res => panic!("Expected RedirectLimitExceeded, got {:?}", res),
         }
     }

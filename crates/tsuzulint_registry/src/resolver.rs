@@ -48,19 +48,19 @@ pub struct PluginResolver {
 }
 
 impl PluginResolver {
-    pub fn new() -> Result<Self, CacheError> {
+    pub fn new() -> Result<Self, ResolveError> {
         Ok(Self {
             fetcher: ManifestFetcher::new(),
             cache: PluginCache::new()?,
-            downloader: WasmDownloader::new(),
+            downloader: WasmDownloader::new()?,
         })
     }
 
-    pub fn with_fetcher(fetcher: ManifestFetcher) -> Result<Self, CacheError> {
+    pub fn with_fetcher(fetcher: ManifestFetcher) -> Result<Self, ResolveError> {
         Ok(Self {
             fetcher,
             cache: PluginCache::new()?,
-            downloader: WasmDownloader::new(),
+            downloader: WasmDownloader::new()?,
         })
     }
 
@@ -245,10 +245,12 @@ mod tests {
             .with_base_url(mock_server.uri())
             .allow_local(true);
 
-        let downloader = WasmDownloader::new().allow_local(true);
+        let downloader = WasmDownloader::new()
+            .expect("Failed to create downloader")
+            .allow_local(true);
 
         let resolver = PluginResolver::with_fetcher(fetcher)
-            .unwrap()
+            .expect("Failed to create resolver")
             .with_downloader(downloader);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
@@ -290,10 +292,12 @@ mod tests {
             .await;
 
         let fetcher = ManifestFetcher::new().allow_local(true);
-        let downloader = WasmDownloader::new().allow_local(true);
+        let downloader = WasmDownloader::new()
+            .expect("Failed to create downloader")
+            .allow_local(true);
 
         let resolver = PluginResolver::with_fetcher(fetcher)
-            .unwrap()
+            .expect("Failed to create resolver")
             .with_downloader(downloader);
 
         let spec = PluginSpec::parse(&json!({
