@@ -194,11 +194,7 @@ impl WasmDownloader {
             };
 
             // 3. Perform Request (without following redirects)
-            let response = client
-                .get(url.clone())
-                .timeout(self.timeout)
-                .send()
-                .await?;
+            let response = client.get(url.clone()).timeout(self.timeout).send().await?;
 
             // 4. Handle Redirects
             if response.status().is_redirection()
