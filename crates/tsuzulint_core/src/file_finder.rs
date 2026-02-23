@@ -1,7 +1,7 @@
 use crate::error::LinterError;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::path::{Path, PathBuf};
-use tracing::info;
+use tracing::{debug, info, warn};
 use walkdir::WalkDir;
 
 pub struct FileFinder {
@@ -84,7 +84,7 @@ impl FileFinder {
                         files.push(abs_path);
                     }
                     Err(e) => {
-                        tracing::warn!(path = ?path, error = %e, "Failed to canonicalize direct file path");
+                        warn!(path = ?path, error = %e, "Failed to canonicalize direct file path");
                         continue;
                     }
                 }
@@ -102,7 +102,7 @@ impl FileFinder {
                 .build()
                 .map_err(|e| LinterError::config(format!("Failed to build globset: {}", e)))?;
 
-            for entry_res in WalkDir::new(base_dir).into_iter() {
+            for entry_res in WalkDir::new(base_dir).follow_links(false).into_iter() {
                 match entry_res {
                     Ok(entry) => {
                         let path = entry.path();
@@ -115,13 +115,13 @@ impl FileFinder {
                                     files.push(abs_path);
                                 }
                                 Err(e) => {
-                                    tracing::debug!(path = ?path, error = %e, "Failed to canonicalize discovered file path");
+                                    debug!(path = ?path, error = %e, "Failed to canonicalize discovered file path");
                                 }
                             }
                         }
                     }
                     Err(err) => {
-                        tracing::debug!(error = ?err, "WalkDir error scanning base_dir");
+                        debug!(error = ?err, "WalkDir error scanning base_dir");
                     }
                 }
             }
@@ -167,15 +167,20 @@ mod tests {
     #[test]
     fn test_file_finder_with_include_patterns() {
         let finder = FileFinder::new(&["**/*.md".to_string()], &[]).unwrap();
-        assert!(finder.include_globs.is_some());
-        assert!(finder.exclude_globs.is_none());
+        // Returns false (do not ignore) for matched inclusive files
+        assert!(!finder.should_ignore(Path::new("README.md")));
+        assert!(!finder.should_ignore(Path::new("docs/setup.md")));
+        // Returns true (ignore) for non-matched inclusive files
+        assert!(finder.should_ignore(Path::new("src/lib.rs")));
     }
 
     #[test]
     fn test_file_finder_with_exclude_patterns() {
         let finder = FileFinder::new(&[], &["**/node_modules/**".to_string()]).unwrap();
-        assert!(finder.include_globs.is_none());
-        assert!(finder.exclude_globs.is_some());
+        // Returns true (ignore) for excluded files
+        assert!(finder.should_ignore(Path::new("node_modules/pkg/index.js")));
+        // Returns false (do not ignore) for all other files
+        assert!(!finder.should_ignore(Path::new("src/code.js")));
     }
 
     #[test]

@@ -23,6 +23,7 @@ use tsuzulint_plugin::PluginHost;
 
 use crate::config::LinterConfig;
 use crate::error::LinterError;
+use crate::file_finder::FileFinder;
 use crate::file_linter::lint_content as lint_content_internal;
 use crate::file_linter::lint_file_internal;
 use crate::parallel_linter::lint_files as lint_files_parallel;
@@ -41,7 +42,7 @@ pub struct Linter {
     plugin_host: Mutex<PluginHost>,
     cache: Mutex<CacheManager>,
     dynamic_rules: Mutex<Vec<PathBuf>>,
-    file_finder: crate::file_finder::FileFinder,
+    file_finder: FileFinder,
 }
 
 impl Linter {
@@ -65,7 +66,7 @@ impl Linter {
         load_configured_rules(&config, &mut host);
 
         let config_hash = config.hash()?;
-        let file_finder = crate::file_finder::FileFinder::new(&config.include, &config.exclude)?;
+        let file_finder = FileFinder::new(&config.include, &config.exclude)?;
 
         Ok(Self {
             tokenizer,
