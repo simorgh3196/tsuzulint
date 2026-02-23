@@ -114,6 +114,21 @@ mod rules_commands {
             .success()
             .stderr(predicate::str::contains("added successfully"));
     }
+
+    #[test]
+    fn add_command_fails_for_invalid_extension() {
+        let temp_dir = TempDir::new().unwrap();
+        let txt_file = temp_dir.path().join("not-wasm.txt");
+        fs::write(&txt_file, "not a wasm").unwrap();
+
+        tsuzulint_cmd()
+            .arg("rules")
+            .arg("add")
+            .arg(&txt_file)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("expected .wasm"));
+    }
 }
 
 mod lint_command_formats {
