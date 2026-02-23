@@ -68,7 +68,10 @@ fn run(cli: Cli) -> Result<bool> {
         Commands::Init { force } => commands::init::run_init(*force).map(|_| false),
         Commands::Rules { command } => match command {
             RulesCommands::Create { name } => commands::rules::run_create_rule(name).map(|_| false),
-            RulesCommands::Add { path } => commands::rules::run_add_rule(path).map(|_| false),
+            RulesCommands::Add { path, r#as } => {
+                commands::rules::run_add_rule(path, r#as.as_deref(), cli.config.clone())
+                    .map(|_| false)
+            }
         },
         Commands::Lsp => commands::lsp::run_lsp().map(|_| false),
         Commands::Plugin { command } => match command {
