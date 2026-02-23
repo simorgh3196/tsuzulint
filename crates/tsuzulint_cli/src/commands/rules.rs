@@ -147,6 +147,21 @@ pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {{
     Ok(())
 }
 
+#[allow(dead_code)]
+fn validate_wasm_path(path: &Path) -> Result<PathBuf, AddRuleError> {
+    if !path.exists() {
+        return Err(AddRuleError::FileNotFound(path.to_path_buf()));
+    }
+
+    let ext = path.extension().map(|e| e.to_string_lossy().to_string());
+    if ext.as_deref() != Some("wasm") {
+        return Err(AddRuleError::InvalidExtension(ext));
+    }
+
+    path.canonicalize()
+        .map_err(|_| AddRuleError::FileNotFound(path.to_path_buf()))
+}
+
 pub fn run_add_rule(
     path: &Path,
     _alias: Option<&str>,
@@ -230,5 +245,39 @@ mod tests {
             PluginSource::GitHub { .. }
         ));
         assert!(alias.is_none());
+    }
+}
+
+#[cfg(test)]
+mod add_rule_tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_validate_wasm_path_valid() {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path().with_extension("wasm");
+        file.persist(&path).unwrap();
+
+        let result = validate_wasm_path(&path);
+        assert!(result.is_ok());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_validate_wasm_path_not_found() {
+        let result = validate_wasm_path(Path::new("nonexistent.wasm"));
+        assert!(matches!(result, Err(AddRuleError::FileNotFound(_))));
+    }
+
+    #[test]
+    fn test_validate_wasm_path_invalid_extension() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "test").unwrap();
+
+        let result = validate_wasm_path(file.path());
+        assert!(matches!(result, Err(AddRuleError::InvalidExtension(_))));
     }
 }
