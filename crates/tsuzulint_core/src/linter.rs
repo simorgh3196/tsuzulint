@@ -505,6 +505,44 @@ mod tests {
     }
 
     #[test]
+    fn test_discover_files_exclude_takes_priority_over_include() {
+        let temp_dir = tempdir().unwrap();
+        let included_file = temp_dir.path().join("docs").join("readme.md");
+        let excluded_file = temp_dir
+            .path()
+            .join("node_modules")
+            .join("docs")
+            .join("internal.md");
+
+        fs::create_dir_all(included_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(excluded_file.parent().unwrap()).unwrap();
+        fs::write(&included_file, "# Readme").unwrap();
+        fs::write(&excluded_file, "# Internal").unwrap();
+
+        let mut config = test_config_in(temp_dir.path());
+        // include only .md files
+        config.include = vec!["**/*.md".to_string()];
+        // but exclude node_modules — should win over include
+        config.exclude = vec!["**/node_modules/**".to_string()];
+
+        let linter = Linter::new(config).unwrap();
+        let files = linter
+            .discover_files(&["**/*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        assert!(
+            files.iter().any(|f| f.ends_with("readme.md")),
+            "included file should be discovered"
+        );
+        assert!(
+            !files
+                .iter()
+                .any(|f| f.to_string_lossy().contains("node_modules")),
+            "excluded file should not be discovered even though it matches include glob"
+        );
+    }
+
+    #[test]
     fn test_discover_files_deduplicates() {
         let temp_dir = tempdir().unwrap();
         let test_file = temp_dir.path().join("test.md");
