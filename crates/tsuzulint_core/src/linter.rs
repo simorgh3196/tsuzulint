@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tracing::{info, warn};
+use tracing::warn;
 use tsuzulint_cache::CacheManager;
 use tsuzulint_text::Tokenizer;
 
@@ -176,17 +176,6 @@ mod tests {
             path: temp_dir.path().to_string_lossy().to_string(),
         });
         (config, temp_dir)
-    }
-
-    fn test_config_in(base: &Path) -> LinterConfig {
-        let cache_dir = base.join(".cache");
-        std::fs::create_dir_all(&cache_dir).unwrap();
-        let mut config = LinterConfig::new();
-        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
-            enabled: true,
-            path: cache_dir.to_string_lossy().to_string(),
-        });
-        config
     }
 
     #[test]
