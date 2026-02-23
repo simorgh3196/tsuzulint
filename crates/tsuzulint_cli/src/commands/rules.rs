@@ -162,6 +162,58 @@ fn validate_wasm_path(path: &Path) -> Result<PathBuf, AddRuleError> {
         .map_err(|_| AddRuleError::FileNotFound(path.to_path_buf()))
 }
 
+#[allow(dead_code)]
+fn find_manifest(wasm_path: &Path) -> Option<PathBuf> {
+    let wasm_dir = wasm_path.parent()?;
+
+    let candidates = [
+        wasm_path.with_file_name("tsuzulint-rule.json"),
+        wasm_dir.join("tsuzulint-rule.json"),
+    ];
+
+    candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+#[allow(dead_code)]
+fn load_manifest(path: &Path) -> Result<tsuzulint_manifest::ExternalRuleManifest, AddRuleError> {
+    let content = std::fs::read_to_string(path).map_err(AddRuleError::ManifestReadError)?;
+
+    tsuzulint_manifest::validate_manifest(&content).map_err(AddRuleError::ManifestParseError)
+}
+
+#[allow(dead_code)]
+fn generate_minimal_manifest(
+    wasm_path: &Path,
+    alias: &str,
+) -> tsuzulint_manifest::ExternalRuleManifest {
+    use tsuzulint_manifest::{Artifacts, IsolationLevel, RuleMetadata};
+
+    let wasm_content = std::fs::read(wasm_path).unwrap_or_default();
+    let sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
+
+    tsuzulint_manifest::ExternalRuleManifest {
+        rule: RuleMetadata {
+            name: alias.to_string(),
+            version: "0.1.0".to_string(),
+            description: None,
+            repository: None,
+            license: None,
+            authors: vec![],
+            keywords: vec![],
+            fixable: false,
+            node_types: vec![],
+            isolation_level: IsolationLevel::Global,
+        },
+        artifacts: Artifacts {
+            wasm: "rule.wasm".to_string(),
+            sha256,
+        },
+        permissions: None,
+        tsuzulint: None,
+        options: None,
+    }
+}
+
 pub fn run_add_rule(
     path: &Path,
     _alias: Option<&str>,
@@ -279,5 +331,85 @@ mod add_rule_tests {
 
         let result = validate_wasm_path(file.path());
         assert!(matches!(result, Err(AddRuleError::InvalidExtension(_))));
+    }
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_find_manifest_sibling() {
+        let dir = TempDir::new().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        std::fs::write(&wasm_path, b"wasm").unwrap();
+        std::fs::write(&manifest_path, b"{}").unwrap();
+
+        let found = find_manifest(&wasm_path);
+        assert_eq!(found, Some(manifest_path));
+    }
+
+    #[test]
+    fn test_find_manifest_none() {
+        let dir = TempDir::new().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        std::fs::write(&wasm_path, b"wasm").unwrap();
+
+        let found = find_manifest(&wasm_path);
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_load_manifest_valid() {
+        let dir = TempDir::new().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let valid_manifest = r#"{
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0"
+            },
+            "artifacts": {
+                "wasm": "rule.wasm",
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+        }"#;
+        std::fs::write(&manifest_path, valid_manifest).unwrap();
+
+        let result = load_manifest(&manifest_path);
+        assert!(result.is_ok());
+        let manifest = result.unwrap();
+        assert_eq!(manifest.rule.name, "test-rule");
+        assert_eq!(manifest.rule.version, "1.0.0");
+    }
+
+    #[test]
+    fn test_load_manifest_invalid_json() {
+        let dir = TempDir::new().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        std::fs::write(&manifest_path, b"not valid json").unwrap();
+
+        let result = load_manifest(&manifest_path);
+        assert!(matches!(result, Err(AddRuleError::ManifestParseError(_))));
+    }
+
+    #[test]
+    fn test_generate_minimal_manifest() {
+        let dir = TempDir::new().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let wasm_content = b"\x00asm\x01\x00\x00\x00";
+        std::fs::write(&wasm_path, wasm_content).unwrap();
+
+        let manifest = generate_minimal_manifest(&wasm_path, "my-alias");
+
+        assert_eq!(manifest.rule.name, "my-alias");
+        assert_eq!(manifest.rule.version, "0.1.0");
+        assert_eq!(manifest.artifacts.wasm, "rule.wasm");
+        assert!(!manifest.artifacts.sha256.is_empty());
     }
 }
