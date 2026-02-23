@@ -99,7 +99,7 @@ impl FileFinder {
 
             for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
-                if path.is_file() && glob_set.is_match(path) {
+                if entry.file_type().is_file() && glob_set.is_match(path) {
                     if self.should_ignore(path) {
                         continue;
                     }
@@ -317,5 +317,37 @@ mod tests {
 
         let result = finder.discover_files(&["[invalid-glob".to_string()], Path::new("."));
         assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_discover_files_ignores_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = tempdir().unwrap();
+        let target_file = temp_dir.path().join("target.md");
+        let link_file = temp_dir.path().join("link.md");
+
+        fs::write(&target_file, "# Target").unwrap();
+        symlink(&target_file, &link_file).unwrap();
+
+        let finder = FileFinder::new(&[], &[]).unwrap();
+
+        let files = finder
+            .discover_files(&["*.md".to_string()], temp_dir.path())
+            .unwrap();
+
+        // Should only contain target.md, NOT link.md
+        assert_eq!(
+            files.len(),
+            1,
+            "Should ignore symlinks, but found: {:?}",
+            files
+        );
+        // Canonicalize target_file because discover_files might return absolute paths or relative
+        // Actually discover_files returns paths as yielded by WalkDir (absolute if base_dir is absolute)
+        // temp_dir.path() is absolute.
+        assert!(files.iter().any(|f| f.ends_with("target.md")));
+        assert!(!files.iter().any(|f| f.ends_with("link.md")));
     }
 }
