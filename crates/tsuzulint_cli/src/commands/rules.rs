@@ -22,6 +22,8 @@ pub enum AddRuleError {
     ManifestParseError(#[source] tsuzulint_manifest::ManifestError),
     #[error("Failed to read WASM file: {0}")]
     WasmReadError(#[source] std::io::Error),
+    #[error("Failed to write manifest: {0}")]
+    ManifestWriteError(#[source] std::io::Error),
 }
 
 pub fn run_create_rule(name: &str) -> Result<()> {
@@ -224,7 +226,7 @@ fn copy_plugin_files(
         ))
     })?;
 
-    std::fs::write(&target_manifest, manifest_json).map_err(AddRuleError::CopyError)?;
+    std::fs::write(&target_manifest, manifest_json).map_err(AddRuleError::ManifestWriteError)?;
 
     Ok(())
 }
