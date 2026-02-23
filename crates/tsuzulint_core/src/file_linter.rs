@@ -320,10 +320,8 @@ impl Parser for FileParser {
 }
 
 fn select_parser(extension: &str) -> FileParser {
-    let md_parser = MarkdownParser::new();
-
-    if md_parser.can_parse(extension) {
-        FileParser::Markdown(md_parser)
+    if MarkdownParser::supports_extension(extension) {
+        FileParser::Markdown(MarkdownParser::new())
     } else {
         FileParser::Text(PlainTextParser::new())
     }
@@ -442,5 +440,27 @@ mod tests {
 
         let parser_txt = select_parser("TXT");
         assert_eq!(parser_txt.name(), "text");
+    }
+
+    #[test]
+    fn test_file_parser_markdown_parse_returns_ast() {
+        let parser = select_parser("md");
+        let arena = AstArena::new();
+        let result = parser.parse(&arena, "# Hello");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_file_parser_text_parse_returns_ast() {
+        let parser = select_parser("txt");
+        let arena = AstArena::new();
+        let result = parser.parse(&arena, "Hello world");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_file_parser_markdown_extensions_contains_md() {
+        let parser = select_parser("md");
+        assert!(parser.extensions().contains(&"md"));
     }
 }

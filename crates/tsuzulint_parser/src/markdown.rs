@@ -29,6 +29,13 @@ impl MarkdownParser {
         ParseOptions::gfm()
     }
 
+    /// Checks if the extension is supported by this parser.
+    pub fn supports_extension(extension: &str) -> bool {
+        ["md", "markdown", "mdown", "mkdn", "mkd"]
+            .iter()
+            .any(|ext| ext.eq_ignore_ascii_case(extension))
+    }
+
     /// Converts an mdast node to TxtNode.
     fn convert_node<'a>(
         &self,
@@ -282,6 +289,10 @@ impl Parser for MarkdownParser {
 
     fn extensions(&self) -> &[&str] {
         &["md", "markdown", "mdown", "mkdn", "mkd"]
+    }
+
+    fn can_parse(&self, extension: &str) -> bool {
+        Self::supports_extension(extension)
     }
 
     fn parse<'a>(&self, arena: &'a AstArena, source: &str) -> Result<TxtNode<'a>, ParseError> {
