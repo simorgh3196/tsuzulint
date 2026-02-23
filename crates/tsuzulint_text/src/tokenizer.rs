@@ -95,39 +95,35 @@ impl Tokenizer {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use super::*;
+
+    static SHARED_TOKENIZER: LazyLock<Tokenizer> = LazyLock::new(|| Tokenizer::new().unwrap());
 
     #[test]
     fn test_tokenize_simple() {
-        let tokenizer = Tokenizer::new().unwrap();
-        let tokens = tokenizer.tokenize("こんにちは世界").unwrap();
-
+        let tokens = SHARED_TOKENIZER.tokenize("こんにちは世界").unwrap();
         assert_eq!(tokens[0].surface, "こんにちは");
         assert_eq!(tokens[1].surface, "世界");
     }
 
     #[test]
     fn test_tokenize_empty() {
-        let tokenizer = Tokenizer::new().unwrap();
-        let tokens = tokenizer.tokenize("").unwrap();
+        let tokens = SHARED_TOKENIZER.tokenize("").unwrap();
         assert!(tokens.is_empty());
     }
 
     #[test]
     fn test_tokenize_punctuation() {
-        let tokenizer = Tokenizer::new().unwrap();
-        let tokens = tokenizer.tokenize("。").unwrap();
+        let tokens = SHARED_TOKENIZER.tokenize("。").unwrap();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].surface, "。");
     }
 
     #[test]
     fn test_tokenize_mixed() {
-        let tokenizer = Tokenizer::new().unwrap();
-        let tokens = tokenizer.tokenize("Hello世界").unwrap();
-        // "Hello" might be one token or multiple depending on dictionary, but usually one UNK or alphabetic token
-        // Lindera default might tokenize "Hello" as "Hello" (UNK) and "世界" as "世界"
-        // Let's just check surfaces exist
+        let tokens = SHARED_TOKENIZER.tokenize("Hello世界").unwrap();
         let surfaces: Vec<&str> = tokens.iter().map(|t| t.surface.as_str()).collect();
         assert!(surfaces.contains(&"Hello"));
         assert!(surfaces.contains(&"世界"));
@@ -135,9 +131,8 @@ mod tests {
 
     #[test]
     fn test_tokenize_long() {
-        let tokenizer = Tokenizer::new().unwrap();
         let long_text = "あ".repeat(1000);
-        let tokens = tokenizer.tokenize(&long_text).unwrap();
+        let tokens = SHARED_TOKENIZER.tokenize(&long_text).unwrap();
         assert!(!tokens.is_empty());
     }
 }
