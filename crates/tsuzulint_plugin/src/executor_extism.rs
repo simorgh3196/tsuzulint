@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use extism::{
     CurrentPlugin, Error, Function, Manifest, Plugin, PluginBuilder, UserData, Val, ValType, Wasm,
@@ -27,14 +28,14 @@ const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
 /// Source of the rule (WASM bytes or file path).
 #[derive(Clone)]
 enum RuleSource {
-    Bytes(Vec<u8>),
+    Bytes(Arc<[u8]>),
     File(PathBuf),
 }
 
 impl RuleSource {
     fn to_wasm(&self) -> Wasm {
         match self {
-            RuleSource::Bytes(bytes) => Wasm::data(bytes.clone()),
+            RuleSource::Bytes(bytes) => Wasm::data(bytes.to_vec()),
             RuleSource::File(path) => Wasm::file(path),
         }
     }
@@ -204,7 +205,7 @@ impl Default for ExtismExecutor {
 impl RuleExecutor for ExtismExecutor {
     fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
         info!("Loading WASM rule ({} bytes)", wasm_bytes.len());
-        self.load_rule(RuleSource::Bytes(wasm_bytes.to_vec()))
+        self.load_rule(RuleSource::Bytes(Arc::from(wasm_bytes)))
     }
 
     fn load_file(&mut self, path: &Path) -> Result<LoadResult, PluginError> {
