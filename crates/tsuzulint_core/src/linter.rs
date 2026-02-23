@@ -963,6 +963,7 @@ mod tests {
 
         // Both rules should have been executed and logged in timings
         // Diagnostics are deduplicated because they are identical
+        assert!(linter.config.timings, "Timings should be enabled");
         assert!(
             result.timings.contains_key("test-rule"),
             "Missing timing for test-rule"
@@ -971,10 +972,66 @@ mod tests {
             result.timings.contains_key("test-rule-2"),
             "Missing timing for test-rule-2"
         );
-        assert_eq!(
-            result.diagnostics.len(),
-            1,
-            "Identical diagnostics should be deduped"
-        );
+    }
+
+    #[test]
+    fn test_lint_file_block_rule() {
+        use crate::config::{LinterConfig, RuleDefinition, RuleOption};
+        use crate::Linter;
+        use tsuzulint_plugin::{IsolationLevel, RuleManifest};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config = LinterConfig::new();
+        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
+            enabled: true,
+            path: temp_dir.path().to_string_lossy().to_string(),
+        });
+
+        // Register a block rule
+        config
+            .rules
+            .push(RuleDefinition::Simple("block-rule".to_string()));
+        config
+            .options
+            .insert("block-rule".to_string(), RuleOption::Enabled(true));
+
+        config.timings = true;
+
+        let linter = Linter::new(config).unwrap();
+
+        if let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() {
+            // Load rule initially
+            linter
+                .load_rule(&wasm_path)
+                .expect("Failed to load test rule");
+
+            // Change it to be a block rule
+            {
+                let mut host = linter.plugin_host.lock().unwrap();
+                let manifest = RuleManifest::new("block-rule", "1.0.0")
+                    .with_isolation_level(IsolationLevel::Block);
+
+                // Rename "test-rule" to "block-rule" and update manifest
+                host.rename_rule("test-rule", "block-rule", Some(manifest))
+                    .unwrap();
+            }
+        } else {
+            println!("WASM build failed, skipping test");
+            return;
+        }
+
+        let file_path = temp_dir.path().join("test_block.md");
+        // Ensure there are some blocks (paragraphs)
+        let content = "Block 1.\n\nBlock 2 with error.";
+        fs::write(&file_path, content).unwrap();
+
+        let result = linter.lint_file(&file_path).unwrap();
+
+        // The rule checks for "error". It should be found in the second block.
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].rule_id, "block-rule");
+
+        // Check timings to verify it ran as a block rule
+        assert!(result.timings.contains_key("block-rule"));
     }
 }

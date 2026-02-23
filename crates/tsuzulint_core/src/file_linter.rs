@@ -173,30 +173,27 @@ pub fn lint_file_internal(
                             }
                         } else if let Ok(node_raw) = to_raw_value(node, "block node") {
                             // Serialize request once for all rules running on this block
-                            match host.prepare_lint_request(
+                            if let Ok(request_bytes) = host.prepare_lint_request(
                                 &node_raw,
                                 &content,
                                 &tokens,
                                 &sentences,
                                 path.to_str(),
                             ) {
-                                Ok(request_bytes) => {
-                                    for rule in &block_rule_names {
-                                        let start = Instant::now();
-                                        match host.run_rule_with_prepared(rule, &request_bytes) {
-                                            Ok(diags) => block_diagnostics.extend(diags),
-                                            Err(e) => warn!("Rule '{}' failed: {}", rule, e),
-                                        }
-                                        if timings_enabled {
-                                            *timings
-                                                .entry(rule.clone())
-                                                .or_insert(Duration::new(0, 0)) += start.elapsed();
-                                        }
+                                for rule in &block_rule_names {
+                                    let start = Instant::now();
+                                    match host.run_rule_with_prepared(rule, &request_bytes) {
+                                        Ok(diags) => block_diagnostics.extend(diags),
+                                        Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                                    }
+                                    if timings_enabled {
+                                        *timings
+                                            .entry(rule.clone())
+                                            .or_insert(Duration::new(0, 0)) += start.elapsed();
                                     }
                                 }
-                                Err(e) => {
-                                    warn!("Failed to prepare lint request for block node: {}", e)
-                                }
+                            } else {
+                                warn!("Failed to prepare lint request for block node");
                             }
                         } else {
                             warn!("Failed to serialize/create RawValue for block node");
