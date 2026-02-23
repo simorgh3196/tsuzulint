@@ -1,0 +1,266 @@
+# tsuzulint_registry
+
+A crate responsible for plugin registry and package management. Fetches and caches plugins from GitHub, URLs, and local paths.
+
+## Overview
+
+`tsuzulint_registry` handles **plugin registry and package management** for the TsuzuLint project.
+
+### Key Responsibilities
+
+1. **External Rule Plugin Retrieval**: Fetch plugin manifests from GitHub, URLs, and local paths
+2. **WASM Artifact Downloads**: Safely download plugin WASM binaries
+3. **Cache Management**: Cache downloaded plugins locally for efficient reuse
+4. **Security Protection**: URL validation to prevent SSRF attacks, hash verification
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                      PluginResolver                              │
+│  (Central coordinator for plugin resolution)                     │
+└─────────────────────────────────────────────────────────────────┘
+          │                    │                    │
+          ▼                    ▼                    ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ ManifestFetcher │  │  WasmDownloader │  │   PluginCache   │
+│ (Manifest Fetch)│  │(WASM Download)  │  │ (Cache Manager) │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+          │                    │                    │
+          ▼                    ▼                    ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  PluginSource   │  │ HashVerifier    │  │  File System    │
+│ (Source Type)   │  │ (SHA256 Verify) │  │  ~/.cache/...   │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+          │                    │
+          ▼                    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    validate_url (Security)                       │
+│           SSRF Prevention: Loopback/Private IP Validation        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## PluginSource (Plugin Source)
+
+Supports 3 types of sources:
+
+```rust
+pub enum PluginSource {
+    /// GitHub repository: `owner/repo` or `owner/repo@version`
+    GitHub { owner: String, repo: String, version: Option<String> },
+    /// Direct URL
+    Url(String),
+    /// Local file path
+    Path(PathBuf),
+}
+```
+
+### GitHub Source
+
+- `owner/repo` → Fetch from latest release
+- `owner/repo@v1.2.3` → Fetch from specific version
+- URL format: `{base}/{owner}/{repo}/releases/download/v{version}/tsuzulint-rule.json`
+
+## Resolution Flow
+
+```text
+PluginSpec Parsing
+    ↓
+Cache Check
+    ├─ Hit → Return ResolvedPlugin
+    └─ Miss → Execute Fetch
+           ↓
+       Manifest Fetch
+           ↓
+       WASM Download
+           ↓
+       SHA256 Hash Verification
+           ↓
+       Cache Save
+           ↓
+       Return ResolvedPlugin
+```
+
+### PluginSpec Parse Formats
+
+```json
+// String format
+"owner/repo"
+"owner/repo@v1.0.0"
+
+// Object format
+{"github": "owner/repo", "as": "my-rule"}
+{"url": "https://example.com/manifest.json", "as": "external-rule"}
+{"path": "./local/rule", "as": "local-rule"}
+```
+
+## Cache Management
+
+### Cache Location
+
+`~/.cache/tsuzulint/plugins/` (Unix systems)
+
+### Directory Structure
+
+```text
+~/.cache/tsuzulint/plugins/
+├── owner/
+│   └── repo/
+│       └── v1.0.0/
+│           ├── rule.wasm
+│           └── tsuzulint-rule.json
+└── url/
+    └── {sha256_of_url}/
+        └── v1.0.0/
+            ├── rule.wasm
+            └── tsuzulint-rule.json
+```
+
+### Features
+
+- Path traversal attack prevention
+- Replace cached manifest's `artifacts.wasm` with local path
+- URL sources use SHA256 hash of URL as key
+
+## Security Features
+
+### SSRF Protection (`validate_url`)
+
+**Blocked by Default:**
+
+- `localhost` domain
+- IPv4 loopback (`127.0.0.0/8`)
+- IPv4 unspecified (`0.0.0.0`)
+- IPv4 private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
+- IPv4 link-local (`169.254.0.0/16`)
+- IPv6 loopback (`::1`)
+- IPv6 unspecified (`::`)
+- IPv6 unique local (`fc00::/7`)
+- IPv6 link-local (`fe80::/10`)
+- Non-HTTP schemes (`ftp://`, `file://`, etc.)
+
+**Allowed for Testing/Development:**
+
+```rust
+let fetcher = ManifestFetcher::new().allow_local(true);
+let downloader = WasmDownloader::new().allow_local(true);
+```
+
+### Hash Verification
+
+- Automatic SHA256 calculation of downloaded WASM
+- Comparison with manifest's `artifacts.sha256`
+- Returns `HashError::Mismatch` on mismatch
+
+### Path Traversal Protection
+
+**Local Path Sources:**
+
+- Absolute paths prohibited
+- `..` components prohibited
+- Verify normalized path is within manifest's parent directory
+
+**Cache:**
+
+- Validate `owner`, `repo`, `version` are single valid path components
+
+## WasmDownloader
+
+```rust
+pub struct WasmDownloader {
+    max_size: usize,          // Default: 50MB
+    timeout: Duration,        // Default: 60 seconds
+    allow_local: bool,        // Default: false
+}
+```
+
+**Features:**
+
+- Streaming download (supports large files)
+- Size limit checking (two-stage: pre-check and during streaming)
+- Timeout configuration
+- `{version}` placeholder substitution
+- Automatic hash calculation
+
+## Usage Examples
+
+### Basic Usage
+
+```rust
+use tsuzulint_registry::{PluginResolver, PluginSpec};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create resolver
+    let resolver = PluginResolver::new()?;
+    
+    // Resolve plugin from GitHub
+    let spec = PluginSpec::parse(&json!("simorgh3196/tsuzulint-rule-no-todo@v1.0.0"))?;
+    let resolved = resolver.resolve(&spec).await?;
+    
+    println!("WASM path: {:?}", resolved.wasm_path);
+    println!("Manifest path: {:?}", resolved.manifest_path);
+    println!("Alias: {}", resolved.alias);
+    
+    Ok(())
+}
+```
+
+### Custom Configuration
+
+```rust
+use tsuzulint_registry::downloader::WasmDownloader;
+use std::time::Duration;
+
+let downloader = WasmDownloader::with_options(
+    100 * 1024 * 1024,        // 100MB max size
+    Duration::from_secs(120), // 2 min timeout
+);
+```
+
+### CLI Usage
+
+```bash
+# Install from GitHub
+tzlint plugin install owner/repo
+
+# Specific version
+tzlint plugin install owner/repo@v1.0.0
+
+# With alias
+tzlint plugin install owner/repo --as my-rule
+
+# From URL
+tzlint plugin install --url https://example.com/rule.wasm --as external-rule
+
+# Clear cache
+tzlint plugin cache clean
+```
+
+## Module Structure
+
+| Module | Responsibility |
+| ------ | -------------- |
+| `lib.rs` | Entry point, public API re-exports |
+| `fetcher.rs` | Plugin manifest fetching |
+| `downloader.rs` | WASM binary download |
+| `resolver.rs` | Plugin resolution integration |
+| `cache.rs` | Local plugin cache |
+| `security.rs` | URL security validation |
+| `hash.rs` | SHA256 hash calculation and verification |
+| `error.rs` | Error type definitions |
+
+## Dependencies
+
+| Crate | Purpose |
+| ----- | ------- |
+| `tsuzulint_manifest` | Plugin manifest type definitions |
+| `reqwest` | HTTP client (with streaming support) |
+| `sha2` | SHA256 hash calculation |
+| `hex` | Hexadecimal encoding of hash values |
+| `futures-util` | Async streaming processing |
+| `dirs` | Cache directory retrieval |
+| `url` | URL parsing |
+| `tokio` | Async runtime |
+| `tracing` | Logging |
