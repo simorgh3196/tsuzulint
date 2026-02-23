@@ -5,8 +5,8 @@ use tracing::info;
 use walkdir::WalkDir;
 
 pub struct FileFinder {
-    pub include_globs: Option<GlobSet>,
-    pub exclude_globs: Option<GlobSet>,
+    include_globs: Option<GlobSet>,
+    exclude_globs: Option<GlobSet>,
 }
 
 impl FileFinder {
@@ -72,7 +72,10 @@ impl FileFinder {
 
         for pattern in patterns {
             let path = Path::new(pattern);
-            if path.exists() && path.is_file() {
+            if path
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_file())
+            {
                 if let Ok(abs_path) = path.canonicalize() {
                     if self.should_ignore(&abs_path) {
                         continue;
