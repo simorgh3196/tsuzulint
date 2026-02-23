@@ -4,12 +4,13 @@
 //! which internally uses wasmtime for JIT compilation.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use extism::{
     CurrentPlugin, Error, Function, Manifest, Plugin, PluginBuilder, UserData, Val, ValType, Wasm,
 };
+use sha2::{Digest, Sha256};
 use tracing::{debug, info};
 
 use crate::executor::{LoadResult, RuleExecutor};
@@ -27,17 +28,14 @@ const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
 
 /// Source of the rule (WASM bytes or file path).
 #[derive(Clone)]
-enum RuleSource {
-    Bytes(Arc<[u8]>),
-    File(PathBuf),
+struct RuleSource {
+    wasm: Arc<[u8]>,
+    hash: String,
 }
 
 impl RuleSource {
     fn to_wasm(&self) -> Wasm {
-        match self {
-            RuleSource::Bytes(bytes) => Wasm::data(bytes.to_vec()),
-            RuleSource::File(path) => Wasm::file(path),
-        }
+        Wasm::data(self.wasm.to_vec()).with_hash(&self.hash)
     }
 }
 
@@ -202,12 +200,30 @@ impl Default for ExtismExecutor {
 impl RuleExecutor for ExtismExecutor {
     fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
         info!("Loading WASM rule ({} bytes)", wasm_bytes.len());
-        self.load_rule(RuleSource::Bytes(Arc::from(wasm_bytes)))
+
+        let mut hasher = Sha256::new();
+        hasher.update(wasm_bytes);
+        let hash = hex::encode(hasher.finalize());
+
+        self.load_rule(RuleSource {
+            wasm: Arc::from(wasm_bytes),
+            hash,
+        })
     }
 
     fn load_file(&mut self, path: &Path) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
-        self.load_rule(RuleSource::File(path.to_path_buf()))
+        let wasm_bytes = std::fs::read(path)
+            .map_err(|e| PluginError::load(format!("Failed to read file: {}", e)))?;
+
+        let mut hasher = Sha256::new();
+        hasher.update(&wasm_bytes);
+        let hash = hex::encode(hasher.finalize());
+
+        self.load_rule(RuleSource {
+            wasm: Arc::from(wasm_bytes),
+            hash,
+        })
     }
 
     fn configure(
