@@ -23,6 +23,8 @@ pub enum AddRuleError {
     ManifestReadError(#[source] std::io::Error),
     #[error("Failed to parse manifest: {0}")]
     ManifestParseError(#[source] tsuzulint_manifest::ManifestError),
+    #[error("Failed to read WASM file: {0}")]
+    WasmReadError(#[source] std::io::Error),
 }
 
 pub fn run_create_rule(name: &str) -> Result<()> {
@@ -164,14 +166,11 @@ fn validate_wasm_path(path: &Path) -> Result<PathBuf, AddRuleError> {
 
 #[allow(dead_code)]
 fn find_manifest(wasm_path: &Path) -> Option<PathBuf> {
-    let wasm_dir = wasm_path.parent()?;
-
-    let candidates = [
-        wasm_path.with_file_name("tsuzulint-rule.json"),
-        wasm_dir.join("tsuzulint-rule.json"),
-    ];
-
-    candidates.into_iter().find(|candidate| candidate.exists())
+    let manifest_path = wasm_path.with_file_name("tsuzulint-rule.json");
+    if manifest_path.exists() {
+        return Some(manifest_path);
+    }
+    None
 }
 
 #[allow(dead_code)]
@@ -185,13 +184,13 @@ fn load_manifest(path: &Path) -> Result<tsuzulint_manifest::ExternalRuleManifest
 fn generate_minimal_manifest(
     wasm_path: &Path,
     alias: &str,
-) -> tsuzulint_manifest::ExternalRuleManifest {
+) -> Result<tsuzulint_manifest::ExternalRuleManifest, AddRuleError> {
     use tsuzulint_manifest::{Artifacts, IsolationLevel, RuleMetadata};
 
-    let wasm_content = std::fs::read(wasm_path).unwrap_or_default();
+    let wasm_content = std::fs::read(wasm_path).map_err(AddRuleError::WasmReadError)?;
     let sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
 
-    tsuzulint_manifest::ExternalRuleManifest {
+    Ok(tsuzulint_manifest::ExternalRuleManifest {
         rule: RuleMetadata {
             name: alias.to_string(),
             version: "0.1.0".to_string(),
@@ -211,7 +210,7 @@ fn generate_minimal_manifest(
         permissions: None,
         tsuzulint: None,
         options: None,
-    }
+    })
 }
 
 pub fn run_add_rule(
@@ -405,11 +404,18 @@ mod manifest_tests {
         let wasm_content = b"\x00asm\x01\x00\x00\x00";
         std::fs::write(&wasm_path, wasm_content).unwrap();
 
-        let manifest = generate_minimal_manifest(&wasm_path, "my-alias");
+        let manifest = generate_minimal_manifest(&wasm_path, "my-alias").unwrap();
 
         assert_eq!(manifest.rule.name, "my-alias");
         assert_eq!(manifest.rule.version, "0.1.0");
         assert_eq!(manifest.artifacts.wasm, "rule.wasm");
         assert!(!manifest.artifacts.sha256.is_empty());
+    }
+
+    #[test]
+    fn test_generate_minimal_manifest_missing_file() {
+        let wasm_path = PathBuf::from("/nonexistent/rule.wasm");
+        let result = generate_minimal_manifest(&wasm_path, "my-alias");
+        assert!(matches!(result, Err(AddRuleError::WasmReadError(_))));
     }
 }
