@@ -962,8 +962,7 @@ mod tests {
         let result = linter.lint_file(&file_path).unwrap();
 
         // Both rules should have been executed and logged in timings
-        // Diagnostics are deduplicated because they are identical
-        assert!(linter.config.timings, "Timings should be enabled");
+        // Each rule produces a diagnostic with its own rule_id, so no deduplication
         assert!(
             result.timings.contains_key("test-rule"),
             "Missing timing for test-rule"
@@ -971,6 +970,11 @@ mod tests {
         assert!(
             result.timings.contains_key("test-rule-2"),
             "Missing timing for test-rule-2"
+        );
+        assert_eq!(
+            result.diagnostics.len(),
+            2,
+            "Each rule should produce one diagnostic"
         );
     }
 
