@@ -46,9 +46,10 @@ jobs:
         with:
           components: clippy
           target: wasm32-wasip1
+          cache: false
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "clippy-v2"
+          shared-key: "clippy-v3"
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --profile ci -- -D warnings
 
@@ -64,10 +65,11 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: wasm32-wasip1
+          cache: false
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "test-${{ matrix.os }}-v2"
+          shared-key: "test-${{ matrix.os }}-v3"
           cache-on-failure: true
 
       - name: Install nextest
@@ -84,9 +86,10 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: wasm32-wasip1
+          cache: false
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "doctest-v2"
+          shared-key: "doctest-v3"
       - name: Run doctests
         run: cargo test --workspace --all-features --doc
 
@@ -102,10 +105,11 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: wasm32-wasip1
+          cache: false
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "build-${{ matrix.os }}-v2"
+          shared-key: "build-${{ matrix.os }}-v3"
           cache-on-failure: true
 
       - name: Build
@@ -119,9 +123,10 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: wasm32-unknown-unknown,wasm32-wasip1
+          cache: false
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "wasm-v2"
+          shared-key: "wasm-v3"
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build WASM
@@ -136,9 +141,10 @@ jobs:
         with:
           components: llvm-tools-preview
           target: wasm32-wasip1
+          cache: false
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "coverage-v2"
+          shared-key: "coverage-v3"
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Install nextest
