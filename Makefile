@@ -1,23 +1,27 @@
-.PHONY: all build release wasm build-all release-all test test-verbose lint fmt fmt-check clean
+.PHONY: all build release wasm build-all release-all test test-doc test-verbose lint fmt fmt-check clean
 
 # =============================================================================
 # Development (frequently used)
 # =============================================================================
 
 # Default: format, lint, and test
-all: fmt lint test
+all: fmt lint test test-doc
 
 # Build host (debug)
 build:
 	cargo build --workspace
 
-# Run all tests (host + PDK)
+# Run all tests with nextest (host + PDK)
 TARGET ?=
 test:
-	cargo test --workspace
+	cargo nextest run --workspace --all-features
 	cd rules && cargo test $(if $(TARGET),--target $(TARGET),) -p tsuzulint-rule-pdk
 
-# Run tests with output
+# Run doctests
+test-doc:
+	cargo test --workspace --all-features --doc
+
+# Run tests with output (falls back to cargo test for --nocapture)
 test-verbose:
 	cargo test --workspace -- --nocapture
 

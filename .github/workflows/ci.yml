@@ -62,8 +62,23 @@ jobs:
         with:
           target: wasm32-wasip1
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run tests
-        run: cargo test --workspace --all-features
+        run: cargo nextest run --workspace --all-features --profile ci
+
+  doctest:
+    name: Doctest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-wasip1
+
+      - name: Run doctests
+        run: cargo test --workspace --all-features --doc
 
   build:
     name: Build (${{ matrix.os }})
@@ -107,8 +122,10 @@ jobs:
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
       - name: Generate coverage report
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --all-features --profile ci --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
