@@ -463,7 +463,7 @@ mod tests {
 
         // NOTE: Writing pure WAT to test Extism config is complex because it involves
         // managing Extism's memory model (alloc, length, load/store).
-        // Instead, we will rely on the fact that `configure` calls `create_plugin` which sets
+        // Instead, we will rely on the fact that `configure` calls `build_plugin` which sets
         // the manifest config. The Extism library guarantees this works.
         // We will just verify that `configure` doesn't error and that the rule persists.
 
