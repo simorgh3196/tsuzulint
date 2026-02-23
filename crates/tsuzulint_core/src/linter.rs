@@ -23,6 +23,7 @@ use tsuzulint_plugin::PluginHost;
 
 use crate::config::LinterConfig;
 use crate::error::LinterError;
+use crate::file_finder::FileFinder;
 use crate::file_linter::lint_content as lint_content_internal;
 use crate::file_linter::lint_file_internal;
 use crate::parallel_linter::lint_files as lint_files_parallel;
@@ -41,6 +42,7 @@ pub struct Linter {
     plugin_host: Mutex<PluginHost>,
     cache: Mutex<CacheManager>,
     dynamic_rules: Mutex<Vec<PathBuf>>,
+    file_finder: FileFinder,
 }
 
 impl Linter {
@@ -64,6 +66,7 @@ impl Linter {
         load_configured_rules(&config, &mut host);
 
         let config_hash = config.hash()?;
+        let file_finder = FileFinder::new(&config.include, &config.exclude)?;
 
         Ok(Self {
             tokenizer,
@@ -72,6 +75,7 @@ impl Linter {
             plugin_host: Mutex::new(host),
             cache: Mutex::new(cache),
             dynamic_rules: Mutex::new(Vec::new()),
+            file_finder,
         })
     }
 
@@ -119,9 +123,7 @@ impl Linter {
 
     pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
         let base_dir = self.config.base_dir.as_deref().unwrap_or(Path::new("."));
-        let finder =
-            crate::file_finder::FileFinder::new(&self.config.include, &self.config.exclude)?;
-        let files = finder.discover_files(patterns, base_dir)?;
+        let files = self.file_finder.discover_files(patterns, base_dir)?;
         self.lint_files(&files)
     }
 
@@ -701,24 +703,18 @@ mod tests {
 
     #[test]
     fn test_lint_file_block_rule() {
-        use crate::Linter;
-        use crate::config::{LinterConfig, RuleDefinition, RuleOption};
         use tsuzulint_plugin::{IsolationLevel, RuleManifest};
 
-        let temp_dir = tempfile::tempdir().unwrap();
-        let mut config = LinterConfig::new();
-        config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
-            enabled: true,
-            path: temp_dir.path().to_string_lossy().to_string(),
-        });
+        let (mut config, temp_dir) = test_config();
 
         // Register a block rule
-        config
-            .rules
-            .push(RuleDefinition::Simple("block-rule".to_string()));
-        config
-            .options
-            .insert("block-rule".to_string(), RuleOption::Enabled(true));
+        config.rules.push(crate::config::RuleDefinition::Simple(
+            "block-rule".to_string(),
+        ));
+        config.options.insert(
+            "block-rule".to_string(),
+            crate::config::RuleOption::Enabled(true),
+        );
 
         config.timings = true;
 

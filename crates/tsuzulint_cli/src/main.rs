@@ -59,7 +59,7 @@ fn run(cli: Cli) -> Result<bool> {
         } => commands::lint::run_lint(
             &cli,
             patterns,
-            format,
+            *format,
             *fix,
             *dry_run,
             *timings,

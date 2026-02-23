@@ -63,9 +63,8 @@ async fn test_did_change_validation_frequency() {
     send_msg(&mut writer, &did_open).await;
 
     // Expect publishDiagnostics from didOpen
-    // We expect it relatively quickly, but allow more time for slow CI/Windows
     let mut got_diagnostics = false;
-    let timeout = tokio::time::sleep(Duration::from_secs(5));
+    let timeout = tokio::time::sleep(Duration::from_millis(500));
     tokio::pin!(timeout);
 
     loop {
@@ -100,8 +99,7 @@ async fn test_did_change_validation_frequency() {
 
     // 5. Wait for debounce (300ms) + some buffer
     // We expect at most 1 or 2 messages.
-    // Allow generous timeout for CI
-    let timeout = tokio::time::sleep(Duration::from_secs(2));
+    let timeout = tokio::time::sleep(Duration::from_millis(400));
     tokio::pin!(timeout);
 
     let mut diagnostics_count = 0;

@@ -173,6 +173,40 @@ mod lint_command_formats {
             .success()
             .stdout(predicate::str::contains("Checked").and(predicate::str::contains("files")));
     }
+
+    #[test]
+    fn rejects_invalid_format() {
+        let sample_md = fixtures_dir().join("sample.md");
+
+        tsuzulint_cmd()
+            .arg("lint")
+            .arg(&sample_md)
+            .arg("--format")
+            .arg("invalid")
+            .assert()
+            .failure()
+            .stderr(
+                predicate::str::contains("invalid value")
+                    .or(predicate::str::contains("possible values")),
+            );
+    }
+
+    #[test]
+    fn rejects_html_format() {
+        let sample_md = fixtures_dir().join("sample.md");
+
+        tsuzulint_cmd()
+            .arg("lint")
+            .arg(&sample_md)
+            .arg("--format")
+            .arg("html")
+            .assert()
+            .failure()
+            .stderr(
+                predicate::str::contains("invalid value")
+                    .or(predicate::str::contains("possible values")),
+            );
+    }
 }
 
 mod lint_command_fix {

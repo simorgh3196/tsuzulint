@@ -151,17 +151,17 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        handle_shutdown().await
+        handle_shutdown()
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let (uri, text, version) = handle_did_open(&self.state, params).await;
+        let (uri, text, version) = handle_did_open(&self.state, params);
 
         self.validate_document(uri, text, version).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        if let Some((uri, text, version)) = handle_did_change(&self.state, params).await {
+        if let Some((uri, text, version)) = handle_did_change(&self.state, params) {
             let backend = self.clone();
 
             spawn_debounced_validation(
@@ -180,7 +180,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        let (uri, text_opt) = handle_did_save(params).await;
+        let (uri, text_opt) = handle_did_save(params);
 
         if let Some(text) = text_opt {
             self.validate_document(uri, text, None).await;
@@ -192,7 +192,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let uri = handle_did_close(&self.state, params).await;
+        let uri = handle_did_close(&self.state, params);
 
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
@@ -325,7 +325,7 @@ mod tests {
         }
 
         let mut diagnostics_count = 0;
-        let timeout = tokio::time::sleep(Duration::from_secs(5));
+        let timeout = tokio::time::sleep(Duration::from_millis(500));
         tokio::pin!(timeout);
 
         loop {

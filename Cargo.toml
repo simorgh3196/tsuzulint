@@ -62,7 +62,7 @@ tower-lsp = "0.20"
 blake3 = "1.5"
 
 # CLI
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "cargo"] }
 
 # Error handling
 thiserror = "2.0"
