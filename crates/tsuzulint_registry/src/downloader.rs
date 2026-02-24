@@ -163,7 +163,17 @@ impl WasmDownloader {
                 if let Some(host) = url.host_str() {
                     let port = url.port_or_known_default().unwrap_or(80);
                     // Force a fresh resolution to avoid stale cache or rebinding
-                    let addrs: Vec<_> = lookup_host((host, port)).await?.collect();
+                    let addrs: Vec<_> =
+                        tokio::time::timeout(self.timeout, lookup_host((host, port)))
+                            .await
+                            .map_err(|_| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::TimedOut,
+                                    "DNS lookup timed out",
+                                )
+                            })??
+                            .collect();
+
                     if addrs.is_empty() {
                         return Err(DownloadError::DnsNoAddress(host.to_string()));
                     }
@@ -173,15 +183,11 @@ impl WasmDownloader {
                         check_ip(addr.ip())?;
                     }
 
-                    // Pin to the first safe IP
-                    // This prevents DNS rebinding attacks (TOCTOU) where the DNS record changes
-                    // between verification and the actual request.
-                    let safe_addr = addrs[0];
-
-                    // Create a new client pinned to this IP
+                    // Pin all validated IPs. This prevents DNS rebinding (TOCTOU) and allows
+                    // hyper to use the happy eyeballs algorithm for dual-stack hosts.
                     reqwest::Client::builder()
                         .redirect(reqwest::redirect::Policy::none())
-                        .resolve(host, safe_addr)
+                        .resolve_to_addrs(host, &addrs)
                         .build()
                         .map_err(|e| DownloadError::ClientBuildError(e.to_string()))?
                 } else {
@@ -586,21 +592,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_secure_download_with_pinning() -> Result<(), DownloadError> {
-        // This test exercises the secure path (allow_local = false)
-        // We use httpbin.org which is a public service that should pass the IP check
-        let manifest = create_dummy_manifest("https://httpbin.org/status/200".to_string());
+    async fn test_secure_download_rejects_private_ip_directly() -> Result<(), DownloadError> {
+        // Verify that a URL whose hostname resolves only to a private IP is rejected
+        // even when the URL string itself looks public.
+        // Uses a wiremock server (localhost) with allow_local = false so the DNS
+        // resolution step is exercised and LoopbackDenied is returned.
+        let mock_server = MockServer::start().await;
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::new()?; // Default is allow_local = false
+        let downloader = WasmDownloader::new()?; // allow_local = false by default
         let result = downloader.download(&manifest).await;
 
-        // We don't necessarily expect success (network might be flaky/offline),
-        // but we want to ensure it doesn't fail with a SecurityError (IP blocked)
-        // or a logic error in the new pinning code.
         match result {
-            Ok(_) => Ok(()),
-            Err(DownloadError::NetworkError(_)) => Ok(()), // Network error is fine, means code executed
-            Err(e) => panic!("Unexpected error type: {:?}", e),
+            Err(DownloadError::SecurityError(SecurityError::LoopbackDenied(_))) => Ok(()),
+            res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
         }
     }
 }
