@@ -158,34 +158,49 @@ impl WasmDownloader {
             // 2. DNS Resolution and IP Validation (SSRF protection)
             // Note: validate_url restricts to http/https when allow_local is false,
             // so a None host (e.g., file://) cannot reach this branch.
-            //
-            // SECURITY LIMITATION: DNS resolution is validated here, but the subsequent
-            // HTTP request performs its own DNS lookup. This creates a theoretical window
-            // for DNS rebinding attacks. However, this risk is considered acceptable because:
-            // - The timing window is extremely small (milliseconds between validation and request)
-            // - The attacker would need to control a DNS server and synchronize timing
-            // - Full mitigation would require pinning IPs to the HTTP client, which is
-            //   complex and not supported by the current reqwest API on RequestBuilder
-            if !self.allow_local
-                && let Some(host) = url.host_str()
-            {
-                let port = url.port_or_known_default().unwrap_or(80);
-                let addrs: Vec<_> = lookup_host((host, port)).await?.collect();
-                if addrs.is_empty() {
-                    return Err(DownloadError::DnsNoAddress(host.to_string()));
+
+            let client = if !self.allow_local {
+                if let Some(host) = url.host_str() {
+                    let port = url.port_or_known_default().unwrap_or(80);
+                    // Force a fresh resolution to avoid stale cache or rebinding
+                    let addrs: Vec<_> =
+                        tokio::time::timeout(self.timeout, lookup_host((host, port)))
+                            .await
+                            .map_err(|_| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::TimedOut,
+                                    "DNS lookup timed out",
+                                )
+                            })??
+                            .collect();
+
+                    if addrs.is_empty() {
+                        return Err(DownloadError::DnsNoAddress(host.to_string()));
+                    }
+
+                    // Verify all resolved IPs
+                    for addr in &addrs {
+                        check_ip(addr.ip())?;
+                    }
+
+                    // Pin all validated IPs. This prevents DNS rebinding (TOCTOU) and allows
+                    // hyper to use the happy eyeballs algorithm for dual-stack hosts.
+                    reqwest::Client::builder()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .resolve_to_addrs(host, &addrs)
+                        .build()
+                        .map_err(|e| DownloadError::ClientBuildError(e.to_string()))?
+                } else {
+                    // Fallback for schemes without host (shouldn't happen for http/s due to validation)
+                    self.client.clone()
                 }
-                for addr in addrs {
-                    check_ip(addr.ip())?;
-                }
-            }
+            } else {
+                // Testing mode: allow local addresses, skip pinning
+                self.client.clone()
+            };
 
             // 3. Perform Request (without following redirects)
-            let response = self
-                .client
-                .get(url.clone())
-                .timeout(self.timeout)
-                .send()
-                .await?;
+            let response = client.get(url.clone()).timeout(self.timeout).send().await?;
 
             // 4. Handle Redirects
             if response.status().is_redirection()
@@ -573,6 +588,49 @@ mod tests {
         match result {
             Err(DownloadError::RedirectLimitExceeded) => Ok(()),
             res => panic!("Expected RedirectLimitExceeded, got {:?}", res),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_secure_download_rejects_private_ip_directly() -> Result<(), DownloadError> {
+        // Verify that a URL whose hostname resolves only to a private IP is rejected
+        // even when the URL string itself looks public.
+        // Uses a wiremock server (localhost) with allow_local = false so the DNS
+        // resolution step is exercised and LoopbackDenied is returned.
+        let mock_server = MockServer::start().await;
+        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+
+        let downloader = WasmDownloader::new()?; // allow_local = false by default
+        let result = downloader.download(&manifest).await;
+
+        match result {
+            Err(DownloadError::SecurityError(SecurityError::LoopbackDenied(_))) => Ok(()),
+            res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_secure_download_builds_client_for_public_ip() -> Result<(), DownloadError> {
+        // This test exercises the code path where the IP check *passes* (secure mode),
+        // triggering the client construction and `resolve_to_addrs` pinning.
+        // We use TEST-NET-1 (192.0.2.1), which is a reserved public block.
+        // It passes check_ip() but is not routable/will timeout, allowing us to
+        // verify the client build logic without reaching an external server.
+
+        // Use a short timeout to make the test fast
+        let downloader =
+            WasmDownloader::with_options(DEFAULT_MAX_SIZE, Duration::from_millis(100))?;
+
+        let manifest = create_dummy_manifest("http://192.0.2.1/rule.wasm".to_string());
+        let result = downloader.download(&manifest).await;
+
+        // We expect a NetworkError (timeout/unreachable) or IoError, NOT a SecurityError.
+        match result {
+            Ok(_) => panic!("Expected failure for unreachable IP"),
+            Err(DownloadError::SecurityError(e)) => {
+                panic!("Should not fail security check: {:?}", e)
+            }
+            Err(_) => Ok(()), // Any other error means we attempted the connection
         }
     }
 }
