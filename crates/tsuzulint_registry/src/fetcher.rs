@@ -436,18 +436,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_redirect_invalid_utf8() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
         // Invalid UTF-8 in Location header: \xFF
         Mock::given(method("GET"))
             .and(path("/invalid-header"))
-            .respond_with(
-                ResponseTemplate::new(301)
-                    .append_header("Location", b"\xFF".as_slice())
-            )
+            .respond_with(ResponseTemplate::new(301).append_header("Location", b"\xFF".as_slice()))
             .mount(&mock_server)
             .await;
 
@@ -465,8 +462,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_redirect_security_check() {
-        use wiremock::{Mock, MockServer, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
 
@@ -545,7 +542,10 @@ mod tests {
             Err(FetchError::NetworkError(_)) | Err(FetchError::IoError(_)) => {
                 // Success - expected error
             }
-            res => panic!("Expected NetworkError/IoError for DNS failure, got {:?}", res),
+            res => panic!(
+                "Expected NetworkError/IoError for DNS failure, got {:?}",
+                res
+            ),
         }
     }
 }
