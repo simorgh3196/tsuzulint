@@ -18,6 +18,8 @@ use crate::{ParseError, Parser};
 /// - Frontmatter (optional)
 pub struct MarkdownParser;
 
+const EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkdn", "mkd"];
+
 impl MarkdownParser {
     /// Creates a new Markdown parser with default options.
     pub fn new() -> Self {
@@ -27,6 +29,13 @@ impl MarkdownParser {
     /// Gets default parse options (GFM).
     fn default_options() -> ParseOptions {
         ParseOptions::gfm()
+    }
+
+    /// Checks if the extension is supported by this parser.
+    pub fn supports_extension(extension: &str) -> bool {
+        EXTENSIONS
+            .iter()
+            .any(|ext| ext.eq_ignore_ascii_case(extension))
     }
 
     /// Converts an mdast node to TxtNode.
@@ -281,7 +290,11 @@ impl Parser for MarkdownParser {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["md", "markdown", "mdown", "mkdn", "mkd"]
+        EXTENSIONS
+    }
+
+    fn can_parse(&self, extension: &str) -> bool {
+        Self::supports_extension(extension)
     }
 
     fn parse<'a>(&self, arena: &'a AstArena, source: &str) -> Result<TxtNode<'a>, ParseError> {

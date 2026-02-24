@@ -285,13 +285,45 @@ pub fn lint_content(
     Ok(diagnostics)
 }
 
-fn select_parser(extension: &str) -> Box<dyn Parser> {
-    let md_parser = MarkdownParser::new();
+/// Enum wrapper for parsers to avoid heap allocation (Box<dyn Parser>) and dynamic dispatch.
+/// This improves performance in the hot path of file linting.
+enum FileParser {
+    Markdown(MarkdownParser),
+    Text(PlainTextParser),
+}
 
-    if md_parser.can_parse(extension) {
-        Box::new(md_parser)
+impl Parser for FileParser {
+    fn name(&self) -> &str {
+        match self {
+            Self::Markdown(p) => p.name(),
+            Self::Text(p) => p.name(),
+        }
+    }
+
+    fn extensions(&self) -> &[&str] {
+        match self {
+            Self::Markdown(p) => p.extensions(),
+            Self::Text(p) => p.extensions(),
+        }
+    }
+
+    fn parse<'a>(
+        &self,
+        arena: &'a AstArena,
+        source: &str,
+    ) -> Result<tsuzulint_ast::TxtNode<'a>, tsuzulint_parser::ParseError> {
+        match self {
+            Self::Markdown(p) => p.parse(arena, source),
+            Self::Text(p) => p.parse(arena, source),
+        }
+    }
+}
+
+fn select_parser(extension: &str) -> FileParser {
+    if MarkdownParser::supports_extension(extension) {
+        FileParser::Markdown(MarkdownParser::new())
     } else {
-        Box::new(PlainTextParser::new())
+        FileParser::Text(PlainTextParser::new())
     }
 }
 
@@ -408,5 +440,27 @@ mod tests {
 
         let parser_txt = select_parser("TXT");
         assert_eq!(parser_txt.name(), "text");
+    }
+
+    #[test]
+    fn test_file_parser_markdown_parse_returns_ast() {
+        let parser = select_parser("md");
+        let arena = AstArena::new();
+        let result = parser.parse(&arena, "# Hello");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_file_parser_text_parse_returns_ast() {
+        let parser = select_parser("txt");
+        let arena = AstArena::new();
+        let result = parser.parse(&arena, "Hello world");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_file_parser_markdown_extensions_contains_md() {
+        let parser = select_parser("md");
+        assert!(parser.extensions().contains(&"md"));
     }
 }
