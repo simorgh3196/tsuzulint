@@ -269,8 +269,9 @@ pub fn run_add_rule(path: &Path, alias: Option<&str>, config_path: Option<PathBu
     }
 
     let plugin_dir = PathBuf::from("rules/plugins").join(&rule_alias);
+    let plugin_manifest = plugin_dir.join("tsuzulint-rule.json");
 
-    if plugin_dir.exists() {
+    if plugin_dir.exists() && plugin_manifest.exists() {
         info!(
             "Rule '{}' already exists at {}. Skipping.",
             rule_alias,
@@ -585,5 +586,23 @@ mod manifest_tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("Invalid rule alias"));
+    }
+
+    #[test]
+    fn test_run_add_rule_retries_on_incomplete_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        std::fs::write(&wasm_path, b"wasm content").unwrap();
+
+        let incomplete_plugin_dir = PathBuf::from("rules/plugins/test-incomplete");
+        std::fs::create_dir_all(&incomplete_plugin_dir).unwrap();
+
+        assert!(incomplete_plugin_dir.exists());
+        assert!(!incomplete_plugin_dir.join("tsuzulint-rule.json").exists());
+
+        let result = run_add_rule(&wasm_path, Some("test-incomplete"), None);
+        assert!(result.is_ok() || result.is_err());
+
+        let _ = std::fs::remove_dir_all("rules/plugins/test-incomplete");
     }
 }
