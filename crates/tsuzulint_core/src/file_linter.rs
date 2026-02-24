@@ -428,7 +428,7 @@ mod tests {
 
         let provider = MockManifestProvider { manifests };
 
-        let loaded_rules = vec![
+        let loaded_rules = [
             global_name.to_string(),
             block_name.to_string(),
             disabled_name.to_string(),
