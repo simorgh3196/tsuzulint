@@ -23,12 +23,17 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Unique rule identifier (e.g., 'no-todo', 'sentence-length')",
-          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Unique rule identifier. Supports multilingual names (Japanese, Chinese, Korean, etc.). Must not contain whitespace or control characters.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[^\\s\\x00-\\x1F\\x7F-\\x9F]{1,64}$",
           "examples": [
             "no-todo",
             "sentence-length",
-            "no-doubled-joshi"
+            "no-doubled-joshi",
+            "敬語チェック",
+            "句子长度",
+            "문장길이"
           ]
         },
         "version": {

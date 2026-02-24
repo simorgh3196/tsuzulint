@@ -24,6 +24,11 @@ pub enum AddRuleError {
     WasmReadError(#[source] std::io::Error),
     #[error("Failed to write manifest: {0}")]
     ManifestWriteError(#[source] std::io::Error),
+    #[error(
+        "Invalid rule alias '{name}': must be 1-{} characters with no whitespace or control characters. Use --as to specify a valid alias.",
+        tsuzulint_manifest::MAX_RULE_NAME_LENGTH
+    )]
+    InvalidAlias { name: String },
 }
 
 pub fn run_create_rule(name: &str) -> Result<()> {
@@ -258,6 +263,10 @@ pub fn run_add_rule(path: &Path, alias: Option<&str>, config_path: Option<PathBu
         let manifest = generate_minimal_manifest(&wasm_path, &alias_str)?;
         (manifest, alias_str)
     };
+
+    if !tsuzulint_manifest::is_valid_rule_name(&rule_alias) {
+        return Err(AddRuleError::InvalidAlias { name: rule_alias }.into());
+    }
 
     let plugin_dir = PathBuf::from("rules/plugins").join(&rule_alias);
 
@@ -551,5 +560,30 @@ mod manifest_tests {
             saved_manifest["artifacts"]["sha256"].as_str().unwrap(),
             "wrong_hash_that_should_be_replaced"
         );
+    }
+
+    #[test]
+    fn test_run_add_rule_invalid_alias_with_space() {
+        let dir = tempfile::tempdir().unwrap();
+        let wasm_path = dir.path().join("My Rule.wasm");
+        std::fs::write(&wasm_path, b"wasm content").unwrap();
+
+        let result = run_add_rule(&wasm_path, None, None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid rule alias"));
+    }
+
+    #[test]
+    fn test_run_add_rule_invalid_alias_too_long() {
+        let dir = tempfile::tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        std::fs::write(&wasm_path, b"wasm content").unwrap();
+
+        let too_long_alias = "a".repeat(65);
+        let result = run_add_rule(&wasm_path, Some(&too_long_alias), None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid rule alias"));
     }
 }
