@@ -122,7 +122,7 @@ static SCHEMA: OnceLock<Validator> = OnceLock::new();
 /// This allows multilingual names (Japanese, Chinese, Korean, etc.) while
 /// preventing problematic characters.
 pub fn is_valid_rule_name(name: &str) -> bool {
-    if name.is_empty() || name.len() > MAX_RULE_NAME_LENGTH {
+    if name.is_empty() || name.chars().count() > MAX_RULE_NAME_LENGTH {
         return false;
     }
 
@@ -283,5 +283,17 @@ mod tests {
 
         let too_long = "a".repeat(65);
         assert!(!is_valid_rule_name(&too_long));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_max_length_multibyte() {
+        let max_cjk = "漢".repeat(64);
+        assert!(is_valid_rule_name(&max_cjk), "64 CJK chars should be valid");
+
+        let too_long_cjk = "漢".repeat(65);
+        assert!(
+            !is_valid_rule_name(&too_long_cjk),
+            "65 CJK chars should be invalid"
+        );
     }
 }
