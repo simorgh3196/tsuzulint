@@ -99,13 +99,13 @@ pub fn lint_file_internal(
         cache_guard.reconcile_blocks(path, &current_blocks, config_hash, &rule_versions)
     };
 
+    let (global_rule_names, block_rule_names) = get_classified_rules(host, enabled_rules);
+
     let mut global_diagnostics = Vec::new();
     let mut block_diagnostics = Vec::new();
     let mut timings = HashMap::new();
 
     {
-        let global_rule_names =
-            get_rule_names_by_isolation(host, enabled_rules, IsolationLevel::Global);
         if !global_rule_names.is_empty() {
             if global_rule_names.len() == 1 {
                 let rule = &global_rule_names[0];
@@ -132,21 +132,19 @@ pub fn lint_file_internal(
                         LinterError::Internal(format!("Failed to prepare lint request: {}", e))
                     })?;
 
-                for rule in global_rule_names {
+                for rule in &global_rule_names {
                     let start = Instant::now();
-                    match host.run_rule_with_prepared(&rule, &request_bytes) {
+                    match host.run_rule_with_prepared(rule, &request_bytes) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
                     if timings_enabled {
-                        timings.insert(rule, start.elapsed());
+                        timings.insert(rule.clone(), start.elapsed());
                     }
                 }
             }
         }
 
-        let block_rule_names =
-            get_rule_names_by_isolation(host, enabled_rules, IsolationLevel::Block);
         if !block_rule_names.is_empty() {
             let single_block_rule = block_rule_names.len() == 1;
             let mut block_index = 0;
@@ -214,9 +212,7 @@ pub fn lint_file_internal(
     // Filter out diagnostics that are covered by global rules (by checking rule ID).
     // Global rules take precedence, and their diagnostics should not be stored in block cache.
     // This is faster than hashing entire Diagnostic objects.
-    let global_rule_names_for_filter =
-        get_rule_names_by_isolation(host, enabled_rules, IsolationLevel::Global);
-    let global_rule_ids: HashSet<&str> = global_rule_names_for_filter
+    let global_rule_ids: HashSet<&str> = global_rule_names
         .iter()
         .map(|s| s.as_str())
         .collect();
@@ -335,22 +331,25 @@ fn to_raw_value<T: serde::Serialize>(
         .map_err(|e| LinterError::Internal(format!("Failed to serialize {}: {}", label, e)))
 }
 
-fn get_rule_names_by_isolation(
+fn get_classified_rules(
     host: &PluginHost,
     enabled_rules: &HashSet<&str>,
-    level: IsolationLevel,
-) -> Vec<String> {
-    let mut names = Vec::new();
+) -> (Vec<String>, Vec<String>) {
+    let mut global_rules = Vec::new();
+    let mut block_rules = Vec::new();
 
     for name in host.loaded_rules() {
-        if enabled_rules.contains(name.as_str())
-            && let Some(manifest) = host.get_manifest(name)
-            && manifest.isolation_level == level
-        {
-            names.push(name.clone());
+        if enabled_rules.contains(name.as_str()) {
+            if let Some(manifest) = host.get_manifest(name) {
+                match manifest.isolation_level {
+                    IsolationLevel::Global => global_rules.push(name.clone()),
+                    IsolationLevel::Block => block_rules.push(name.clone()),
+                }
+            }
         }
     }
-    names
+
+    (global_rules, block_rules)
 }
 
 fn filter_overridden_diagnostics(
