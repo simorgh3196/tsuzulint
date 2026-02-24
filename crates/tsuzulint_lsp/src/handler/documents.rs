@@ -38,11 +38,11 @@ pub fn handle_did_open(
 
 /// Handles the `textDocument/didChange` notification.
 ///
-/// Returns the URI, text, and version for debounced validation.
+/// Returns the URI and version for debounced validation.
 pub fn handle_did_change(
     state: &SharedState,
     params: DidChangeTextDocumentParams,
-) -> Option<(Url, String, i32)> {
+) -> Option<(Url, i32)> {
     let uri = params.text_document.uri;
     let version = params.text_document.version;
 
@@ -62,13 +62,13 @@ pub fn handle_did_change(
         docs.insert(
             uri.clone(),
             DocumentData {
-                text: text.clone(),
+                text,
                 version,
             },
         );
     }
 
-    Some((uri, text, version))
+    Some((uri, version))
 }
 
 /// Handles the `textDocument/didSave` notification.
