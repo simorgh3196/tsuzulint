@@ -59,13 +59,7 @@ pub fn handle_did_change(
                 return None;
             }
         };
-        docs.insert(
-            uri.clone(),
-            DocumentData {
-                text,
-                version,
-            },
-        );
+        docs.insert(uri.clone(), DocumentData { text, version });
     }
 
     Some((uri, version))

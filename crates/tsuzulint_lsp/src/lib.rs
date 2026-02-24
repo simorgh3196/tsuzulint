@@ -164,17 +164,12 @@ impl LanguageServer for Backend {
         if let Some((uri, version)) = handle_did_change(&self.state, params) {
             let backend = self.clone();
 
-            spawn_debounced_validation(
-                self.state.clone(),
-                uri.clone(),
-                version,
-                move |u, t, v| {
-                    let backend = backend.clone();
-                    tokio::spawn(async move {
-                        backend.validate_document(u, t, v).await;
-                    });
-                },
-            );
+            spawn_debounced_validation(self.state.clone(), uri.clone(), version, move |u, t, v| {
+                let backend = backend.clone();
+                tokio::spawn(async move {
+                    backend.validate_document(u, t, v).await;
+                });
+            });
         }
     }
 

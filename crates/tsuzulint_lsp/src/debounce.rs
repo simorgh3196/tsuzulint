@@ -14,12 +14,8 @@ pub const DEFAULT_DEBOUNCE_MS: u64 = 300;
 ///
 /// This function waits for the debounce period, then checks if the document
 /// version is still the same before retrieving the text and triggering validation.
-pub fn spawn_debounced_validation<F>(
-    state: SharedState,
-    uri: Url,
-    version: i32,
-    validate_fn: F,
-) where
+pub fn spawn_debounced_validation<F>(state: SharedState, uri: Url, version: i32, validate_fn: F)
+where
     F: FnOnce(Url, String, Option<i32>) + Send + 'static,
 {
     tokio::spawn(async move {
@@ -41,10 +37,8 @@ fn get_text_if_version(state: &BackendState, uri: &Url, version: i32) -> Option<
         }
     };
 
-    if let Some(doc) = docs.get(uri) {
-        if doc.version == version {
-            return Some(doc.text.clone());
-        }
+    if let Some(doc) = docs.get(uri).filter(|d| d.version == version) {
+        return Some(doc.text.clone());
     }
     None
 }
