@@ -2,9 +2,11 @@
 
 use crate::error::FetchError;
 use crate::manifest::{ExternalRuleManifest, validate_manifest};
-use crate::security::validate_url;
+use crate::security::{check_ip, validate_url};
 use reqwest::Url;
 use std::path::PathBuf;
+use std::time::Duration;
+use tokio::net::lookup_host;
 
 /// Source of a plugin manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,23 +127,99 @@ impl ManifestFetcher {
 
     /// Fetch manifest from a URL.
     async fn fetch_from_url(&self, url_str: &str) -> Result<ExternalRuleManifest, FetchError> {
-        let url =
-            Url::parse(url_str).map_err(|e| FetchError::NotFound(format!("Invalid URL: {}", e)))?;
+        let mut current_url_str = url_str.to_string();
+        let mut redirect_count = 0;
+        const MAX_REDIRECTS: u32 = 10;
+        const TIMEOUT: Duration = Duration::from_secs(10);
 
-        // Security check
-        validate_url(&url, self.allow_local)?;
+        loop {
+            if redirect_count >= MAX_REDIRECTS {
+                return Err(FetchError::RedirectLimitExceeded);
+            }
 
-        let response = self.client.get(url).send().await?;
+            let url = Url::parse(&current_url_str)
+                .map_err(|e| FetchError::NotFound(format!("Invalid URL: {}", e)))?;
 
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(FetchError::NotFound(format!(
-                "Manifest not found at {url_str}"
-            )));
+            // 1. Basic validation
+            validate_url(&url, self.allow_local)?;
+
+            let client = if !self.allow_local {
+                if let Some(host) = url.host_str() {
+                    let port = url.port_or_known_default().unwrap_or(80);
+
+                    // 2. DNS Resolution
+                    let addrs: Vec<_> = tokio::time::timeout(TIMEOUT, lookup_host((host, port)))
+                        .await
+                        .map_err(|_| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "DNS lookup timed out",
+                            )
+                        })??
+                        .collect();
+
+                    if addrs.is_empty() {
+                        return Err(FetchError::DnsNoAddress(host.to_string()));
+                    }
+
+                    // 3. IP Validation (SSRF protection)
+                    for addr in &addrs {
+                        check_ip(addr.ip())?;
+                    }
+
+                    // 4. Pinning for DNS Rebinding protection
+                    reqwest::Client::builder()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .resolve_to_addrs(host, &addrs)
+                        .build()
+                        .map_err(FetchError::NetworkError)?
+                } else {
+                    // Should be unreachable for http/https due to validate_url
+                    self.client.clone()
+                }
+            } else {
+                // Allow local: use default client but with no redirects to support manual handling
+                reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .map_err(FetchError::NetworkError)?
+            };
+
+            // 5. Perform Request
+            let response = client.get(url.clone()).timeout(TIMEOUT).send().await?;
+
+            // 6. Handle Redirects
+            if response.status().is_redirection() {
+                if let Some(location) = response.headers().get(reqwest::header::LOCATION) {
+                    let location_str = location.to_str().map_err(|_| {
+                        FetchError::InvalidRedirectUrl(
+                            "Location header is not valid UTF-8".to_string(),
+                        )
+                    })?;
+
+                    let next_url = url.join(location_str).map_err(|e| {
+                        FetchError::InvalidRedirectUrl(format!(
+                            "Failed to parse redirect URL: {}",
+                            e
+                        ))
+                    })?;
+
+                    current_url_str = next_url.to_string();
+                    redirect_count += 1;
+                    continue;
+                }
+            }
+
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Err(FetchError::NotFound(format!(
+                    "Manifest not found at {current_url_str}"
+                )));
+            }
+
+            let text = response.error_for_status()?.text().await?;
+            let manifest = validate_manifest(&text)?;
+            return Ok(manifest);
         }
-
-        let text = response.error_for_status()?.text().await?;
-        let manifest = validate_manifest(&text)?;
-        Ok(manifest)
     }
 
     /// Fetch manifest from a local file path.
@@ -277,6 +355,81 @@ mod tests {
         match result {
             Err(FetchError::SecurityError(SecurityError::LoopbackDenied(_))) => {}
             res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_redirect_loop() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/loop"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("Location", format!("{}/loop", mock_server.uri())),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let url = format!("{}/loop", mock_server.uri());
+        let result = fetcher.fetch(&PluginSource::Url(url)).await;
+
+        match result {
+            Err(FetchError::RedirectLimitExceeded) => {}
+            res => panic!("Expected RedirectLimitExceeded, got {:?}", res),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_redirect_success() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // Redirect /redirect -> /manifest.json
+        Mock::given(method("GET"))
+            .and(path("/redirect"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("Location", format!("{}/manifest.json", mock_server.uri())),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // Serve valid manifest at /manifest.json
+        let manifest_json = r#"{
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0",
+                "description": "Test Rule",
+                "fixable": false,
+                "node_types": [],
+                "isolation_level": "global"
+            },
+            "artifacts": {
+                "wasm": "http://example.com/rule.wasm",
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(manifest_json))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let url = format!("{}/redirect", mock_server.uri());
+        let result = fetcher.fetch(&PluginSource::Url(url)).await;
+
+        match result {
+            Ok(manifest) => assert_eq!(manifest.rule.name, "test-rule"),
+            Err(e) => panic!("Fetch failed: {:?}", e),
         }
     }
 }

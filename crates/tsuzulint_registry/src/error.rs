@@ -26,4 +26,16 @@ pub enum FetchError {
     /// Security error (SSRF protection).
     #[error("Security error: {0}")]
     SecurityError(#[from] SecurityError),
+
+    /// DNS resolution returned no addresses.
+    #[error("DNS resolution returned no addresses for host: {0}")]
+    DnsNoAddress(String),
+
+    /// Too many redirects.
+    #[error("Too many redirects")]
+    RedirectLimitExceeded,
+
+    /// Invalid redirect URL.
+    #[error("Invalid redirect URL: {0}")]
+    InvalidRedirectUrl(String),
 }
