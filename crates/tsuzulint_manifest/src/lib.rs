@@ -22,11 +22,11 @@ pub enum ManifestError {
 pub struct ExternalRuleManifest {
     pub rule: RuleMetadata,
     pub artifacts: Artifacts,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<Permissions>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tsuzulint: Option<TsuzuLintCompatibility>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<Value>,
 }
 
@@ -34,8 +34,11 @@ pub struct ExternalRuleManifest {
 pub struct RuleMetadata {
     pub name: String,
     pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     #[serde(default)]
     pub authors: Vec<String>,
@@ -103,6 +106,7 @@ pub enum NetworkAccess {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TsuzuLintCompatibility {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_version: Option<String>,
 }
 
@@ -334,5 +338,112 @@ mod tests {
         assert!(!is_valid_rule_name("my.rule"));
         assert!(!is_valid_rule_name(".hidden"));
         assert!(!is_valid_rule_name("rule."));
+    }
+
+    #[test]
+    fn test_serialize_skips_none_fields() {
+        let manifest = ExternalRuleManifest {
+            rule: RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: IsolationLevel::Global,
+            },
+            artifacts: Artifacts {
+                wasm: "rule.wasm".to_string(),
+                sha256: "abc123".to_string(),
+            },
+            permissions: None,
+            tsuzulint: None,
+            options: None,
+        };
+
+        let json = serde_json::to_string(&manifest).unwrap();
+
+        assert!(
+            !json.contains("null"),
+            "Serialized JSON should not contain null values: {}",
+            json
+        );
+        assert!(
+            !json.contains("description"),
+            "None description should be skipped"
+        );
+        assert!(
+            !json.contains("repository"),
+            "None repository should be skipped"
+        );
+        assert!(!json.contains("license"), "None license should be skipped");
+        assert!(
+            !json.contains("permissions"),
+            "None permissions should be skipped"
+        );
+        assert!(
+            !json.contains("tsuzulint"),
+            "None tsuzulint should be skipped"
+        );
+        assert!(!json.contains("options"), "None options should be skipped");
+
+        let roundtrip: ExternalRuleManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(manifest, roundtrip);
+    }
+
+    #[test]
+    fn test_serialize_includes_some_fields() {
+        let manifest = ExternalRuleManifest {
+            rule: RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: Some("A test rule".to_string()),
+                repository: None,
+                license: Some("MIT".to_string()),
+                authors: vec![],
+                keywords: vec![],
+                fixable: false,
+                node_types: vec![],
+                isolation_level: IsolationLevel::Global,
+            },
+            artifacts: Artifacts {
+                wasm: "rule.wasm".to_string(),
+                sha256: "abc123".to_string(),
+            },
+            permissions: None,
+            tsuzulint: Some(TsuzuLintCompatibility {
+                min_version: Some("0.1.0".to_string()),
+            }),
+            options: None,
+        };
+
+        let json = serde_json::to_string(&manifest).unwrap();
+
+        assert!(
+            json.contains("description"),
+            "Some description should be included"
+        );
+        assert!(json.contains("license"), "Some license should be included");
+        assert!(
+            json.contains("tsuzulint"),
+            "Some tsuzulint should be included"
+        );
+        assert!(
+            json.contains("min_version"),
+            "Some min_version should be included"
+        );
+        assert!(
+            !json.contains("null"),
+            "Serialized JSON should not contain null values"
+        );
+
+        let roundtrip: ExternalRuleManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            manifest, roundtrip,
+            "Round-trip serialization should preserve all fields"
+        );
     }
 }
