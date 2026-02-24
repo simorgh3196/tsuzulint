@@ -36,12 +36,8 @@ enum RuleSource {
 impl RuleSource {
     fn to_wasm(&self) -> Wasm {
         match self {
-            RuleSource::Bytes { wasm, hash } => {
-                Wasm::data(wasm.to_vec()).with_hash(hash)
-            }
-            RuleSource::File { path, hash } => {
-                Wasm::file(path).with_hash(hash)
-            }
+            RuleSource::Bytes { wasm, hash } => Wasm::data(wasm.to_vec()).with_hash(hash),
+            RuleSource::File { path, hash } => Wasm::file(path).with_hash(hash),
         }
     }
 }
