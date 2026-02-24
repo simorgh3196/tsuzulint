@@ -4574,6 +4574,7 @@ version = "0.1.0"
 dependencies = [
  "extism",
  "extism-manifest",
+ "hex",
  "insta",
  "pretty_assertions",
  "rkyv",
@@ -4581,6 +4582,7 @@ dependencies = [
  "rstest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",

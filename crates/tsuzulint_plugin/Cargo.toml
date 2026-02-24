@@ -20,10 +20,12 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tsuzulint_ast = { workspace = true }
 wat = { version = "1.245", optional = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
 
 [features]
 default = ["native"]
-native = ["dep:extism", "dep:extism-manifest"]
+native = ["dep:extism", "dep:extism-manifest", "dep:sha2", "dep:hex"]
 browser = ["dep:wasmi"]
 test-utils = ["dep:wat"]
 rkyv = ["dep:rkyv", "tsuzulint_ast/rkyv"]
