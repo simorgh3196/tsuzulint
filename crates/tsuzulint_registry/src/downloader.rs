@@ -618,7 +618,8 @@ mod tests {
         // verify the client build logic without reaching an external server.
 
         // Use a short timeout to make the test fast
-        let downloader = WasmDownloader::with_options(DEFAULT_MAX_SIZE, Duration::from_millis(100))?;
+        let downloader =
+            WasmDownloader::with_options(DEFAULT_MAX_SIZE, Duration::from_millis(100))?;
 
         let manifest = create_dummy_manifest("http://192.0.2.1/rule.wasm".to_string());
         let result = downloader.download(&manifest).await;
@@ -626,7 +627,9 @@ mod tests {
         // We expect a NetworkError (timeout/unreachable) or IoError, NOT a SecurityError.
         match result {
             Ok(_) => panic!("Expected failure for unreachable IP"),
-            Err(DownloadError::SecurityError(e)) => panic!("Should not fail security check: {:?}", e),
+            Err(DownloadError::SecurityError(e)) => {
+                panic!("Should not fail security check: {:?}", e)
+            }
             Err(_) => Ok(()), // Any other error means we attempted the connection
         }
     }
