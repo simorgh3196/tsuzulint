@@ -608,4 +608,26 @@ mod tests {
             res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
         }
     }
+
+    #[tokio::test]
+    async fn test_secure_download_builds_client_for_public_ip() -> Result<(), DownloadError> {
+        // This test exercises the code path where the IP check *passes* (secure mode),
+        // triggering the client construction and `resolve_to_addrs` pinning.
+        // We use TEST-NET-1 (192.0.2.1), which is a reserved public block.
+        // It passes check_ip() but is not routable/will timeout, allowing us to
+        // verify the client build logic without reaching an external server.
+
+        // Use a short timeout to make the test fast
+        let downloader = WasmDownloader::with_options(DEFAULT_MAX_SIZE, Duration::from_millis(100))?;
+
+        let manifest = create_dummy_manifest("http://192.0.2.1/rule.wasm".to_string());
+        let result = downloader.download(&manifest).await;
+
+        // We expect a NetworkError (timeout/unreachable) or IoError, NOT a SecurityError.
+        match result {
+            Ok(_) => panic!("Expected failure for unreachable IP"),
+            Err(DownloadError::SecurityError(e)) => panic!("Should not fail security check: {:?}", e),
+            Err(_) => Ok(()), // Any other error means we attempted the connection
+        }
+    }
 }
