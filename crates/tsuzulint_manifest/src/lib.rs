@@ -4,6 +4,9 @@ use serde_json::Value;
 use std::sync::OnceLock;
 use thiserror::Error;
 
+/// Maximum length for rule names
+pub const MAX_RULE_NAME_LENGTH: usize = 64;
+
 /// Error type for manifest operations.
 #[derive(Debug, Error)]
 pub enum ManifestError {
@@ -109,6 +112,31 @@ const RULE_SCHEMA_JSON: &str = include_str!("../../../schemas/v1/rule.json");
 
 static SCHEMA: OnceLock<Validator> = OnceLock::new();
 
+/// Validates a rule name against the schema requirements.
+///
+/// A valid rule name:
+/// - Is 1-64 characters long
+/// - Contains no whitespace characters
+/// - Contains no ASCII control characters (0x00-0x1F, 0x7F-0x9F)
+/// - Contains no path separators or traversal characters (/, \, .)
+///
+/// This allows multilingual names (Japanese, Chinese, Korean, etc.) while
+/// preventing path traversal attacks and problematic characters.
+pub fn is_valid_rule_name(name: &str) -> bool {
+    if name.is_empty() || name.chars().count() > MAX_RULE_NAME_LENGTH {
+        return false;
+    }
+
+    !name.chars().any(|c| {
+        c.is_whitespace()
+            || (c as u32) <= 0x1F
+            || ((c as u32) >= 0x7F && (c as u32) <= 0x9F)
+            || c == '/'
+            || c == '\\'
+            || c == '.'
+    })
+}
+
 /// Validates a manifest JSON string against the schema.
 pub fn validate_manifest(json_str: &str) -> Result<ExternalRuleManifest, ManifestError> {
     // 1. Parse JSON to Value
@@ -155,6 +183,25 @@ mod tests {
     }
 
     #[test]
+    fn test_valid_manifest_multilingual() {
+        let json = r#"{
+            "rule": {
+                "name": "敬語チェック",
+                "version": "1.0.0",
+                "description": "Check keigo usage"
+            },
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }
+        }"#;
+
+        let manifest =
+            validate_manifest(json).expect("Validation should pass for multilingual name");
+        assert_eq!(manifest.rule.name, "敬語チェック");
+    }
+
+    #[test]
     fn test_invalid_manifest_missing_field() {
         let json = r#"{
             "rule": {
@@ -191,5 +238,101 @@ mod tests {
         } else {
             panic!("Unexpected error type");
         }
+    }
+
+    #[test]
+    fn test_invalid_manifest_path_traversal() {
+        let json = r#"{
+            "rule": {
+                "name": "../../etc/malicious",
+                "version": "1.0.0"
+            },
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }
+        }"#;
+
+        let err = validate_manifest(json).expect_err("Validation should fail for path traversal");
+        if let ManifestError::ValidationError(msg) = err {
+            assert!(msg.contains("name"));
+        } else {
+            panic!("Unexpected error type");
+        }
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_basic() {
+        assert!(is_valid_rule_name("no-todo"));
+        assert!(is_valid_rule_name("sentence-length"));
+        assert!(is_valid_rule_name("a"));
+        assert!(is_valid_rule_name("rule123"));
+        assert!(is_valid_rule_name("MyRule"));
+        assert!(is_valid_rule_name("NO_TODO"));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_multilingual() {
+        assert!(is_valid_rule_name("敬語チェック"));
+        assert!(is_valid_rule_name("冗長表現"));
+        assert!(is_valid_rule_name("句子长度"));
+        assert!(is_valid_rule_name("문장길이"));
+        assert!(is_valid_rule_name("проверка"));
+        assert!(is_valid_rule_name("Überprüfung"));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_invalid_empty() {
+        assert!(!is_valid_rule_name(""));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_invalid_whitespace() {
+        assert!(!is_valid_rule_name("my rule"));
+        assert!(!is_valid_rule_name("my\trule"));
+        assert!(!is_valid_rule_name("my\nrule"));
+        assert!(!is_valid_rule_name(" myrule"));
+        assert!(!is_valid_rule_name("myrule "));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_invalid_control_chars() {
+        assert!(!is_valid_rule_name("my\x00rule"));
+        assert!(!is_valid_rule_name("my\x1Frule"));
+        assert!(!is_valid_rule_name("my\x7Frule"));
+        assert!(!is_valid_rule_name("my\u{9F}rule"));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_max_length() {
+        let max_name = "a".repeat(64);
+        assert!(is_valid_rule_name(&max_name));
+
+        let too_long = "a".repeat(65);
+        assert!(!is_valid_rule_name(&too_long));
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_max_length_multibyte() {
+        let max_cjk = "漢".repeat(64);
+        assert!(is_valid_rule_name(&max_cjk), "64 CJK chars should be valid");
+
+        let too_long_cjk = "漢".repeat(65);
+        assert!(
+            !is_valid_rule_name(&too_long_cjk),
+            "65 CJK chars should be invalid"
+        );
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_path_traversal() {
+        assert!(!is_valid_rule_name("../../etc/malicious"));
+        assert!(!is_valid_rule_name("..\\..\\windows"));
+        assert!(!is_valid_rule_name("rule/../../../etc"));
+        assert!(!is_valid_rule_name("my/rule"));
+        assert!(!is_valid_rule_name("my\\rule"));
+        assert!(!is_valid_rule_name("my.rule"));
+        assert!(!is_valid_rule_name(".hidden"));
+        assert!(!is_valid_rule_name("rule."));
     }
 }

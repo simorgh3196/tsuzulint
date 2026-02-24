@@ -96,6 +96,10 @@ pub enum RulesCommands {
     Add {
         /// Path to WASM file
         path: PathBuf,
+
+        /// Alias name for the rule
+        #[arg(long, value_name = "ALIAS")]
+        r#as: Option<String>,
     },
 }
 

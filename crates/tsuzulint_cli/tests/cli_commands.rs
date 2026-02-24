@@ -94,7 +94,7 @@ mod rules_commands {
             .arg("/nonexistent/rule.wasm")
             .assert()
             .failure()
-            .stderr(predicate::str::contains("File not found"));
+            .stderr(predicate::str::contains("WASM file not found"));
     }
 
     #[test]
@@ -109,9 +109,25 @@ mod rules_commands {
             .arg("rules")
             .arg("add")
             .arg(&wasm_file)
+            .current_dir(temp_dir.path())
             .assert()
             .success()
-            .stderr(predicate::str::contains("Rule added"));
+            .stderr(predicate::str::contains("added successfully"));
+    }
+
+    #[test]
+    fn add_command_fails_for_invalid_extension() {
+        let temp_dir = TempDir::new().unwrap();
+        let txt_file = temp_dir.path().join("not-wasm.txt");
+        fs::write(&txt_file, "not a wasm").unwrap();
+
+        tsuzulint_cmd()
+            .arg("rules")
+            .arg("add")
+            .arg(&txt_file)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("expected .wasm"));
     }
 }
 
