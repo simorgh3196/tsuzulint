@@ -118,16 +118,22 @@ static SCHEMA: OnceLock<Validator> = OnceLock::new();
 /// - Is 1-64 characters long
 /// - Contains no whitespace characters
 /// - Contains no ASCII control characters (0x00-0x1F, 0x7F-0x9F)
+/// - Contains no path separators or traversal characters (/, \, .)
 ///
 /// This allows multilingual names (Japanese, Chinese, Korean, etc.) while
-/// preventing problematic characters.
+/// preventing path traversal attacks and problematic characters.
 pub fn is_valid_rule_name(name: &str) -> bool {
     if name.is_empty() || name.chars().count() > MAX_RULE_NAME_LENGTH {
         return false;
     }
 
     !name.chars().any(|c| {
-        c.is_whitespace() || (c as u32) <= 0x1F || ((c as u32) >= 0x7F && (c as u32) <= 0x9F)
+        c.is_whitespace()
+            || (c as u32) <= 0x1F
+            || ((c as u32) >= 0x7F && (c as u32) <= 0x9F)
+            || c == '/'
+            || c == '\\'
+            || c == '.'
     })
 }
 
@@ -235,6 +241,27 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_manifest_path_traversal() {
+        let json = r#"{
+            "rule": {
+                "name": "../../etc/malicious",
+                "version": "1.0.0"
+            },
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }
+        }"#;
+
+        let err = validate_manifest(json).expect_err("Validation should fail for path traversal");
+        if let ManifestError::ValidationError(msg) = err {
+            assert!(msg.contains("name"));
+        } else {
+            panic!("Unexpected error type");
+        }
+    }
+
+    #[test]
     fn test_is_valid_rule_name_basic() {
         assert!(is_valid_rule_name("no-todo"));
         assert!(is_valid_rule_name("sentence-length"));
@@ -295,5 +322,17 @@ mod tests {
             !is_valid_rule_name(&too_long_cjk),
             "65 CJK chars should be invalid"
         );
+    }
+
+    #[test]
+    fn test_is_valid_rule_name_path_traversal() {
+        assert!(!is_valid_rule_name("../../etc/malicious"));
+        assert!(!is_valid_rule_name("..\\..\\windows"));
+        assert!(!is_valid_rule_name("rule/../../../etc"));
+        assert!(!is_valid_rule_name("my/rule"));
+        assert!(!is_valid_rule_name("my\\rule"));
+        assert!(!is_valid_rule_name("my.rule"));
+        assert!(!is_valid_rule_name(".hidden"));
+        assert!(!is_valid_rule_name("rule."));
     }
 }

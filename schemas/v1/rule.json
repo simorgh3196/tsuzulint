@@ -23,10 +23,10 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Unique rule identifier. Supports multilingual names (Japanese, Chinese, Korean, etc.). Must not contain whitespace or control characters.",
+          "description": "Unique rule identifier. Supports multilingual names (Japanese, Chinese, Korean, etc.). Must not contain whitespace, control characters, or path separators (/, \\, .).",
           "minLength": 1,
           "maxLength": 64,
-          "pattern": "^[^\\s\\x00-\\x1F\\x7F-\\x9F]{1,64}$",
+          "pattern": "^[^\\s\\x00-\\x1F\\x7F-\\x9F/\\\\.]{1,64}$",
           "examples": [
             "no-todo",
             "sentence-length",
