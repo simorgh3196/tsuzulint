@@ -212,10 +212,7 @@ pub fn lint_file_internal(
     // Filter out diagnostics that are covered by global rules (by checking rule ID).
     // Global rules take precedence, and their diagnostics should not be stored in block cache.
     // This is faster than hashing entire Diagnostic objects.
-    let global_rule_ids: HashSet<&str> = global_rule_names
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
+    let global_rule_ids: HashSet<&str> = global_rule_names.iter().map(|s| s.as_str()).collect();
 
     filter_overridden_diagnostics(&mut local_diagnostics, &global_rule_ids);
 
@@ -339,12 +336,13 @@ fn get_classified_rules(
     let mut block_rules = Vec::new();
 
     for name in host.loaded_rules() {
-        if enabled_rules.contains(name.as_str()) {
-            if let Some(manifest) = host.get_manifest(name) {
-                match manifest.isolation_level {
-                    IsolationLevel::Global => global_rules.push(name.clone()),
-                    IsolationLevel::Block => block_rules.push(name.clone()),
-                }
+        if !enabled_rules.contains(name.as_str()) {
+            continue;
+        }
+        if let Some(manifest) = host.get_manifest(name) {
+            match manifest.isolation_level {
+                IsolationLevel::Global => global_rules.push(name.clone()),
+                IsolationLevel::Block => block_rules.push(name.clone()),
             }
         }
     }
