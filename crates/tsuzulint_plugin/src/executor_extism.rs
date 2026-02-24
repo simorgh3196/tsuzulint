@@ -4,7 +4,7 @@
 //! which internally uses wasmtime for JIT compilation.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use extism::{
@@ -28,14 +28,21 @@ const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
 
 /// Source of the rule (WASM bytes or file path).
 #[derive(Clone)]
-struct RuleSource {
-    wasm: Arc<[u8]>,
-    hash: String,
+enum RuleSource {
+    Bytes { wasm: Arc<[u8]>, hash: String },
+    File { path: PathBuf, hash: String },
 }
 
 impl RuleSource {
     fn to_wasm(&self) -> Wasm {
-        Wasm::data(self.wasm.to_vec()).with_hash(&self.hash)
+        match self {
+            RuleSource::Bytes { wasm, hash } => {
+                Wasm::data(wasm.to_vec()).with_hash(hash)
+            }
+            RuleSource::File { path, hash } => {
+                Wasm::file(path).with_hash(hash)
+            }
+        }
     }
 }
 
@@ -205,7 +212,7 @@ impl RuleExecutor for ExtismExecutor {
         hasher.update(wasm_bytes);
         let hash = hex::encode(hasher.finalize());
 
-        self.load_rule(RuleSource {
+        self.load_rule(RuleSource::Bytes {
             wasm: Arc::from(wasm_bytes),
             hash,
         })
@@ -213,6 +220,9 @@ impl RuleExecutor for ExtismExecutor {
 
     fn load_file(&mut self, path: &Path) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
+
+        // Read the file to calculate the hash, but don't keep the bytes in memory
+        // if we are using RuleSource::File.
         let wasm_bytes = std::fs::read(path)
             .map_err(|e| PluginError::load(format!("Failed to read file: {}", e)))?;
 
@@ -220,8 +230,8 @@ impl RuleExecutor for ExtismExecutor {
         hasher.update(&wasm_bytes);
         let hash = hex::encode(hasher.finalize());
 
-        self.load_rule(RuleSource {
-            wasm: Arc::from(wasm_bytes),
+        self.load_rule(RuleSource::File {
+            path: path.to_path_buf(),
             hash,
         })
     }
