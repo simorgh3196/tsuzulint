@@ -85,9 +85,15 @@ pub fn lint_file_internal(
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
-    let tokens = tokenizer
-        .tokenize(&content)
-        .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
+    let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), host, enabled_rules);
+
+    let tokens = if needs_morphology {
+        tokenizer
+            .tokenize(&content)
+            .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?
+    } else {
+        Vec::new()
+    };
     let sentences = SentenceSplitter::split(&content, &ignore_ranges);
 
     let current_blocks = extract_blocks(&ast, &content);
@@ -267,9 +273,18 @@ pub fn lint_content(
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
-    let tokens = tokenizer
-        .tokenize(content)
-        .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?;
+    let needs_morphology = host
+        .loaded_rules()
+        .filter_map(|name| host.get_manifest(name))
+        .any(|m| m.needs_morphology());
+
+    let tokens = if needs_morphology {
+        tokenizer
+            .tokenize(content)
+            .map_err(|e| LinterError::Internal(format!("Tokenizer error: {}", e)))?
+    } else {
+        Vec::new()
+    };
     let sentences = SentenceSplitter::split(content, &ignore_ranges);
 
     let diagnostics =
@@ -374,6 +389,24 @@ fn filter_overridden_diagnostics(
     }
 }
 
+fn any_rule_needs_morphology<'a, I, P>(rules: I, host: &P, enabled_rules: &HashSet<&str>) -> bool
+where
+    I: Iterator<Item = &'a String>,
+    P: ManifestProvider,
+{
+    for name in rules {
+        if !enabled_rules.contains(name.as_str()) {
+            continue;
+        }
+        if let Some(manifest) = host.get_manifest(name)
+            && manifest.needs_morphology()
+        {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +432,8 @@ mod tests {
             node_types: vec![],
             isolation_level: level,
             schema: None,
+            languages: vec![],
+            capabilities: vec![],
         }
     }
 

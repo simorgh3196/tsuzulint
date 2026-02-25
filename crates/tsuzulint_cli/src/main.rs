@@ -14,6 +14,7 @@ mod commands;
 mod config;
 mod fix;
 mod output;
+mod utils;
 
 use cli::{CacheCommands, Cli, Commands, PluginCommands, RulesCommands};
 

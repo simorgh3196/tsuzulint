@@ -26,13 +26,13 @@ pub fn output_text(results: &[LintResult], timings: bool) {
     }
 
     let total_files = results.len();
-    let total_errors: usize = results.iter().map(|r| r.diagnostics.len()).sum();
+    let total_issues: usize = results.iter().map(|r| r.diagnostics.len()).sum();
     let cached = results.iter().filter(|r| r.from_cache).count();
 
     println!();
     println!(
         "Checked {} files ({} from cache), found {} issues",
-        total_files, cached, total_errors
+        total_files, cached, total_issues
     );
 
     if timings {

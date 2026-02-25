@@ -4475,6 +4475,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsuzulint-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "predicates",
+ "tempfile",
+]
+
+[[package]]
 name = "tsuzulint_ast"
 version = "0.1.0"
 dependencies = [
@@ -4603,6 +4612,7 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "futures-util",
+ "miette",
  "proptest",
  "reqwest 0.12.28",
  "serde",

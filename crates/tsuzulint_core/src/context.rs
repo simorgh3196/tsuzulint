@@ -351,20 +351,17 @@ impl<'a> LintContext<'a> {
         Some(&self.source[info.start as usize..end as usize])
     }
 
-    /// Extracts text content from a node and its children.
+    /// Extracts text content from a node and its children using iterative traversal.
     fn extract_text(node: &TxtNode<'a>) -> String {
         let mut text = String::new();
-        Self::collect_text(node, &mut text);
+        let mut stack = vec![node];
+        while let Some(n) = stack.pop() {
+            if let Some(v) = n.value {
+                text.push_str(v);
+            }
+            stack.extend(n.children.iter().rev());
+        }
         text
-    }
-
-    fn collect_text(node: &TxtNode<'a>, text: &mut String) {
-        if let Some(v) = node.value {
-            text.push_str(v);
-        }
-        for child in node.children {
-            Self::collect_text(child, text);
-        }
     }
 
     /// Builds document structure from an AST node.
@@ -1023,6 +1020,32 @@ mod tests {
 
         assert_eq!(structure.headings.len(), 1);
         assert_eq!(structure.headings[0].text, "HelloWorld");
+    }
+
+    #[test]
+    fn test_extract_text_from_deeply_nested_nodes() {
+        let arena = AstArena::new();
+        let text = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(0, 4), "deep"));
+
+        let mut nodes = vec![];
+        let mut current = *text;
+        for i in 0..100 {
+            let children = arena.alloc_slice_copy(&[current]);
+            let node = TxtNode::new_parent(NodeType::Emphasis, Span::new(0, 4 + i), children);
+            current = *arena.alloc(node);
+            nodes.push(current);
+        }
+
+        let doc_children = arena.alloc_slice_copy(&[current]);
+        let doc = arena.alloc(TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 104),
+            doc_children,
+        ));
+
+        let ctx = LintContext::with_ast("deep", doc);
+        let structure = ctx.structure();
+        assert!(structure.headings.is_empty());
     }
 }
 

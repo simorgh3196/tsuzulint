@@ -353,6 +353,78 @@ impl Token {
     pub fn has_pos(&self, pos_tag: &str) -> bool {
         self.pos.iter().any(|p| p == pos_tag)
     }
+
+    // === Part of Speech Accessors ===
+
+    /// Returns the major part of speech (pos[0]).
+    /// Example: "動詞", "名詞", "助詞"
+    pub fn major_pos(&self) -> Option<&str> {
+        self.pos.first().map(|s| s.as_str())
+    }
+
+    /// Returns the part of speech detail at the specified level.
+    /// level=0: major POS, level=1: detail1, level=2: detail2
+    pub fn pos_detail(&self, level: usize) -> Option<&str> {
+        self.pos.get(level).map(|s| s.as_str())
+    }
+
+    // === Conjugation Accessors (from detail field) ===
+
+    /// Returns the conjugation type (detail[0]).
+    /// Example: "五段・ワ行促音便", "一段"
+    pub fn conjugation_type(&self) -> Option<&str> {
+        self.detail.first().map(|s| s.as_str())
+    }
+
+    /// Returns the conjugation form (detail[1]).
+    /// Example: "連用形", "基本形", "連体形"
+    pub fn conjugation_form(&self) -> Option<&str> {
+        self.detail.get(1).map(|s| s.as_str())
+    }
+
+    /// Returns the base/dictionary form (detail[2]).
+    /// Example: "行う", "食べる"
+    pub fn base_form(&self) -> Option<&str> {
+        self.detail.get(2).map(|s| s.as_str())
+    }
+
+    /// Returns the reading in katakana (detail[3]).
+    /// Example: "コト", "オコナウ"
+    pub fn reading(&self) -> Option<&str> {
+        self.detail.get(3).map(|s| s.as_str())
+    }
+
+    // === Common POS Shortcuts ===
+
+    /// Returns true if this token is a verb.
+    pub fn is_verb(&self) -> bool {
+        self.major_pos() == Some("動詞")
+    }
+
+    /// Returns true if this token is a noun.
+    pub fn is_noun(&self) -> bool {
+        self.major_pos() == Some("名詞")
+    }
+
+    /// Returns true if this token is a particle.
+    pub fn is_particle(&self) -> bool {
+        self.major_pos() == Some("助詞")
+    }
+
+    /// Returns true if this token is an auxiliary verb.
+    pub fn is_auxiliary_verb(&self) -> bool {
+        self.major_pos() == Some("助動詞")
+    }
+
+    /// Returns true if this token is an adjective.
+    pub fn is_adjective(&self) -> bool {
+        self.major_pos() == Some("形容詞")
+    }
+
+    /// Returns true if this token is in 連用形 (renyoukei) form.
+    pub fn is_renyoukei(&self) -> bool {
+        self.conjugation_form() == Some("連用形")
+    }
 }
 
 /// A sentence from text analysis.
@@ -540,6 +612,31 @@ impl Fix {
     }
 }
 
+// ============================================================================
+// Language and Capability Types
+// ============================================================================
+
+/// Supported languages for text analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum KnownLanguage {
+    #[default]
+    Ja,
+    En,
+    // Zh, // Chinese (not yet implemented)
+    // Ko, // Korean (not yet implemented)
+}
+
+/// Required analysis capabilities for a rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Capability {
+    /// Morphological analysis (tokenization).
+    Morphology,
+    /// Sentence boundary detection.
+    Sentences,
+}
+
 /// Rule manifest for registration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleManifest {
@@ -555,6 +652,12 @@ pub struct RuleManifest {
     /// Node types this rule is interested in.
     #[serde(default)]
     pub node_types: Vec<String>,
+    /// Supported languages.
+    #[serde(default)]
+    pub languages: Vec<KnownLanguage>,
+    /// Required analysis capabilities.
+    #[serde(default)]
+    pub capabilities: Vec<Capability>,
 }
 
 impl RuleManifest {
@@ -566,6 +669,8 @@ impl RuleManifest {
             description: None,
             fixable: false,
             node_types: Vec::new(),
+            languages: Vec::new(),
+            capabilities: Vec::new(),
         }
     }
 
@@ -584,6 +689,18 @@ impl RuleManifest {
     /// Sets the node types this rule handles.
     pub fn with_node_types(mut self, node_types: Vec<String>) -> Self {
         self.node_types = node_types;
+        self
+    }
+
+    /// Sets the supported languages.
+    pub fn with_languages(mut self, languages: Vec<KnownLanguage>) -> Self {
+        self.languages = languages;
+        self
+    }
+
+    /// Sets the required analysis capabilities.
+    pub fn with_capabilities(mut self, capabilities: Vec<Capability>) -> Self {
+        self.capabilities = capabilities;
         self
     }
 }
@@ -1713,5 +1830,182 @@ mod tests {
         assert_eq!(ctx.tokens.len(), 1);
         assert_eq!(ctx.sentences.len(), 1);
         assert_eq!(ctx.tokens[0].surface, "は");
+    }
+
+    // ============================================================================
+    // Tests for Token Accessors
+    // ============================================================================
+
+    #[test]
+    fn token_major_pos() {
+        let token = Token::new(
+            "は",
+            vec!["助詞".to_string(), "係助詞".to_string()],
+            TextSpan::new(0, 3),
+        );
+        assert_eq!(token.major_pos(), Some("助詞"));
+    }
+
+    #[test]
+    fn token_pos_detail() {
+        let token = Token::new(
+            "は",
+            vec!["助詞".to_string(), "係助詞".to_string()],
+            TextSpan::new(0, 3),
+        );
+        assert_eq!(token.pos_detail(0), Some("助詞"));
+        assert_eq!(token.pos_detail(1), Some("係助詞"));
+        assert_eq!(token.pos_detail(2), None);
+    }
+
+    #[test]
+    fn token_conjugation_accessors() {
+        let token =
+            Token::new("行う", vec!["動詞".to_string()], TextSpan::new(0, 9)).with_detail(vec![
+                "五段・ワ行促音便".to_string(),
+                "連用形".to_string(),
+                "行う".to_string(),
+                "オコナウ".to_string(),
+            ]);
+        assert_eq!(token.conjugation_type(), Some("五段・ワ行促音便"));
+        assert_eq!(token.conjugation_form(), Some("連用形"));
+        assert_eq!(token.base_form(), Some("行う"));
+        assert_eq!(token.reading(), Some("オコナウ"));
+    }
+
+    #[test]
+    fn token_accessors_empty_pos_and_detail_return_none() {
+        let token = Token::new("x", vec![], TextSpan::new(0, 1));
+        assert!(token.major_pos().is_none());
+        assert!(token.pos_detail(0).is_none());
+        assert!(token.pos_detail(1).is_none());
+        assert!(token.conjugation_type().is_none());
+        assert!(token.conjugation_form().is_none());
+        assert!(token.base_form().is_none());
+        assert!(token.reading().is_none());
+        assert!(!token.is_verb());
+        assert!(!token.is_renyoukei());
+    }
+
+    #[test]
+    fn token_pos_shortcuts() {
+        let verb = Token::new("行う", vec!["動詞".to_string()], TextSpan::new(0, 9));
+        assert!(verb.is_verb());
+        assert!(!verb.is_noun());
+        assert!(!verb.is_particle());
+
+        let noun = Token::new("私", vec!["名詞".to_string()], TextSpan::new(0, 3));
+        assert!(noun.is_noun());
+        assert!(!noun.is_verb());
+
+        let particle = Token::new("は", vec!["助詞".to_string()], TextSpan::new(0, 3));
+        assert!(particle.is_particle());
+        assert!(!particle.is_verb());
+
+        let aux_verb = Token::new("だ", vec!["助動詞".to_string()], TextSpan::new(0, 3));
+        assert!(aux_verb.is_auxiliary_verb());
+        assert!(!aux_verb.is_verb());
+
+        let adjective = Token::new("良い", vec!["形容詞".to_string()], TextSpan::new(0, 6));
+        assert!(adjective.is_adjective());
+    }
+
+    #[test]
+    fn token_is_renyoukei() {
+        let renyoukei = Token::new("行き", vec!["動詞".to_string()], TextSpan::new(0, 6))
+            .with_detail(vec!["五段".to_string(), "連用形".to_string()]);
+        assert!(renyoukei.is_renyoukei());
+
+        let not_renyoukei = Token::new("行う", vec!["動詞".to_string()], TextSpan::new(0, 9))
+            .with_detail(vec!["五段".to_string(), "基本形".to_string()]);
+        assert!(!not_renyoukei.is_renyoukei());
+    }
+
+    // ============================================================================
+    // Tests for KnownLanguage and Capability
+    // ============================================================================
+
+    #[test]
+    fn known_language_serialization() {
+        assert_eq!(serde_json::to_string(&KnownLanguage::Ja).unwrap(), "\"ja\"");
+        assert_eq!(serde_json::to_string(&KnownLanguage::En).unwrap(), "\"en\"");
+    }
+
+    #[test]
+    fn known_language_default_is_japanese() {
+        assert_eq!(KnownLanguage::default(), KnownLanguage::Ja);
+    }
+
+    #[test]
+    fn known_language_deserialization() {
+        let lang: KnownLanguage = serde_json::from_str("\"ja\"").unwrap();
+        assert_eq!(lang, KnownLanguage::Ja);
+
+        let lang: KnownLanguage = serde_json::from_str("\"en\"").unwrap();
+        assert_eq!(lang, KnownLanguage::En);
+    }
+
+    #[test]
+    fn capability_serialization() {
+        assert_eq!(
+            serde_json::to_string(&Capability::Morphology).unwrap(),
+            "\"morphology\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Capability::Sentences).unwrap(),
+            "\"sentences\""
+        );
+    }
+
+    #[test]
+    fn capability_deserialization() {
+        let cap: Capability = serde_json::from_str("\"morphology\"").unwrap();
+        assert_eq!(cap, Capability::Morphology);
+
+        let cap: Capability = serde_json::from_str("\"sentences\"").unwrap();
+        assert_eq!(cap, Capability::Sentences);
+    }
+
+    #[test]
+    fn rule_manifest_with_languages_and_capabilities() {
+        let manifest = RuleManifest::new("test-rule", "1.0.0")
+            .with_languages(vec![KnownLanguage::Ja])
+            .with_capabilities(vec![Capability::Morphology]);
+
+        assert_eq!(manifest.languages, vec![KnownLanguage::Ja]);
+        assert_eq!(manifest.capabilities, vec![Capability::Morphology]);
+    }
+
+    #[test]
+    fn rule_manifest_json_with_languages_and_capabilities() {
+        let manifest = RuleManifest::new("test-rule", "1.0.0")
+            .with_languages(vec![KnownLanguage::Ja, KnownLanguage::En])
+            .with_capabilities(vec![Capability::Morphology, Capability::Sentences]);
+
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(json.contains("\"languages\":[\"ja\",\"en\"]"));
+        assert!(json.contains("\"capabilities\":[\"morphology\",\"sentences\"]"));
+    }
+
+    #[test]
+    fn rule_manifest_deserialize_with_languages_and_capabilities() {
+        let json = r#"{
+            "name": "test-rule",
+            "version": "1.0.0",
+            "languages": ["ja"],
+            "capabilities": ["morphology"]
+        }"#;
+
+        let manifest: RuleManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.name, "test-rule");
+        assert_eq!(manifest.languages, vec![KnownLanguage::Ja]);
+        assert_eq!(manifest.capabilities, vec![Capability::Morphology]);
+    }
+
+    #[test]
+    fn rule_manifest_defaults_empty_languages_and_capabilities() {
+        let manifest = RuleManifest::new("test", "1.0.0");
+        assert!(manifest.languages.is_empty());
+        assert!(manifest.capabilities.is_empty());
     }
 }
