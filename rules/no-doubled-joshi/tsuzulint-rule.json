@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
   "rule": {
     "name": "no-doubled-joshi",
-    "version": "2.0.0",
+    "version": "1.0.0",
     "description": "Detect repeated Japanese particles (助詞)",
     "repository": "https://github.com/simorgh3196/tsuzulint",
     "license": "MIT",

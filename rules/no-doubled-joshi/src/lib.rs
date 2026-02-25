@@ -39,7 +39,7 @@ use tsuzulint_rule_pdk::{
 };
 
 const RULE_ID: &str = "no-doubled-joshi";
-const VERSION: &str = "2.0.0";
+const VERSION: &str = "1.0.0";
 
 const DEFAULT_SEPARATOR_CHARACTERS: &[&str] = &[".", "．", "。", "?", "!", "？", "！"];
 const DEFAULT_COMMA_CHARACTERS: &[&str] = &["、", "，"];
@@ -112,6 +112,12 @@ fn create_particle_key(token: &Token) -> String {
     }
 }
 
+/// 助詞の例外ルールを判定する。
+///
+/// 以下の助詞は重複を許容する:
+/// - 「の」（連体化）: 修飾関係を示す
+/// - 「を」（格助詞）: 目的語を示す
+/// - 「て」（接続助詞）: 接続を示す
 fn is_exception_particle(token: &Token) -> bool {
     let surface = token.surface.as_str();
     let subtype = token.pos_detail(1);
@@ -124,6 +130,10 @@ fn is_exception_particle(token: &Token) -> bool {
     }
 }
 
+/// 並立助詞かどうかを判定する。
+///
+/// 「たり」「や」「か」などの並立助詞は、
+/// 列挙のために連続して使用されるため許容する。
 fn is_parallel_particle(token: &Token) -> bool {
     token.pos_detail(1) == Some("並立助詞")
 }
@@ -168,6 +178,10 @@ fn extract_particles_from_tokens(tokens: &[Token], config: &Config) -> Vec<Parti
     particles
 }
 
+/// 連続する助詞を結合して連語として扱う。
+///
+/// 例: 「に」+「は」→「には」（連語）
+/// これにより、「には」と「には」の重複を正しく検出できる。
 fn concat_adjacent_particles(particles: Vec<ParticleInfo>) -> Vec<ParticleInfo> {
     let mut result = Vec::new();
     let mut current: Option<ParticleInfo> = None;
@@ -193,6 +207,10 @@ fn concat_adjacent_particles(particles: Vec<ParticleInfo>) -> Vec<ParticleInfo> 
     result
 }
 
+/// 「かどうか」パターンかどうかを判定する。
+///
+/// 「〜するかどうか検討する」のような表現では、
+/// 「か」が連続するが、意味的に問題ないため許容する。
 fn is_ka_douka_pattern(particles: &[&ParticleInfo], all_tokens: &[Token]) -> bool {
     if particles.len() != 2 {
         return false;
@@ -567,12 +585,12 @@ mod tests {
 
     #[test]
     fn version_bumped() {
-        assert_eq!(VERSION, "2.0.0");
+        assert_eq!(VERSION, "1.0.0");
     }
 
     // ============================================================================
-    // textlint-compatible test cases
-    // Reference: https://github.com/textlint-ja/textlint-rule-no-doubled-joshi/blob/master/test/no-doubled-joshi-test.ts
+    // textlint互換テストケース
+    // 参考: https://github.com/textlint-ja/textlint-rule-no-doubled-joshi/blob/master/test/no-doubled-joshi-test.ts
     // ============================================================================
 
     fn create_token(surface: &str, pos: Vec<&str>, start: u32, end: u32) -> Token {
@@ -603,11 +621,11 @@ mod tests {
         }
     }
 
-    // Valid cases - should NOT produce errors
+    // 正常系: エラーにならないケース
 
     #[test]
     fn valid_no_exception() {
-        // "の" (連体化) is an exception
+        // 「の」（連体化）は例外扱い
         let config = Config::default();
         let tokens = vec![
             create_token("既存", vec!["名詞"], 0, 6),
@@ -617,13 +635,13 @@ mod tests {
             create_token("利用", vec!["名詞", "サ変接続"], 18, 24),
         ];
         let particles = extract_particles_from_tokens(&tokens, &config);
-        // Both "の" should be filtered out as exceptions
+        // 両方の「の」が例外としてフィルタリングされる
         assert_eq!(particles.len(), 0);
     }
 
     #[test]
     fn valid_wo_exception() {
-        // "を" (格助詞) is an exception
+        // 「を」（格助詞）は例外扱い
         let config = Config::default();
         let tokens = vec![
             create_token("オブジェクト", vec!["名詞"], 0, 18),
@@ -639,8 +657,8 @@ mod tests {
 
     #[test]
     fn valid_different_subtypes() {
-        // "と" with different subtypes (格助詞 vs 接続助詞) should not conflict
-        // Also includes "で" (格助詞) as another particle
+        // 「と」の細分類が異なる場合（格助詞 vs 接続助詞）は別の助詞として扱う
+        // 「で」（格助詞）も別の助詞として含まれる
         let config = Config::default();
         let tokens = vec![
             create_token("ターミナル", vec!["名詞"], 0, 15),
@@ -653,9 +671,9 @@ mod tests {
             create_token("画面", vec!["名詞"], 45, 51),
         ];
         let particles = extract_particles_from_tokens(&tokens, &config);
-        // 3 particles: で, と(格助詞), と(接続助詞)
+        // 3つの助詞: で, と(格助詞), と(接続助詞)
         assert_eq!(particles.len(), 3);
-        // Find the two "と" particles and verify they have different keys
+        // 2つの「と」を見つけて、キーが異なることを確認
         let to_particles: Vec<&ParticleInfo> =
             particles.iter().filter(|p| p.surface == "と").collect();
         assert_eq!(to_particles.len(), 2);
@@ -664,19 +682,19 @@ mod tests {
 
     #[test]
     fn valid_comma_increases_interval() {
-        // "、" increases interval
+        // 「、」は間隔を増やす
         let config = Config::default();
         let source = "これがiPhone、これがAndroidです。";
         let prev = create_particle("が", "が:助詞.格助詞", 6, 9, 0, "これ", Some("格助詞"));
         let curr = create_particle("が", "が:助詞.格助詞", 21, 24, 1, "これ", Some("格助詞"));
 
         let interval = calculate_interval(&prev, &curr, source, &config);
-        assert!(interval >= 1); // Comma adds to interval
+        assert!(interval >= 1); // 読点が間隔に加算される
     }
 
     #[test]
     fn valid_parallel_particles() {
-        // 並立助詞 is allowed
+        // 並立助詞は許容される
         let config = Config::default();
         let tokens = vec![
             create_token("登っ", vec!["動詞"], 0, 6),
@@ -686,14 +704,14 @@ mod tests {
         ];
         let particles = extract_particles_from_tokens(&tokens, &config);
         assert_eq!(particles.len(), 2);
-        // Both are parallel particles, should be allowed
+        // 両方とも並立助詞
         assert!(particles[0].pos_subtype == Some("並立助詞".to_string()));
         assert!(particles[1].pos_subtype == Some("並立助詞".to_string()));
     }
 
     #[test]
     fn valid_ka_douka_pattern() {
-        // "かどうか" pattern is allowed
+        // 「かどうか」パターンは許容される
         let config = Config::default();
         let tokens = vec![
             create_token("これ", vec!["名詞"], 0, 6),
@@ -709,14 +727,14 @@ mod tests {
             particles.iter().filter(|p| p.surface == "か").collect();
         assert_eq!(ka_particles.len(), 2);
 
-        // Check ka_douka pattern
+        // 「かどうか」パターンを確認
         let ka_refs: Vec<&ParticleInfo> = ka_particles.iter().map(|p| *p).collect();
         assert!(is_ka_douka_pattern(&ka_refs, &tokens));
     }
 
     #[test]
     fn valid_te_connection() {
-        // "て" (接続助詞) is an exception
+        // 「て」（接続助詞）は例外
         let config = Config::default();
         let tokens = vec![
             create_token("まず", vec!["副詞"], 0, 6),
@@ -727,14 +745,14 @@ mod tests {
             create_token("て", vec!["助詞", "接続助詞"], 27, 30),
         ];
         let particles = extract_particles_from_tokens(&tokens, &config);
-        // Only "は" should remain, "て" are exceptions
+        // 「は」のみ残り、「て」は例外として除外される
         assert_eq!(particles.len(), 1);
         assert_eq!(particles[0].surface, "は");
     }
 
     #[test]
     fn valid_rengo_different_keys() {
-        // "に" and "には" are different
+        // 「に」と「には」は異なる
         let config = Config::default();
         let tokens = vec![
             create_token("その", vec!["連体詞"], 0, 6),
@@ -751,13 +769,13 @@ mod tests {
             create_token("は", vec!["助詞", "係助詞"], 54, 57),
         ];
         let particles = extract_particles_from_tokens(&tokens, &config);
-        // After concat, "には" becomes a single compound particle
+        // 連結後、「には」は1つの連語になる
         let concatenated = concat_adjacent_particles(particles);
-        // Should have "には" as compound
+        // 「には」が連語として含まれる
         assert!(concatenated.iter().any(|p| p.surface == "には"));
     }
 
-    // Invalid cases - should produce errors
+    // 異常系: エラーになるケース
 
     #[test]
     fn invalid_doubled_ha() {
@@ -805,7 +823,7 @@ mod tests {
 
     #[test]
     fn invalid_strict_mode() {
-        // In strict mode, "の" (連体化) is NOT an exception
+        // strictモードでは「の」（連体化）は例外ではない
         let config = Config {
             strict: true,
             ..Default::default()
@@ -819,7 +837,7 @@ mod tests {
         ];
 
         let particles = extract_particles_from_tokens(&tokens, &config);
-        assert_eq!(particles.len(), 2); // In strict mode, "の" is not filtered
+        assert_eq!(particles.len(), 2); // strictモードでは「の」はフィルタされない
 
         let source = "既存のコードの利用";
         let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
@@ -828,7 +846,7 @@ mod tests {
 
     #[test]
     fn invalid_strict_mode_adjacent() {
-        // In strict mode, adjacent same particles are detected even without comma
+        // strictモードでは、読点がなくても隣接する同じ助詞を検出
         let config = Config {
             strict: true,
             ..Default::default()
@@ -852,7 +870,7 @@ mod tests {
         assert_eq!(de_particles.len(), 2);
 
         let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
-        // In strict mode, "で" should be detected (no comma between them)
+        // strictモードでは「で」が検出される（読点なし）
         assert!(diagnostics.iter().any(|d| d.message.contains("で")));
     }
 
@@ -880,7 +898,7 @@ mod tests {
 
     #[test]
     fn invalid_rengo_doubled() {
-        // "には" + "には" should be detected
+        // 「には」+「には」は検出される
         let config = Config::default();
         let source = "文字列にはそこには問題がある。";
         let tokens = vec![
@@ -906,7 +924,7 @@ mod tests {
 
     #[test]
     fn options_allow() {
-        // "も" is allowed via options
+        // 「も」はオプションで許可
         let config = Config {
             allow: vec!["も".to_string()],
             ..Default::default()
@@ -919,32 +937,32 @@ mod tests {
         ];
 
         let particles = extract_particles_from_tokens(&tokens, &config);
-        assert_eq!(particles.len(), 0); // "も" is filtered by allow
+        assert_eq!(particles.len(), 0); // 「も」はallowでフィルタされる
     }
 
     #[test]
     fn options_custom_separator() {
-        // Custom separator character
+        // カスタム区切り文字
         let config = Config {
             separator_characters: vec!["♪".to_string()],
             ..Default::default()
         };
-        // With ♪ as separator, "これはペンです♪これは鉛筆です♪" should be 2 sentences
-        // But our rule works on tokens, so we test the separator logic
+        // ♪を区切り文字として、「これはペンです♪これは鉛筆です♪」は2文になる
+        // ルールはトークン単位で動作するため、区切り文字ロジックをテスト
         let source = "これはペンです";
         let prev = create_particle("は", "は:助詞.係助詞", 3, 6, 0, "これ", Some("係助詞"));
 
-        // Check that ♪ returns MAX interval (treated as sentence boundary)
+        // ♪が間にある場合、MAX間隔（文境界として扱われる）を返す
         let source_with_separator = "これはペンです♪";
         let curr_after_sep =
             create_particle("は", "は:助詞.係助詞", 21, 24, 1, "これ", Some("係助詞"));
         let interval = calculate_interval(&prev, &curr_after_sep, source_with_separator, &config);
-        // If we had ♪ in between, it would return MAX
+        // ♪が間にあればMAXを返す
     }
 
     #[test]
     fn options_empty_comma_characters() {
-        // Without comma characters, comma does NOT increase interval
+        // 読点文字がない場合、読点は間隔を増やさない
         let config = Config {
             comma_characters: vec![],
             ..Default::default()
@@ -954,7 +972,7 @@ mod tests {
         let curr = create_particle("が", "が:助詞.格助詞", 21, 24, 1, "これ", Some("格助詞"));
 
         let interval = calculate_interval(&prev, &curr, source, &config);
-        // Without comma, interval should be 0 (chars between: "iPhone")
+        // 読点がない場合、間隔は0（間の文字: "iPhone"）
         assert_eq!(interval, 0);
     }
 }
