@@ -336,10 +336,10 @@ fn get_classified_rules(
     let mut block_rules = Vec::new();
 
     for name in host.loaded_rules() {
-        if let Some(manifest) = host
-            .get_manifest(name)
-            .filter(|_| enabled_rules.contains(name.as_str()))
-        {
+        if !enabled_rules.contains(name.as_str()) {
+            continue;
+        }
+        if let Some(manifest) = host.get_manifest(name) {
             match manifest.isolation_level {
                 IsolationLevel::Global => global_rules.push(name.clone()),
                 IsolationLevel::Block => block_rules.push(name.clone()),
@@ -458,5 +458,54 @@ mod tests {
     fn test_file_parser_markdown_extensions_contains_md() {
         let parser = select_parser("md");
         assert!(parser.extensions().contains(&"md"));
+    }
+
+    // Helper to get path to the test fixture WASM
+    fn get_test_rule_path() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/simple_rule/target/wasm32-wasip1/release/simple_rule.wasm")
+    }
+
+    #[test]
+    fn test_get_classified_rules_separates_global_and_block() {
+        // Only run this test if the fixture exists (it might not be built in all envs)
+        let rule_path = get_test_rule_path();
+        if !rule_path.exists() {
+            return;
+        }
+
+        let mut host = PluginHost::new();
+        host.load_rule(&rule_path).expect("Failed to load rule");
+
+        // The simple_rule is global by default (from RuleManifest::new)
+        let loaded_name = host.loaded_rules().next().unwrap().clone();
+
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert(loaded_name.as_str());
+
+        let (global, block) = get_classified_rules(&host, &enabled_rules);
+
+        assert_eq!(global.len(), 1);
+        assert_eq!(global[0], loaded_name);
+        assert!(block.is_empty());
+    }
+
+    #[test]
+    fn test_get_classified_rules_skips_disabled_rules() {
+        let rule_path = get_test_rule_path();
+        if !rule_path.exists() {
+            return;
+        }
+
+        let mut host = PluginHost::new();
+        host.load_rule(&rule_path).expect("Failed to load rule");
+
+        let enabled_rules = HashSet::new();
+        // Rule loaded but not enabled
+
+        let (global, block) = get_classified_rules(&host, &enabled_rules);
+
+        assert!(global.is_empty());
+        assert!(block.is_empty());
     }
 }
