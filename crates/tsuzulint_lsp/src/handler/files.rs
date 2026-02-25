@@ -67,7 +67,9 @@ mod tests {
     async fn test_handle_did_change_watched_files_no_config_change() {
         let state = BackendState::new();
         let temp = tempdir().unwrap();
+        let config_path = temp.path().join(".tsuzulint.json");
         let other_path = temp.path().join("other.txt");
+        fs::write(&config_path, "{}").unwrap();
         fs::write(&other_path, "hello").unwrap();
 
         {
