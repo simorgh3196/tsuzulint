@@ -20,8 +20,10 @@ pub enum KnownLanguage {
     #[default]
     Ja, // Japanese
     En, // English
-    Zh, // Chinese
-    Ko, // Korean
+    /// Chinese (not yet implemented; reserved for future use).
+    Zh,
+    /// Korean (not yet implemented; reserved for future use).
+    Ko,
 }
 
 /// Required analysis capabilities for a rule.
