@@ -1,4 +1,7 @@
 //! Secure HTTP client with SSRF and DNS Rebinding protection.
+//!
+//! Note: `#![allow(unused_assignments)]` is needed due to false positives from
+//! thiserror/miette derive macros on struct variant fields used in error messages.
 
 #![allow(unused_assignments)]
 
@@ -142,78 +145,7 @@ impl SecureHttpClient {
 
     /// Fetch content from URL with SSRF/DNS Rebinding protection.
     pub async fn fetch(&self, url: &str) -> Result<Vec<u8>, SecureFetchError> {
-        let mut current_url_str = url.to_string();
-        let mut redirect_count = 0;
-
-        loop {
-            let parsed_url = Url::parse(&current_url_str)
-                .map_err(|e| SecureFetchError::NotFound(format!("Invalid URL: {}", e)))?;
-
-            // 1. Basic URL validation
-            validate_url(&parsed_url, self.allow_local)?;
-
-            // 2. Build client with DNS pinning
-            let client = self.build_client(&parsed_url).await?;
-
-            // 3. Perform request
-            let response = client
-                .get(parsed_url.clone())
-                .timeout(self.timeout)
-                .send()
-                .await?;
-
-            // 4. Handle redirects
-            if response.status().is_redirection() {
-                let location = response
-                    .headers()
-                    .get(reqwest::header::LOCATION)
-                    .ok_or_else(|| {
-                        SecureFetchError::InvalidRedirectUrl(
-                            "Redirect response missing Location header".to_string(),
-                        )
-                    })?;
-
-                let location_str = location.to_str().map_err(|_| {
-                    SecureFetchError::InvalidRedirectUrl(
-                        "Location header is not valid UTF-8".to_string(),
-                    )
-                })?;
-
-                let next_url = parsed_url.join(location_str).map_err(|e| {
-                    SecureFetchError::InvalidRedirectUrl(format!(
-                        "Failed to parse redirect URL: {}",
-                        e
-                    ))
-                })?;
-
-                redirect_count += 1;
-                if redirect_count >= self.max_redirects {
-                    return Err(SecureFetchError::RedirectLimitExceeded);
-                }
-
-                current_url_str = next_url.to_string();
-                continue;
-            }
-
-            // 5. Handle response status
-            if response.status() == reqwest::StatusCode::NOT_FOUND {
-                return Err(SecureFetchError::NotFound(format!(
-                    "Resource not found at {}",
-                    current_url_str
-                )));
-            }
-
-            let response = response.error_for_status().map_err(|e| {
-                if let Some(status) = e.status() {
-                    SecureFetchError::HttpError(status)
-                } else {
-                    SecureFetchError::NetworkError(e)
-                }
-            })?;
-
-            let bytes = response.bytes().await?.to_vec();
-            return Ok(bytes);
-        }
+        self.fetch_internal(url, None).await
     }
 
     /// Fetch content with streaming and size limit.
@@ -225,6 +157,14 @@ impl SecureHttpClient {
         &self,
         url: &str,
         max_size: u64,
+    ) -> Result<Vec<u8>, SecureFetchError> {
+        self.fetch_internal(url, Some(max_size)).await
+    }
+
+    async fn fetch_internal(
+        &self,
+        url: &str,
+        max_size: Option<u64>,
     ) -> Result<Vec<u8>, SecureFetchError> {
         let mut current_url_str = url.to_string();
         let mut redirect_count = 0;
@@ -290,25 +230,30 @@ impl SecureHttpClient {
                 }
             })?;
 
-            let mut stream = response.bytes_stream();
-            let mut buffer = Vec::new();
-            let mut total_size: u64 = 0;
+            return if let Some(max) = max_size {
+                let mut stream = response.bytes_stream();
+                let mut buffer = Vec::new();
+                let mut total_size: u64 = 0;
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = chunk_result?;
-                total_size += chunk.len() as u64;
+                while let Some(chunk_result) = stream.next().await {
+                    let chunk = chunk_result?;
+                    total_size += chunk.len() as u64;
 
-                if total_size > max_size {
-                    return Err(SecureFetchError::ResponseTooLarge {
-                        size: total_size,
-                        max: max_size,
-                    });
+                    if total_size > max {
+                        return Err(SecureFetchError::ResponseTooLarge {
+                            size: total_size,
+                            max,
+                        });
+                    }
+
+                    buffer.extend_from_slice(&chunk);
                 }
 
-                buffer.extend_from_slice(&chunk);
-            }
-
-            return Ok(buffer);
+                Ok(buffer)
+            } else {
+                let bytes = response.bytes().await?.to_vec();
+                Ok(bytes)
+            };
         }
     }
 
@@ -326,7 +271,6 @@ impl SecureHttpClient {
 
         let port = url.port_or_known_default().unwrap_or(80);
 
-        // DNS resolution with timeout
         let addrs: Vec<_> = tokio::time::timeout(self.timeout, lookup_host((host, port)))
             .await
             .map_err(|_| SecureFetchError::DnsTimeout)?
@@ -337,12 +281,10 @@ impl SecureHttpClient {
             return Err(SecureFetchError::DnsNoAddress(host.to_string()));
         }
 
-        // Validate all resolved IPs
         for addr in &addrs {
             check_ip(addr.ip())?;
         }
 
-        // Build client with DNS pinning
         reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .resolve_to_addrs(host, &addrs)
@@ -496,7 +438,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = SecureHttpClient::builder().build(); // allow_local = false
+        let client = SecureHttpClient::builder().build();
         let url = format!("{}/data", mock_server.uri());
         let result = client.fetch(&url).await;
 
