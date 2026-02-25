@@ -337,4 +337,27 @@ mod tests {
             res => panic!("Expected ResponseTooLarge error, got {:?}", res),
         }
     }
+
+    #[tokio::test]
+    async fn test_fetch_from_path_too_large() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a file slightly larger than MAX_MANIFEST_SIZE
+        let mut file = NamedTempFile::new().unwrap();
+        let target_size = MAX_MANIFEST_SIZE + 1;
+        file.as_file().set_len(target_size).unwrap();
+
+        let fetcher = ManifestFetcher::new();
+        let result = fetcher
+            .fetch(&PluginSource::Path(file.path().to_path_buf()))
+            .await;
+
+        match result {
+            Err(FetchError::IoError(e)) => {
+                assert_eq!(e.kind(), std::io::ErrorKind::FileTooLarge);
+            }
+            res => panic!("Expected IoError(FileTooLarge), got {:?}", res),
+        }
+    }
 }
