@@ -6,6 +6,9 @@ use crate::manifest::{ExternalRuleManifest, validate_manifest};
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Maximum size for a manifest file (10MB).
+const MAX_MANIFEST_SIZE: u64 = 10 * 1024 * 1024;
+
 /// Source of a plugin manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginSource {
@@ -138,7 +141,10 @@ impl ManifestFetcher {
 
     /// Fetch manifest from a URL.
     async fn fetch_from_url(&self, url_str: &str) -> Result<ExternalRuleManifest, FetchError> {
-        let bytes = self.http_client.fetch(url_str).await?;
+        let bytes = self
+            .http_client
+            .fetch_with_size_limit(url_str, MAX_MANIFEST_SIZE)
+            .await?;
         let text = String::from_utf8(bytes)?;
         let manifest = validate_manifest(&text)?;
         Ok(manifest)
@@ -150,6 +156,18 @@ impl ManifestFetcher {
             return Err(FetchError::NotFound(format!(
                 "Manifest file not found: {}",
                 path.display()
+            )));
+        }
+
+        let metadata = tokio::fs::metadata(path).await?;
+        if metadata.len() > MAX_MANIFEST_SIZE {
+            return Err(FetchError::IoError(std::io::Error::new(
+                std::io::ErrorKind::FileTooLarge,
+                format!(
+                    "Manifest file too large: {} bytes (max {} bytes)",
+                    metadata.len(),
+                    MAX_MANIFEST_SIZE
+                ),
             )));
         }
 
@@ -283,6 +301,40 @@ mod tests {
                 "Expected SecureFetchError::SecurityError::LoopbackDenied, got {:?}",
                 res
             ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_from_url_too_large() {
+        use crate::http_client::SecureFetchError;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        // Mock a response slightly larger than MAX_MANIFEST_SIZE
+        // We can't generate 10MB string easily in memory without allocation,
+        // so we'll just check if it fails for > MAX_MANIFEST_SIZE.
+        // Actually, let's just use a smaller max size for testing if possible?
+        // But MAX_MANIFEST_SIZE is const.
+        // We can create a large string, 10MB is fine for test environment usually.
+        let large_manifest = " ".repeat((MAX_MANIFEST_SIZE + 100) as usize);
+
+        Mock::given(method("GET"))
+            .and(path("/large.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(&large_manifest))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let url = format!("{}/large.json", mock_server.uri());
+        let result = fetcher.fetch(&PluginSource::Url(url)).await;
+
+        match result {
+            Err(FetchError::SecureFetchError(SecureFetchError::ResponseTooLarge { size, max })) => {
+                assert!(size > max);
+                assert_eq!(max, MAX_MANIFEST_SIZE);
+            }
+            res => panic!("Expected ResponseTooLarge error, got {:?}", res),
         }
     }
 }
