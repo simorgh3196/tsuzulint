@@ -100,7 +100,7 @@ pub fn lint_file_internal(
     };
 
     let (global_rule_names, block_rule_names) =
-        get_classified_rules(host.loaded_rules(), host, enabled_rules);
+        get_classified_rules(host, enabled_rules);
 
     let mut global_diagnostics = Vec::new();
     let mut block_diagnostics = Vec::new();
@@ -339,31 +339,32 @@ impl ManifestProvider for PluginHost {
     }
 }
 
-fn get_classified_rules<'a, I, P>(
-    rules: I,
+/// Classifies enabled rules into global and block rules.
+///
+/// This function iterates over `enabled_rules` (O(M)) instead of all loaded rules (O(N))
+/// to optimize performance when M << N. It sorts the results to ensure deterministic
+/// output since `enabled_rules` iteration order is arbitrary.
+fn get_classified_rules<P>(
     host: &P,
     enabled_rules: &HashSet<&str>,
 ) -> (Vec<String>, Vec<String>)
 where
-    I: Iterator<Item = &'a String>,
     P: ManifestProvider,
 {
     let mut global_rules = Vec::new();
     let mut block_rules = Vec::new();
 
-    for name in rules {
-        if !enabled_rules.contains(name.as_str()) {
-            continue;
-        }
+    for name in enabled_rules {
         if let Some(manifest) = host.get_manifest(name) {
             match manifest.isolation_level {
-                IsolationLevel::Global => global_rules.push(name.clone()),
-                IsolationLevel::Block => block_rules.push(name.clone()),
+                IsolationLevel::Global => global_rules.push(name.to_string()),
+                IsolationLevel::Block => block_rules.push(name.to_string()),
             }
-        } else {
-            warn!("Rule '{}' is enabled but has no manifest; skipping", name);
         }
     }
+
+    global_rules.sort();
+    block_rules.sort();
 
     (global_rules, block_rules)
 }
@@ -428,20 +429,13 @@ mod tests {
 
         let provider = MockManifestProvider { manifests };
 
-        let loaded_rules = [
-            global_name.to_string(),
-            block_name.to_string(),
-            disabled_name.to_string(),
-            missing_manifest_name.to_string(),
-        ];
-
         let mut enabled_rules = HashSet::new();
         enabled_rules.insert(global_name);
         enabled_rules.insert(block_name);
         enabled_rules.insert(missing_manifest_name); // Enabled but no manifest
 
         let (global_rules, block_rules) =
-            get_classified_rules(loaded_rules.iter(), &provider, &enabled_rules);
+            get_classified_rules(&provider, &enabled_rules);
 
         assert!(global_rules.contains(&global_name.to_string()));
         assert!(!global_rules.contains(&disabled_name.to_string()));
