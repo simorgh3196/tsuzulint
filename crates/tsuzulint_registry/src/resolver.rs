@@ -4,8 +4,7 @@ use crate::cache::{CacheError, PluginCache};
 use crate::downloader::{DownloadError, WasmDownloader};
 use crate::error::FetchError;
 use crate::fetcher::ManifestFetcher;
-use crate::manifest::ExternalRuleManifest;
-use crate::manifest::IntegrityError;
+use crate::manifest::{ExternalRuleManifest, HashVerifier, IntegrityError};
 use crate::security::validate_local_wasm_path;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -137,6 +136,8 @@ impl PluginResolver {
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
         if let Some(cached) = self.cache.get(source, version) {
+            let cached_bytes = std::fs::read(&cached.wasm_path).map_err(DownloadError::IoError)?;
+            HashVerifier::verify(&cached_bytes, &manifest.artifacts.sha256)?;
             return Ok(ResolvedPlugin {
                 wasm_path: cached.wasm_path,
                 manifest_path: cached.manifest_path,
@@ -147,7 +148,7 @@ impl PluginResolver {
 
         let result = self.downloader.download(&manifest).await?;
 
-        tsuzulint_manifest::HashVerifier::verify(&result.bytes, &manifest.artifacts.sha256)?;
+        HashVerifier::verify(&result.bytes, &manifest.artifacts.sha256)?;
 
         let manifest_json = serde_json::to_string(&manifest)
             .map_err(|e| ResolveError::SerializationError(e.to_string()))?;
@@ -177,7 +178,7 @@ impl PluginResolver {
 
         let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
 
-        tsuzulint_manifest::HashVerifier::verify(&bytes, &manifest.artifacts.sha256)?;
+        HashVerifier::verify(&bytes, &manifest.artifacts.sha256)?;
 
         Ok(ResolvedPlugin {
             wasm_path,
@@ -194,7 +195,7 @@ mod tests {
     use crate::security::SecurityError;
     use serde_json::json;
     use tempfile::tempdir;
-    use tsuzulint_manifest::HashVerifier;
+    use HashVerifier;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
