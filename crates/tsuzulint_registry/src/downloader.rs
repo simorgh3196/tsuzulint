@@ -17,10 +17,6 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Error type for WASM download operations.
 #[derive(Debug, Error)]
 pub enum DownloadError {
-    /// Network request failed.
-    #[error("Network error: {0}")]
-    NetworkError(#[from] reqwest::Error),
-
     /// Resource not found.
     #[error("Not found: {0}")]
     NotFound(String),

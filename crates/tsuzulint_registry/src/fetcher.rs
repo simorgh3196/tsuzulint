@@ -1,7 +1,7 @@
 //! Manifest fetcher for plugin sources.
 
 use crate::error::FetchError;
-use crate::http_client::{DEFAULT_TIMEOUT, SecureHttpClient};
+use crate::http_client::{DEFAULT_MAX_REDIRECTS, DEFAULT_TIMEOUT, SecureHttpClient};
 use crate::manifest::{ExternalRuleManifest, validate_manifest};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -61,6 +61,7 @@ pub struct ManifestFetcher {
     http_client: SecureHttpClient,
     github_base_url: String,
     timeout: Duration,
+    max_redirects: u32,
 }
 
 impl Default for ManifestFetcher {
@@ -73,9 +74,10 @@ impl ManifestFetcher {
     /// Create a new manifest fetcher.
     pub fn new() -> Self {
         Self {
-            http_client: SecureHttpClient::builder().build(),
+            http_client: SecureHttpClient::builder().timeout(DEFAULT_TIMEOUT).build(),
             github_base_url: "https://github.com".to_string(),
             timeout: DEFAULT_TIMEOUT,
+            max_redirects: DEFAULT_MAX_REDIRECTS,
         }
     }
 
@@ -90,10 +92,12 @@ impl ManifestFetcher {
         Self {
             http_client: SecureHttpClient::builder()
                 .timeout(self.timeout)
+                .max_redirects(self.max_redirects)
                 .allow_local(allow)
                 .build(),
             github_base_url: self.github_base_url,
             timeout: self.timeout,
+            max_redirects: self.max_redirects,
         }
     }
 

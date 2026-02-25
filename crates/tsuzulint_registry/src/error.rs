@@ -8,10 +8,6 @@ use thiserror::Error;
 /// Error type for manifest fetch operations.
 #[derive(Debug, Error)]
 pub enum FetchError {
-    /// Network request failed.
-    #[error("Network error: {0}")]
-    NetworkError(#[from] reqwest::Error),
-
     /// Resource not found.
     #[error("Not found: {0}")]
     NotFound(String),
