@@ -120,14 +120,16 @@ impl WasmDownloader {
         &self,
         initial_url_str: &str,
     ) -> Result<DownloadResult, DownloadError> {
-        let bytes = self.http_client.fetch(initial_url_str).await?;
-
-        if bytes.len() as u64 > self.max_size {
-            return Err(DownloadError::TooLarge {
-                size: bytes.len() as u64,
-                max: self.max_size,
-            });
-        }
+        let bytes = self
+            .http_client
+            .fetch_with_size_limit(initial_url_str, self.max_size)
+            .await
+            .map_err(|e| match e {
+                SecureFetchError::ResponseTooLarge { size, max } => {
+                    DownloadError::TooLarge { size, max }
+                }
+                other => DownloadError::SecureHttp(other),
+            })?;
 
         let computed_hash = HashVerifier::compute(&bytes);
 
@@ -300,7 +302,10 @@ mod tests {
 
         match result {
             Err(DownloadError::TooLarge { size, max }) => {
-                assert_eq!(size, 20);
+                assert!(
+                    size > max,
+                    "size should exceed max (streaming: size depends on chunk boundaries)"
+                );
                 assert_eq!(max, max_size);
                 Ok(())
             }
@@ -310,8 +315,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_download_too_large_buffered() -> Result<(), DownloadError> {
-        // NOTE: This test uses the buffered fetch() path, not streaming.
-        // TODO: Update to test streaming size limit when fetch_with_limit is implemented (Issue #200)
+        // Tests streaming size limit enforcement (Issue #200)
         let mock_server = MockServer::start().await;
         let max_size = 5;
 
