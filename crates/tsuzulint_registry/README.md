@@ -180,19 +180,19 @@ initially resolves to a public IP but later resolves to a private IP.
 
 ```rust
 pub struct WasmDownloader {
-    max_size: usize,          // Default: 50MB
-    timeout: Duration,        // Default: 60 seconds
-    allow_local: bool,        // Default: false
+    http_client: SecureHttpClient,  // Handles HTTP with SSRF protection
+    max_size: u64,                   // Default: 50MB
+    timeout: Duration,               // Default: 60 seconds (stored for allow_local rebuild)
 }
 ```
 
 **Features:**
 
-- Streaming download (supports large files)
-- Size limit checking (two-stage: pre-check and during streaming)
+- Size limit checking after download
 - Timeout configuration
 - `{version}` placeholder substitution
 - Automatic hash calculation
+- Uses `SecureHttpClient` for SSRF/DNS Rebinding protection
 
 ## SecureHttpClient
 

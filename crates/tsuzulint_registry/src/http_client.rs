@@ -92,10 +92,6 @@ impl SecureHttpClient {
         let mut redirect_count = 0;
 
         loop {
-            if redirect_count >= self.max_redirects {
-                return Err(SecureFetchError::RedirectLimitExceeded);
-            }
-
             let parsed_url = Url::parse(&current_url_str)
                 .map_err(|e| SecureFetchError::NotFound(format!("Invalid URL: {}", e)))?;
 
@@ -113,9 +109,16 @@ impl SecureHttpClient {
                 .await?;
 
             // 4. Handle redirects
-            if response.status().is_redirection()
-                && let Some(location) = response.headers().get(reqwest::header::LOCATION)
-            {
+            if response.status().is_redirection() {
+                let location = response
+                    .headers()
+                    .get(reqwest::header::LOCATION)
+                    .ok_or_else(|| {
+                        SecureFetchError::InvalidRedirectUrl(
+                            "Redirect response missing Location header".to_string(),
+                        )
+                    })?;
+
                 let location_str = location.to_str().map_err(|_| {
                     SecureFetchError::InvalidRedirectUrl(
                         "Location header is not valid UTF-8".to_string(),
@@ -129,8 +132,12 @@ impl SecureHttpClient {
                     ))
                 })?;
 
-                current_url_str = next_url.to_string();
                 redirect_count += 1;
+                if redirect_count >= self.max_redirects {
+                    return Err(SecureFetchError::RedirectLimitExceeded);
+                }
+
+                current_url_str = next_url.to_string();
                 continue;
             }
 
