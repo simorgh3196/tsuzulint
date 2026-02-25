@@ -302,7 +302,10 @@ mod tests {
 
         match result {
             Err(DownloadError::TooLarge { size, max }) => {
-                assert_eq!(size, 20);
+                assert!(
+                    size > max,
+                    "size should exceed max (streaming: size depends on chunk boundaries)"
+                );
                 assert_eq!(max, max_size);
                 Ok(())
             }
