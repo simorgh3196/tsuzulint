@@ -239,8 +239,8 @@ let wasm_bytes = include_bytes!("rule.wasm");
 let hash = HashVerifier::compute(wasm_bytes);
 // Returns: 64-character lowercase hex string
 
-// Verify against expected hash
-HashVerifier::verify(wasm_bytes, &expected_hash)?;
+// Verify against expected hash (case-insensitive)
+HashVerifier::verify(wasm_bytes, &hash)?;
 ```
 
 ### IntegrityError
