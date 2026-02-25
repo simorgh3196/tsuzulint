@@ -63,20 +63,20 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                         resolve_manifest_path(config.base_dir.as_deref(), path)
                     {
                         match rule_manifest::load_rule_manifest(&manifest_path) {
-                            Ok((manifest, wasm_path)) => {
+                            Ok(result) => {
                                 let rule_name = detail
                                     .r#as
                                     .clone()
-                                    .unwrap_or_else(|| manifest.rule.name.clone());
+                                    .unwrap_or_else(|| result.manifest.rule.name.clone());
                                 debug!(
                                     "Loading rule '{}' from manifest: {}",
                                     rule_name,
                                     manifest_path.display()
                                 );
-                                match host.load_rule(&wasm_path) {
+                                match host.load_rule_bytes(&result.wasm_bytes) {
                                     Ok(loaded_manifest) => {
                                         let internal_name = loaded_manifest.name.clone();
-                                        let plugin_manifest = convert_manifest(&manifest);
+                                        let plugin_manifest = convert_manifest(&result.manifest);
 
                                         if let Err(e) = host.rename_rule(
                                             &internal_name,

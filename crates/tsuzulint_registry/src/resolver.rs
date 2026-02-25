@@ -4,8 +4,8 @@ use crate::cache::{CacheError, PluginCache};
 use crate::downloader::{DownloadError, WasmDownloader};
 use crate::error::FetchError;
 use crate::fetcher::ManifestFetcher;
-use crate::hash::HashError;
 use crate::manifest::ExternalRuleManifest;
+use crate::manifest::IntegrityError;
 use crate::security::validate_local_wasm_path;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -23,8 +23,8 @@ pub enum ResolveError {
     DownloadError(#[from] DownloadError),
     #[error("Cache error: {0}")]
     CacheError(#[from] CacheError),
-    #[error("Hash mismatch: {0}")]
-    HashMismatch(#[from] HashError),
+    #[error("Integrity check failed: {0}")]
+    IntegrityError(#[from] IntegrityError),
     #[error("Alias required for {src}")]
     AliasRequired { src: String },
     #[error("Serialization error: {0}")]
@@ -148,7 +148,7 @@ impl PluginResolver {
         let result = self.downloader.download(&manifest).await?;
 
         if result.computed_hash != manifest.artifacts.sha256 {
-            return Err(ResolveError::HashMismatch(HashError::Mismatch {
+            return Err(ResolveError::IntegrityError(IntegrityError::HashMismatch {
                 expected: manifest.artifacts.sha256.clone(),
                 actual: result.computed_hash,
             }));
@@ -181,10 +181,10 @@ impl PluginResolver {
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
         let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
-        let computed_hash = crate::hash::HashVerifier::compute(&bytes);
+        let computed_hash = tsuzulint_manifest::HashVerifier::compute(&bytes);
 
         if computed_hash != manifest.artifacts.sha256 {
-            return Err(ResolveError::HashMismatch(HashError::Mismatch {
+            return Err(ResolveError::IntegrityError(IntegrityError::HashMismatch {
                 expected: manifest.artifacts.sha256.clone(),
                 actual: computed_hash,
             }));
@@ -202,10 +202,10 @@ impl PluginResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hash::HashVerifier;
     use crate::security::SecurityError;
     use serde_json::json;
     use tempfile::tempdir;
+    use tsuzulint_manifest::HashVerifier;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -414,7 +414,7 @@ mod tests {
         .unwrap();
 
         let result = resolver.resolve(&spec).await;
-        assert!(matches!(result, Err(ResolveError::HashMismatch(_))));
+        assert!(matches!(result, Err(ResolveError::IntegrityError(_))));
     }
 
     #[tokio::test]

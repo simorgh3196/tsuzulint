@@ -1,15 +1,21 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-use tsuzulint_manifest::{ExternalRuleManifest, validate_manifest};
+use std::path::Path;
+use tsuzulint_manifest::{ExternalRuleManifest, HashVerifier, validate_manifest};
 
 use crate::error::LinterError;
 
-/// Loads a rule manifest from a file.
+/// Result of loading a rule manifest with verified WASM bytes.
 ///
-/// Returns the parsed manifest and the resolved path to the WASM file.
-pub fn load_rule_manifest(
-    manifest_path: &Path,
-) -> Result<(ExternalRuleManifest, PathBuf), LinterError> {
+/// This struct enables single-read optimization: the WASM file is read once,
+/// verified against the manifest's SHA256 hash, and the bytes are returned
+/// for direct use by the plugin host without re-reading from disk.
+#[derive(Debug)]
+pub struct LoadRuleManifestResult {
+    pub manifest: ExternalRuleManifest,
+    pub wasm_bytes: Vec<u8>,
+}
+
+pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult, LinterError> {
     let content = fs::read_to_string(manifest_path).map_err(|e| {
         LinterError::Config(format!(
             "Failed to read rule manifest '{}': {}",
@@ -28,11 +34,8 @@ pub fn load_rule_manifest(
 
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
 
-    // Resolve WASM path relative to the manifest file
     let wasm_relative = Path::new(&manifest.artifacts.wasm);
 
-    // Security: Reject absolute paths
-    // On Windows, is_absolute() requires a drive letter, but has_root() catches rooted paths like "/foo"
     if wasm_relative.is_absolute() || wasm_relative.has_root() {
         return Err(LinterError::Config(format!(
             "Absolute WASM path '{}' is not allowed in manifest '{}'",
@@ -41,7 +44,6 @@ pub fn load_rule_manifest(
         )));
     }
 
-    // Security: Reject ParentDir (..) components
     if wasm_relative
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
@@ -63,7 +65,6 @@ pub fn load_rule_manifest(
         )));
     }
 
-    // Security: Verify canonicalized paths to prevent any other traversal
     let canonical_manifest_dir = manifest_dir.canonicalize().map_err(|e| {
         LinterError::Config(format!(
             "Failed to canonicalize manifest directory '{}': {}",
@@ -87,7 +88,26 @@ pub fn load_rule_manifest(
         )));
     }
 
-    Ok((manifest, canonical_wasm_path))
+    let wasm_bytes = fs::read(&canonical_wasm_path).map_err(|e| {
+        LinterError::Config(format!(
+            "Failed to read WASM file '{}': {}",
+            canonical_wasm_path.display(),
+            e
+        ))
+    })?;
+
+    HashVerifier::verify(&wasm_bytes, &manifest.artifacts.sha256).map_err(|e| {
+        LinterError::Config(format!(
+            "Integrity check failed for WASM file '{}': {}",
+            canonical_wasm_path.display(),
+            e
+        ))
+    })?;
+
+    Ok(LoadRuleManifestResult {
+        manifest,
+        wasm_bytes,
+    })
 }
 
 #[cfg(test)]
@@ -103,28 +123,68 @@ mod tests {
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let wasm_path = dir.path().join("rule.wasm");
 
-        // Create dummy WASM file
-        File::create(&wasm_path).unwrap().write_all(b"").unwrap();
+        let wasm_content = b"test wasm content";
+        File::create(&wasm_path)
+            .unwrap()
+            .write_all(wasm_content)
+            .unwrap();
 
-        // Create manifest
-        let json = r#"{
-            "rule": {
+        let wasm_hash = HashVerifier::compute(wasm_content);
+        let json = format!(
+            r#"{{
+            "rule": {{
                 "name": "test-rule",
                 "version": "1.0.0",
                 "description": "Test rule",
                 "fixable": false
-            },
-            "artifacts": {
+            }},
+            "artifacts": {{
                 "wasm": "rule.wasm",
-                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
-        }"#;
+                "sha256": "{}"
+            }}
+        }}"#,
+            wasm_hash
+        );
         fs::write(&manifest_path, json).unwrap();
 
-        let (manifest, resolved_wasm) = load_rule_manifest(&manifest_path).unwrap();
+        let result = load_rule_manifest(&manifest_path).unwrap();
 
-        assert_eq!(manifest.rule.name, "test-rule");
-        assert_eq!(resolved_wasm, wasm_path.canonicalize().unwrap());
+        assert_eq!(result.manifest.rule.name, "test-rule");
+        assert_eq!(result.wasm_bytes, wasm_content);
+    }
+
+    #[test]
+    fn test_load_rule_manifest_hash_mismatch() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        File::create(&wasm_path)
+            .unwrap()
+            .write_all(b"test content")
+            .unwrap();
+
+        let wrong_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{
+            "rule": {{ "name": "test", "version": "1.0.0" }},
+            "artifacts": {{
+                "wasm": "rule.wasm",
+                "sha256": "{}"
+            }}
+        }}"#,
+            wrong_hash
+        );
+        fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Integrity check failed"),
+            "Error message was: {}",
+            err_msg
+        );
     }
 
     #[test]
@@ -132,7 +192,6 @@ mod tests {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
 
-        // Use valid sha256 to bypass manifest validation
         let json = r#"{
             "rule": { "name": "test", "version": "1.0.0" },
             "artifacts": {
@@ -157,7 +216,6 @@ mod tests {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
 
-        // Use valid sha256 to bypass manifest validation
         let json = r#"{
             "rule": { "name": "test", "version": "1.0.0" },
             "artifacts": {
@@ -187,12 +245,6 @@ mod tests {
         let _manifest_path = sub_dir.join("tsuzulint-rule.json");
         let _wasm_path = dir.path().join("outside.wasm");
         File::create(&_wasm_path).unwrap();
-
-        // This path is tricky: it doesn't contain ".." literally, but if it resolved outside,
-        // (e.g. via hardlinks or something if we didn't check components), canonicalize would catch it.
-        // However, we already reject ".." components which is the main way to traverse.
-        // For testing the `starts_with` check, we'd need a way to resolve outside without "..".
-        // In many systems, ".." is the only way for a relative path to go up.
     }
 
     #[test]

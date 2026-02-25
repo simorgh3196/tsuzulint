@@ -1,7 +1,7 @@
 //! WASM downloader for plugin artifacts.
 
-use crate::hash::HashVerifier;
 use crate::manifest::ExternalRuleManifest;
+use crate::manifest::HashVerifier;
 use crate::security::{SecurityError, check_ip, validate_url};
 use futures_util::StreamExt;
 use reqwest::Url;

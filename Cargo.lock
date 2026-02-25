@@ -4552,9 +4552,12 @@ dependencies = [
 name = "tsuzulint_manifest"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "jsonschema",
+ "proptest",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
 ]
 
@@ -4600,12 +4603,10 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "futures-util",
- "hex",
  "proptest",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
