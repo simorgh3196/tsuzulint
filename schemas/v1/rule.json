@@ -138,6 +138,24 @@
           ],
           "default": "global",
           "description": "Rule isolation level: 'global' requires entire document, 'block' can run on individual blocks"
+        },
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["ja", "en", "zh", "ko"]
+          },
+          "default": [],
+          "description": "Supported languages for this rule"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["morphology", "sentences"]
+          },
+          "default": [],
+          "description": "Required analysis capabilities: 'morphology' for tokenization, 'sentences' for sentence splitting"
         }
       },
       "additionalProperties": false

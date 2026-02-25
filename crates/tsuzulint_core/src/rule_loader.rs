@@ -144,6 +144,8 @@ fn convert_manifest(
         node_types: external.rule.node_types.clone(),
         isolation_level,
         schema: None,
+        languages: Vec::new(),
+        capabilities: Vec::new(),
     }
 }
 
