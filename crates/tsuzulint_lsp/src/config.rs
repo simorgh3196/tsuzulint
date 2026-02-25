@@ -34,7 +34,7 @@ pub fn reload_config(state: &BackendState) {
                         }
                         Err(e) => {
                             error!("Failed to create new linter: {}", e);
-                            *linter_guard = None;
+                            // Keep the existing linter rather than clearing it on failure.
                         }
                     },
                     Err(e) => error!("Linter lock poisoned: {}", e),
