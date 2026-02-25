@@ -1,7 +1,0 @@
-{
-  "rules": [
-    { "path": "rules/plugins/test-incomplete", "as": "test-incomplete" }],
-  "options": {
-    "test-incomplete": true},
-  "cache": true
-}

@@ -1,3 +1,7 @@
+pub mod integrity;
+
+pub use integrity::{HashVerifier, IntegrityError};
+
 use jsonschema::Validator;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -10,6 +10,7 @@ A shared library for defining and validating external rule manifest files (`tsuz
 
 - Providing type definitions that represent distribution metadata for external WASM rules
 - Providing manifest validation functionality based on JSON Schema
+- Providing integrity verification via SHA256 hash computation and validation
 - Aggregating types shared across other crates (`tsuzulint_registry`, `tsuzulint_plugin`, etc.)
 
 This crate is used during rule distribution and installation, centrally managing information such as rule names, versions, WASM file locations, integrity check hashes, and permission settings.
@@ -208,6 +209,8 @@ let json = serde_json::to_string_pretty(&manifest)?;
 | **`serde`** | Serialization/deserialization framework |
 | **`serde_json`** | JSON parsing and manipulation |
 | **`thiserror`** | Error type definitions |
+| **`sha2`** | SHA256 hash calculation |
+| **`hex`** | Hexadecimal encoding of hash values |
 
 ## Design Features
 
@@ -221,3 +224,37 @@ let json = serde_json::to_string_pretty(&manifest)?;
 - **`tsuzulint_registry`**: Validates manifests during plugin download
 - **`tsuzulint_plugin`**: Uses manifest information during rule loading
 - **`tsuzulint_core`**: Uses for rule configuration validation
+
+## Integrity Verification
+
+The `integrity` module provides SHA256 hash computation and verification for WASM artifacts.
+
+### HashVerifier
+
+```rust
+use tsuzulint_manifest::HashVerifier;
+
+// Compute SHA256 hash
+let wasm_bytes = include_bytes!("rule.wasm");
+let hash = HashVerifier::compute(wasm_bytes);
+// Returns: 64-character lowercase hex string
+
+// Verify against expected hash (case-insensitive)
+HashVerifier::verify(wasm_bytes, &hash)?;
+```
+
+### IntegrityError
+
+```rust
+pub enum IntegrityError {
+    HashMismatch { expected: String, actual: String },
+    InvalidFormat(String),
+}
+```
+
+### Features
+
+- SHA256 hash computation using `sha2` crate
+- Case-insensitive hash comparison
+- Format validation (64 hex characters)
+- Used by both `tsuzulint_registry` and `tsuzulint_core` for consistent verification

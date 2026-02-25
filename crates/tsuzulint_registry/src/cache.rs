@@ -70,14 +70,7 @@ impl PluginCache {
                 }
             }
             PluginSource::Url(url) => {
-                // For URL, we use a hash of the URL as the directory name
-                // to avoid issues with special characters in URLs.
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(url.as_bytes());
-                let result = hasher.finalize();
-                let hash_hex = hex::encode(result);
-
+                let hash_hex = tsuzulint_manifest::HashVerifier::compute(url.as_bytes());
                 Some(self.cache_dir.join("url").join(hash_hex).join(version))
             }
             PluginSource::Path(_) => {

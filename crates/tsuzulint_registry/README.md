@@ -33,11 +33,17 @@ A crate responsible for plugin registry and package management. Fetches and cach
 │        SecureHttpClient             │  │  File System    │
 │  (SSRF + DNS Rebinding Protection)  │  │  ~/.cache/...   │
 └─────────────────────────────────────┘  └─────────────────┘
+          │                    │
+          ▼                    ▼
+┌─────────────────┐  ┌─────────────────────────────────────────────┐
+│  PluginSource   │  │         validate_url / check_ip (Security)   │
+│ (Source Type)   │  │         SSRF + DNS Rebinding Protection      │
+└─────────────────┘  └─────────────────────────────────────────────┘
           │
           ▼
 ┌─────────────────────────────────────┐
-│  validate_url / check_ip (Security) │
-│  SSRF + DNS Rebinding Protection    │
+│  tsuzulint_manifest::HashVerifier   │
+│  (SHA256 Integrity Verification)    │
 └─────────────────────────────────────┘
 ```
 
@@ -160,9 +166,10 @@ initially resolves to a public IP but later resolves to a private IP.
 
 ### Hash Verification
 
+- Uses `tsuzulint_manifest::HashVerifier` for SHA256 hash verification
 - Automatic SHA256 calculation of downloaded WASM
 - Comparison with manifest's `artifacts.sha256`
-- Returns `HashError::Mismatch` on mismatch
+- Returns `IntegrityError::HashMismatch` on mismatch
 
 ### Path Traversal Protection
 
@@ -294,17 +301,14 @@ tzlint plugin cache clean
 | `resolver.rs` | Plugin resolution integration |
 | `cache.rs` | Local plugin cache |
 | `security.rs` | URL security validation |
-| `hash.rs` | SHA256 hash calculation and verification |
 | `error.rs` | Error type definitions |
 
 ## Dependencies
 
 | Crate | Purpose |
 | ----- | ------- |
-| `tsuzulint_manifest` | Plugin manifest type definitions |
+| `tsuzulint_manifest` | Plugin manifest types and `HashVerifier` for integrity checks |
 | `reqwest` | HTTP client (with streaming support) |
-| `sha2` | SHA256 hash calculation |
-| `hex` | Hexadecimal encoding of hash values |
 | `futures-util` | Async streaming processing |
 | `dirs` | Cache directory retrieval |
 | `url` | URL parsing |

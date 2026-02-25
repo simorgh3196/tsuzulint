@@ -1,9 +1,7 @@
 //! WASM downloader for plugin artifacts.
 
-use crate::hash::HashVerifier;
-use crate::http_client::SecureFetchError;
-use crate::http_client::SecureHttpClient;
-use crate::manifest::ExternalRuleManifest;
+use crate::http_client::{SecureFetchError, SecureHttpClient};
+use crate::manifest::{ExternalRuleManifest, HashVerifier};
 use std::time::Duration;
 use thiserror::Error;
 

@@ -4,8 +4,7 @@ use crate::cache::{CacheError, PluginCache};
 use crate::downloader::{DownloadError, WasmDownloader};
 use crate::error::FetchError;
 use crate::fetcher::ManifestFetcher;
-use crate::hash::HashError;
-use crate::manifest::ExternalRuleManifest;
+use crate::manifest::{ExternalRuleManifest, HashVerifier, IntegrityError};
 use crate::security::validate_local_wasm_path;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -23,8 +22,8 @@ pub enum ResolveError {
     DownloadError(#[from] DownloadError),
     #[error("Cache error: {0}")]
     CacheError(#[from] CacheError),
-    #[error("Hash mismatch: {0}")]
-    HashMismatch(#[from] HashError),
+    #[error("Integrity check failed: {0}")]
+    IntegrityError(#[from] IntegrityError),
     #[error("Alias required for {src}")]
     AliasRequired { src: String },
     #[error("Serialization error: {0}")]
@@ -137,22 +136,35 @@ impl PluginResolver {
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
         if let Some(cached) = self.cache.get(source, version) {
-            return Ok(ResolvedPlugin {
-                wasm_path: cached.wasm_path,
-                manifest_path: cached.manifest_path,
-                manifest,
-                alias,
-            });
+            match std::fs::read(&cached.wasm_path) {
+                Ok(cached_bytes) => {
+                    if HashVerifier::verify(&cached_bytes, &manifest.artifacts.sha256).is_ok() {
+                        return Ok(ResolvedPlugin {
+                            wasm_path: cached.wasm_path,
+                            manifest_path: cached.manifest_path,
+                            manifest,
+                            alias,
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Cache integrity check failed for {:?}, re-downloading",
+                            cached.wasm_path
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to read cached WASM at {:?}: {}, re-downloading",
+                        cached.wasm_path,
+                        e
+                    );
+                }
+            }
         }
 
         let result = self.downloader.download(&manifest).await?;
 
-        if result.computed_hash != manifest.artifacts.sha256 {
-            return Err(ResolveError::HashMismatch(HashError::Mismatch {
-                expected: manifest.artifacts.sha256.clone(),
-                actual: result.computed_hash,
-            }));
-        }
+        HashVerifier::verify(&result.bytes, &manifest.artifacts.sha256)?;
 
         let manifest_json = serde_json::to_string(&manifest)
             .map_err(|e| ResolveError::SerializationError(e.to_string()))?;
@@ -181,14 +193,8 @@ impl PluginResolver {
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
         let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
-        let computed_hash = crate::hash::HashVerifier::compute(&bytes);
 
-        if computed_hash != manifest.artifacts.sha256 {
-            return Err(ResolveError::HashMismatch(HashError::Mismatch {
-                expected: manifest.artifacts.sha256.clone(),
-                actual: computed_hash,
-            }));
-        }
+        HashVerifier::verify(&bytes, &manifest.artifacts.sha256)?;
 
         Ok(ResolvedPlugin {
             wasm_path,
@@ -202,7 +208,6 @@ impl PluginResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hash::HashVerifier;
     use crate::security::SecurityError;
     use serde_json::json;
     use tempfile::tempdir;
@@ -414,7 +419,7 @@ mod tests {
         .unwrap();
 
         let result = resolver.resolve(&spec).await;
-        assert!(matches!(result, Err(ResolveError::HashMismatch(_))));
+        assert!(matches!(result, Err(ResolveError::IntegrityError(_))));
     }
 
     #[tokio::test]
@@ -530,5 +535,180 @@ mod tests {
             .expect("Resolve should succeed with directory path");
         assert_eq!(resolved.alias, "dir-rule");
         assert!(resolved.manifest_path.ends_with("tsuzulint-rule.json"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_cached_valid_wasm() {
+        let mock_server = MockServer::start().await;
+        let wasm_content = b"fake wasm content";
+        let wasm_hash = HashVerifier::compute(wasm_content);
+
+        let manifest = json!({
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0",
+                "isolation_level": "global"
+            },
+            "artifacts": {
+                "wasm": format!("{}/rule.wasm", mock_server.uri()),
+                "sha256": wasm_hash
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/owner/repo/releases/latest/download/tsuzulint-rule.json",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&manifest))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(wasm_content.as_slice()))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new()
+            .with_base_url(mock_server.uri())
+            .allow_local(true);
+
+        let downloader = WasmDownloader::new()
+            .expect("Failed to create downloader")
+            .allow_local(true);
+
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .expect("Failed to create resolver")
+            .with_downloader(downloader);
+
+        let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
+
+        let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
+        let resolved2 = resolver
+            .resolve(&spec)
+            .await
+            .expect("Second resolve failed");
+
+        assert_eq!(resolved1.wasm_path, resolved2.wasm_path);
+        assert_eq!(resolved1.manifest_path, resolved2.manifest_path);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_cache_tampered_redownloads() {
+        let mock_server = MockServer::start().await;
+        let wasm_content = b"fake wasm content";
+        let wasm_hash = HashVerifier::compute(wasm_content);
+
+        let manifest = json!({
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0",
+                "isolation_level": "global"
+            },
+            "artifacts": {
+                "wasm": format!("{}/rule.wasm", mock_server.uri()),
+                "sha256": wasm_hash
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/owner/repo/releases/latest/download/tsuzulint-rule.json",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&manifest))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(wasm_content.as_slice()))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new()
+            .with_base_url(mock_server.uri())
+            .allow_local(true);
+
+        let downloader = WasmDownloader::new()
+            .expect("Failed to create downloader")
+            .allow_local(true);
+
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .expect("Failed to create resolver")
+            .with_downloader(downloader);
+
+        let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
+
+        let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
+
+        std::fs::write(&resolved1.wasm_path, b"tampered content").unwrap();
+
+        let resolved2 = resolver
+            .resolve(&spec)
+            .await
+            .expect("Second resolve failed");
+
+        let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
+        assert_eq!(wasm_bytes, wasm_content);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_cache_deleted_redownloads() {
+        let mock_server = MockServer::start().await;
+        let wasm_content = b"fake wasm content";
+        let wasm_hash = HashVerifier::compute(wasm_content);
+
+        let manifest = json!({
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0",
+                "isolation_level": "global"
+            },
+            "artifacts": {
+                "wasm": format!("{}/rule.wasm", mock_server.uri()),
+                "sha256": wasm_hash
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/owner/repo/releases/latest/download/tsuzulint-rule.json",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&manifest))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(wasm_content.as_slice()))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new()
+            .with_base_url(mock_server.uri())
+            .allow_local(true);
+
+        let downloader = WasmDownloader::new()
+            .expect("Failed to create downloader")
+            .allow_local(true);
+
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .expect("Failed to create resolver")
+            .with_downloader(downloader);
+
+        let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
+
+        let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
+
+        std::fs::remove_file(&resolved1.wasm_path).unwrap();
+
+        let resolved2 = resolver
+            .resolve(&spec)
+            .await
+            .expect("Second resolve failed");
+
+        assert!(resolved2.wasm_path.exists());
+        let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
+        assert_eq!(wasm_bytes, wasm_content);
     }
 }

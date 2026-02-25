@@ -2,7 +2,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::tempdir;
-use tsuzulint_registry::hash::HashVerifier;
+use tsuzulint_registry::HashVerifier;
 
 fn tsuzulint_cmd() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_tzlint"));
