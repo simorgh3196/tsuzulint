@@ -136,14 +136,16 @@ impl PluginResolver {
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
         if let Some(cached) = self.cache.get(source, version) {
-            let cached_bytes = std::fs::read(&cached.wasm_path).map_err(DownloadError::IoError)?;
-            HashVerifier::verify(&cached_bytes, &manifest.artifacts.sha256)?;
-            return Ok(ResolvedPlugin {
-                wasm_path: cached.wasm_path,
-                manifest_path: cached.manifest_path,
-                manifest,
-                alias,
-            });
+            if let Ok(cached_bytes) = std::fs::read(&cached.wasm_path) {
+                if HashVerifier::verify(&cached_bytes, &manifest.artifacts.sha256).is_ok() {
+                    return Ok(ResolvedPlugin {
+                        wasm_path: cached.wasm_path,
+                        manifest_path: cached.manifest_path,
+                        manifest,
+                        alias,
+                    });
+                }
+            }
         }
 
         let result = self.downloader.download(&manifest).await?;

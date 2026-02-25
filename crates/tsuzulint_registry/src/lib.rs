@@ -4,6 +4,7 @@ pub mod cache;
 pub mod downloader;
 pub mod error;
 pub mod fetcher;
+pub mod http_client;
 pub use tsuzulint_manifest as manifest;
 pub mod resolver;
 pub mod security;
