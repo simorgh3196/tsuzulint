@@ -147,12 +147,7 @@ impl PluginResolver {
 
         let result = self.downloader.download(&manifest).await?;
 
-        if result.computed_hash != manifest.artifacts.sha256 {
-            return Err(ResolveError::IntegrityError(IntegrityError::HashMismatch {
-                expected: manifest.artifacts.sha256.clone(),
-                actual: result.computed_hash,
-            }));
-        }
+        tsuzulint_manifest::HashVerifier::verify(&result.bytes, &manifest.artifacts.sha256)?;
 
         let manifest_json = serde_json::to_string(&manifest)
             .map_err(|e| ResolveError::SerializationError(e.to_string()))?;
@@ -181,14 +176,8 @@ impl PluginResolver {
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
         let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
-        let computed_hash = tsuzulint_manifest::HashVerifier::compute(&bytes);
 
-        if computed_hash != manifest.artifacts.sha256 {
-            return Err(ResolveError::IntegrityError(IntegrityError::HashMismatch {
-                expected: manifest.artifacts.sha256.clone(),
-                actual: computed_hash,
-            }));
-        }
+        tsuzulint_manifest::HashVerifier::verify(&bytes, &manifest.artifacts.sha256)?;
 
         Ok(ResolvedPlugin {
             wasm_path,
