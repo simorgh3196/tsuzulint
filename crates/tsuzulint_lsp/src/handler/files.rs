@@ -125,4 +125,46 @@ mod tests {
         // Should be Some because one of them was a config file
         assert!(state.linter.read().unwrap().is_some());
     }
+
+    #[tokio::test]
+    async fn test_reload_config_preserves_existing_linter_on_failure() {
+        use tsuzulint_core::{Linter, LinterConfig};
+
+        let temp = tempdir().unwrap();
+        let config_path = temp.path().join(".tsuzulint.json");
+
+        // First, create a valid config and load it
+        fs::write(&config_path, "{}").unwrap();
+        let initial_linter = Linter::new(LinterConfig::default()).unwrap();
+        let state = BackendState::with_linter(Some(initial_linter));
+
+        {
+            let mut root = state.workspace_root.write().unwrap();
+            *root = Some(temp.path().to_path_buf());
+        }
+
+        assert!(
+            state.linter.read().unwrap().is_some(),
+            "Linter should exist before reload"
+        );
+
+        // Now write an invalid config (invalid glob pattern causes Linter::new to fail)
+        // The "[" pattern is invalid because it's an unclosed character class
+        fs::write(&config_path, r#"{"include": ["["]}"#).unwrap();
+
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&config_path).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        };
+
+        handle_did_change_watched_files(&state, params).await;
+
+        // The existing linter should still be present after failed reload
+        assert!(
+            state.linter.read().unwrap().is_some(),
+            "Linter should be preserved after failed config reload"
+        );
+    }
 }
