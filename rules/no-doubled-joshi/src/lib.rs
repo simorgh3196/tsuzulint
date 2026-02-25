@@ -945,17 +945,19 @@ mod tests {
             separator_characters: vec!["♪".to_string()],
             ..Default::default()
         };
-        // ♪を区切り文字として、「これはペンです♪これは鉛筆です♪」は2文になる
-        // ルールはトークン単位で動作するため、区切り文字ロジックをテスト
-        let source = "これはペンです";
-        let prev = create_particle("は", "は:助詞.係助詞", 3, 6, 0, "これ", Some("係助詞"));
+        // 「♪」を区切り文字として設定
+        // 2つの「は」の間に「♪」がある場合、文境界として扱われMAX間隔を返す
+        // 文字列: "これはペンです♪これは鉛筆です"
+        // バイト数: これは(9) + ペンです(12) + ♪(3) + これは(9) + ...
+        let source = "これはペンです♪これは鉛筆です";
+        // 1つ目の「は」: 「これ」(0-5) の後ろ → バイト位置6-8
+        let prev = create_particle("は", "は:助詞.係助詞", 6, 9, 0, "これ", Some("係助詞"));
+        // 2つ目の「は」: 「♪」+「これ」の後ろ → 9+12+3+6 = 30-32
+        let curr = create_particle("は", "は:助詞.係助詞", 30, 33, 1, "これ", Some("係助詞"));
 
-        // ♪が間にある場合、MAX間隔（文境界として扱われる）を返す
-        let source_with_separator = "これはペンです♪";
-        let curr_after_sep =
-            create_particle("は", "は:助詞.係助詞", 21, 24, 1, "これ", Some("係助詞"));
-        let interval = calculate_interval(&prev, &curr_after_sep, source_with_separator, &config);
-        // ♪が間にあればMAXを返す
+        let interval = calculate_interval(&prev, &curr, source, &config);
+        // 「♪」が間にあるため、文境界としてMAX間隔を返す
+        assert_eq!(interval, usize::MAX);
     }
 
     #[test]

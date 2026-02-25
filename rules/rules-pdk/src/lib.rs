@@ -631,8 +631,8 @@ pub enum KnownLanguage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Capability {
-    Morphology, // 形態素解析 (tokens)
-    Sentences,  // 文分割
+    Morphology, // Morphological analysis (tokens)
+    Sentences,  // Sentence splitting
 }
 
 /// Rule manifest for registration.
