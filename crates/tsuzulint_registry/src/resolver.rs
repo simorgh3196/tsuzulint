@@ -193,9 +193,9 @@ impl PluginResolver {
 mod tests {
     use super::*;
     use crate::security::SecurityError;
+    use HashVerifier;
     use serde_json::json;
     use tempfile::tempdir;
-    use HashVerifier;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
