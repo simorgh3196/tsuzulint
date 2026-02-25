@@ -130,14 +130,6 @@ fn is_exception_particle(token: &Token) -> bool {
     }
 }
 
-/// 並立助詞かどうかを判定する。
-///
-/// 「たり」「や」「か」などの並立助詞は、
-/// 列挙のために連続して使用されるため許容する。
-fn is_parallel_particle(token: &Token) -> bool {
-    token.pos_detail(1) == Some("並立助詞")
-}
-
 fn get_previous_word(_token: &Token, tokens: &[Token], token_index: usize) -> String {
     if token_index == 0 {
         return String::new();
@@ -192,6 +184,7 @@ fn concat_adjacent_particles(particles: Vec<ParticleInfo>) -> Vec<ParticleInfo> 
                 curr.surface.push_str(&particle.surface);
                 curr.key = format!("{}:連語", curr.surface);
                 curr.byte_end = particle.byte_end;
+                curr.pos_subtype = Some("連語".to_string());
                 continue;
             } else {
                 result.push(curr.clone());
@@ -394,8 +387,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
     let mut particles = extract_particles_from_tokens(&node_tokens, &config);
     particles = concat_adjacent_particles(particles);
 
-    let source_slice = &request.source[node_start..node_end];
-    diagnostics = check_doubled_particles(&particles, &node_tokens, source_slice, &config);
+    diagnostics = check_doubled_particles(&particles, &node_tokens, &request.source, &config);
 
     Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
 }
@@ -457,23 +449,6 @@ mod tests {
             TextSpan::new(0, 3),
         );
         assert!(!is_exception_particle(&ha_token));
-    }
-
-    #[test]
-    fn parallel_particle_detection() {
-        let tari_token = Token::new(
-            "たり",
-            vec!["助詞".to_string(), "並立助詞".to_string()],
-            TextSpan::new(0, 6),
-        );
-        assert!(is_parallel_particle(&tari_token));
-
-        let ha_token = Token::new(
-            "は",
-            vec!["助詞".to_string(), "係助詞".to_string()],
-            TextSpan::new(0, 3),
-        );
-        assert!(!is_parallel_particle(&ha_token));
     }
 
     #[test]

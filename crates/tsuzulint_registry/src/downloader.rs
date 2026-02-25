@@ -158,6 +158,8 @@ mod tests {
                 fixable: false,
                 node_types: vec![],
                 isolation_level: crate::manifest::IsolationLevel::Global,
+                languages: vec![],
+                capabilities: vec![],
             },
             artifacts: crate::manifest::Artifacts {
                 wasm: wasm_url,
@@ -183,6 +185,8 @@ mod tests {
                 fixable: false,
                 node_types: vec![],
                 isolation_level: crate::manifest::IsolationLevel::Global,
+                languages: vec![],
+                capabilities: vec![],
             },
             artifacts: crate::manifest::Artifacts {
                 wasm: "https://example.com/releases/v{version}/rule.wasm".to_string(),

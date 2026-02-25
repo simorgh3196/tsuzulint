@@ -32,6 +32,8 @@ async fn main() {
             fixable: false,
             node_types: vec![],
             isolation_level: IsolationLevel::Global,
+            languages: vec![],
+            capabilities: vec![],
         },
         artifacts: Artifacts {
             wasm: format!("{}/large.wasm", mock_server.uri()),

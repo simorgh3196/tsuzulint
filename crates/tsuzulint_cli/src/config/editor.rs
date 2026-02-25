@@ -247,6 +247,8 @@ mod tests {
                 fixable: false,
                 node_types: vec![],
                 isolation_level: IsolationLevel::Global,
+                languages: vec![],
+                capabilities: vec![],
             },
             artifacts: Artifacts {
                 wasm: "test.wasm".to_string(),

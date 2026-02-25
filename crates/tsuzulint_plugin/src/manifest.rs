@@ -20,16 +20,16 @@ pub enum KnownLanguage {
     #[default]
     Ja, // Japanese
     En, // English
-    Zh, // Chinese (future)
-    Ko, // Korean (future)
+    Zh, // Chinese
+    Ko, // Korean
 }
 
 /// Required analysis capabilities for a rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Capability {
-    Morphology, // 形態素解析 (tokens)
-    Sentences,  // 文分割
+    Morphology, // morphological analysis (tokens)
+    Sentences,  // sentence segmentation
 }
 
 /// Manifest for a WASM rule plugin.
