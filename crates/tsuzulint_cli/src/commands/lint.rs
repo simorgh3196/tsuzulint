@@ -1,12 +1,15 @@
 //! Lint command implementation
 
 use miette::{IntoDiagnostic, Result};
+use tokio::runtime::Runtime;
 use tracing::{info, warn};
 use tsuzulint_core::{Linter, LinterConfig, RuleDefinition, RuleDefinitionDetail};
+use tsuzulint_registry::resolver::{PluginResolver, PluginSpec};
 
 use crate::cli::{Cli, OutputFormat};
 use crate::fix::{apply_fixes, output_fix_summary};
 use crate::output::output_results;
+use crate::utils::create_tokio_runtime;
 
 pub fn run_lint(
     cli: &Cli,
@@ -23,86 +26,10 @@ pub fn run_lint(
         find_config()?
     };
 
-    let resolver = tsuzulint_registry::resolver::PluginResolver::new().into_diagnostic()?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .into_diagnostic()?;
+    let resolver = PluginResolver::new().into_diagnostic()?;
+    let runtime = create_tokio_runtime()?;
 
-    let mut new_rules = Vec::new();
-    let mut modified = false;
-
-    for rule in &config.rules {
-        let (spec, original_alias) = match rule {
-            RuleDefinition::Simple(s) => {
-                let val = serde_json::Value::String(s.clone());
-                if let Ok(spec) = tsuzulint_registry::resolver::PluginSpec::parse(&val) {
-                    if matches!(
-                        spec.source,
-                        tsuzulint_registry::resolver::PluginSource::GitHub { .. }
-                    ) {
-                        (Some(spec), None)
-                    } else {
-                        (None, None)
-                    }
-                } else {
-                    (None, None)
-                }
-            }
-            RuleDefinition::Detail(d) => {
-                if let Some(gh) = &d.github {
-                    super::rules::build_spec_from_detail("github", gh, d.r#as.as_deref())
-                } else if let Some(url) = &d.url {
-                    super::rules::build_spec_from_detail("url", url, d.r#as.as_deref())
-                } else {
-                    (None, None)
-                }
-            }
-        };
-
-        if let Some(spec) = spec {
-            info!("Resolving rule: {:?}...", spec);
-            let resolve_result = runtime.block_on(async { resolver.resolve(&spec).await });
-
-            let resolved = match resolve_result {
-                Ok(r) => r,
-                Err(e) => {
-                    if fail_on_resolve_error {
-                        return Err(e).into_diagnostic();
-                    } else {
-                        warn!("Failed to resolve rule {:?}: {}. Skipping...", spec, e);
-                        new_rules.push(rule.clone());
-                        continue;
-                    }
-                }
-            };
-
-            let path_str = resolved
-                .manifest_path
-                .to_str()
-                .ok_or_else(|| {
-                    miette::miette!(
-                        "Resolved manifest path is not valid UTF-8: {:?}",
-                        resolved.manifest_path
-                    )
-                })?
-                .to_string();
-            let new_rule = RuleDefinition::Detail(RuleDefinitionDetail {
-                github: None,
-                url: None,
-                path: Some(path_str),
-                r#as: original_alias.or(Some(resolved.alias)),
-            });
-            new_rules.push(new_rule);
-            modified = true;
-        } else {
-            new_rules.push(rule.clone());
-        }
-    }
-
-    if modified {
-        config.rules = new_rules;
-    }
+    config.rules = resolve_rules(&config.rules, &resolver, &runtime, fail_on_resolve_error)?;
 
     if timings {
         config.timings = true;
@@ -142,6 +69,119 @@ pub fn run_lint(
     let has_errors = output_results(&results, format, timings_enabled)?;
 
     Ok(has_errors || !failures.is_empty())
+}
+
+fn resolve_rules(
+    rules: &[RuleDefinition],
+    resolver: &PluginResolver,
+    runtime: &Runtime,
+    fail_on_resolve_error: bool,
+) -> Result<Vec<RuleDefinition>> {
+    let mut resolved_rules = Vec::with_capacity(rules.len());
+
+    for rule in rules {
+        match extract_plugin_spec(rule) {
+            Some((spec, original_alias)) => {
+                match resolve_single_rule(&spec, resolver, runtime, fail_on_resolve_error) {
+                    Ok(resolved) => {
+                        let new_rule = RuleDefinition::Detail(RuleDefinitionDetail {
+                            github: None,
+                            url: None,
+                            path: Some(resolved.path),
+                            r#as: original_alias.or(Some(resolved.alias)),
+                        });
+                        resolved_rules.push(new_rule);
+                    }
+                    Err(ResolveError::Skipped) => {
+                        resolved_rules.push(rule.clone());
+                    }
+                    Err(ResolveError::Fatal(e)) => {
+                        return Err(e);
+                    }
+                }
+            }
+            None => {
+                resolved_rules.push(rule.clone());
+            }
+        }
+    }
+
+    Ok(resolved_rules)
+}
+
+struct ResolvedRule {
+    path: String,
+    alias: String,
+}
+
+enum ResolveError {
+    Skipped,
+    Fatal(miette::Report),
+}
+
+fn resolve_single_rule(
+    spec: &PluginSpec,
+    resolver: &PluginResolver,
+    runtime: &Runtime,
+    fail_on_resolve_error: bool,
+) -> std::result::Result<ResolvedRule, ResolveError> {
+    info!("Resolving rule: {:?}...", spec);
+
+    let resolve_result = runtime.block_on(async { resolver.resolve(spec).await });
+
+    match resolve_result {
+        Ok(resolved) => resolved
+            .manifest_path
+            .to_str()
+            .ok_or_else(|| {
+                ResolveError::Fatal(miette::miette!(
+                    "Resolved manifest path is not valid UTF-8: {:?}",
+                    resolved.manifest_path
+                ))
+            })
+            .map(|s| ResolvedRule {
+                path: s.to_string(),
+                alias: resolved.alias,
+            }),
+        Err(e) => {
+            if fail_on_resolve_error {
+                Err(ResolveError::Fatal(miette::miette!("{}", e)))
+            } else {
+                warn!("Failed to resolve rule {:?}: {}. Skipping...", spec, e);
+                Err(ResolveError::Skipped)
+            }
+        }
+    }
+}
+
+fn extract_plugin_spec(rule: &RuleDefinition) -> Option<(PluginSpec, Option<String>)> {
+    match rule {
+        RuleDefinition::Simple(s) => {
+            let val = serde_json::Value::String(s.clone());
+            let spec = PluginSpec::parse(&val).ok()?;
+            if matches!(
+                spec.source,
+                tsuzulint_registry::resolver::PluginSource::GitHub { .. }
+            ) {
+                Some((spec, None))
+            } else {
+                None
+            }
+        }
+        RuleDefinition::Detail(d) => {
+            if let Some(gh) = &d.github {
+                let (spec, alias) =
+                    super::rules::build_spec_from_detail("github", gh, d.r#as.as_deref());
+                spec.map(|s| (s, alias))
+            } else if let Some(url) = &d.url {
+                let (spec, alias) =
+                    super::rules::build_spec_from_detail("url", url, d.r#as.as_deref());
+                spec.map(|s| (s, alias))
+            } else {
+                None
+            }
+        }
+    }
 }
 
 pub fn find_config() -> Result<LinterConfig> {
