@@ -221,9 +221,9 @@ mod tests {
 
     #[test]
     fn test_collect_text_partial_multibyte_at_end() {
-        let text = "日本語";
+        let text = "a日";
         let extractor = SymbolExtractor::new(text);
-        let node = make_text_node(0, 4);
+        let node = make_text_node(0, 2);
         let mut out = String::new();
         extractor.collect_text(&node, &mut out);
         assert_eq!(out, "");
