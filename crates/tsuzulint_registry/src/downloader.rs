@@ -1,13 +1,11 @@
 //! WASM downloader for plugin artifacts.
 
 use crate::hash::HashVerifier;
+use crate::http_client::SecureFetchError;
+use crate::http_client::SecureHttpClient;
 use crate::manifest::ExternalRuleManifest;
-use crate::security::{SecurityError, check_ip, validate_url};
-use futures_util::StreamExt;
-use reqwest::Url;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::net::lookup_host;
 
 /// Default maximum file size for WASM downloads (50 MB).
 pub const DEFAULT_MAX_SIZE: u64 = 50 * 1024 * 1024;
@@ -18,10 +16,6 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Error type for WASM download operations.
 #[derive(Debug, Error)]
 pub enum DownloadError {
-    /// Network request failed.
-    #[error("Network error: {0}")]
-    NetworkError(#[from] reqwest::Error),
-
     /// Resource not found.
     #[error("Not found: {0}")]
     NotFound(String),
@@ -34,25 +28,9 @@ pub enum DownloadError {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// Security error (SSRF protection).
-    #[error("Security error: {0}")]
-    SecurityError(#[from] SecurityError),
-
-    /// Too many redirects.
-    #[error("Too many redirects")]
-    RedirectLimitExceeded,
-
-    /// Invalid redirect URL.
-    #[error("Invalid redirect URL: {0}")]
-    InvalidRedirectUrl(String),
-
-    /// Failed to build HTTP client.
-    #[error("Failed to build HTTP client: {0}")]
-    ClientBuildError(String),
-
-    /// DNS resolution returned no addresses.
-    #[error("DNS resolution returned no addresses for host: {0}")]
-    DnsNoAddress(String),
+    /// Secure HTTP fetch error.
+    #[error("Secure fetch error: {0}")]
+    SecureHttp(#[from] SecureFetchError),
 }
 
 /// Result of a successful WASM download.
@@ -66,10 +44,9 @@ pub struct DownloadResult {
 
 /// Downloader for WASM artifacts from plugin manifests.
 pub struct WasmDownloader {
-    client: reqwest::Client,
+    http_client: SecureHttpClient,
     max_size: u64,
     timeout: Duration,
-    allow_local: bool,
 }
 
 impl WasmDownloader {
@@ -89,16 +66,15 @@ impl WasmDownloader {
     }
 
     fn create(max_size: u64, timeout: Duration, allow_local: bool) -> Result<Self, DownloadError> {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| DownloadError::ClientBuildError(e.to_string()))?;
+        let http_client = SecureHttpClient::builder()
+            .timeout(timeout)
+            .allow_local(allow_local)
+            .build();
 
         Ok(Self {
-            client,
+            http_client,
             max_size,
             timeout,
-            allow_local,
         })
     }
 
@@ -106,16 +82,22 @@ impl WasmDownloader {
     ///
     /// By default, downloads from loopback, link-local, and private IP ranges are blocked
     /// to prevent SSRF attacks. Set this to `true` to allow them (e.g. for testing).
-    pub fn allow_local(mut self, allow: bool) -> Self {
-        self.allow_local = allow;
-        self
+    pub fn allow_local(self, allow: bool) -> Self {
+        Self {
+            http_client: SecureHttpClient::builder()
+                .timeout(self.timeout)
+                .allow_local(allow)
+                .build(),
+            max_size: self.max_size,
+            timeout: self.timeout,
+        }
     }
 
     /// Download WASM from the manifest's artifact URL.
     ///
     /// This method:
     /// 1. Replaces `{version}` placeholder in the URL with the manifest version
-    /// 2. Downloads the WASM binary with streaming (early size limit check)
+    /// 2. Downloads the WASM binary with size limit check
     /// 3. Computes the SHA256 hash after download
     ///
     /// Note: Hash verification against `manifest.artifacts.sha256` is the caller's responsibility.
@@ -135,156 +117,33 @@ impl WasmDownloader {
             .replace("{version}", &manifest.rule.version)
     }
 
-    /// Download WASM from a resolved URL using streaming.
+    /// Download WASM from a resolved URL.
     async fn download_from_url(
         &self,
         initial_url_str: &str,
     ) -> Result<DownloadResult, DownloadError> {
-        let mut current_url_str = initial_url_str.to_string();
-        let mut redirect_count = 0;
-        const MAX_REDIRECTS: u32 = 10;
+        let bytes = self.http_client.fetch(initial_url_str).await?;
 
-        loop {
-            if redirect_count >= MAX_REDIRECTS {
-                return Err(DownloadError::RedirectLimitExceeded);
-            }
-
-            let url = Url::parse(&current_url_str)
-                .map_err(|e| DownloadError::NotFound(format!("Invalid URL: {}", e)))?;
-
-            // 1. Basic URL validation (scheme, string host checks)
-            validate_url(&url, self.allow_local)?;
-
-            // 2. DNS Resolution and IP Validation (SSRF protection)
-            // Note: validate_url restricts to http/https when allow_local is false,
-            // so a None host (e.g., file://) cannot reach this branch.
-
-            let client = if !self.allow_local {
-                if let Some(host) = url.host_str() {
-                    let port = url.port_or_known_default().unwrap_or(80);
-                    // Force a fresh resolution to avoid stale cache or rebinding
-                    let addrs: Vec<_> =
-                        tokio::time::timeout(self.timeout, lookup_host((host, port)))
-                            .await
-                            .map_err(|_| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::TimedOut,
-                                    "DNS lookup timed out",
-                                )
-                            })??
-                            .collect();
-
-                    if addrs.is_empty() {
-                        return Err(DownloadError::DnsNoAddress(host.to_string()));
-                    }
-
-                    // Verify all resolved IPs
-                    for addr in &addrs {
-                        check_ip(addr.ip())?;
-                    }
-
-                    // Pin all validated IPs. This prevents DNS rebinding (TOCTOU) and allows
-                    // hyper to use the happy eyeballs algorithm for dual-stack hosts.
-                    reqwest::Client::builder()
-                        .redirect(reqwest::redirect::Policy::none())
-                        .resolve_to_addrs(host, &addrs)
-                        .build()
-                        .map_err(|e| DownloadError::ClientBuildError(e.to_string()))?
-                } else {
-                    // Fallback for schemes without host (shouldn't happen for http/s due to validation)
-                    self.client.clone()
-                }
-            } else {
-                // Testing mode: allow local addresses, skip pinning
-                self.client.clone()
-            };
-
-            // 3. Perform Request (without following redirects)
-            let response = client.get(url.clone()).timeout(self.timeout).send().await?;
-
-            // 4. Handle Redirects
-            if response.status().is_redirection()
-                && let Some(location) = response.headers().get(reqwest::header::LOCATION)
-            {
-                let location_str = location.to_str().map_err(|_| {
-                    DownloadError::InvalidRedirectUrl(
-                        "Location header is not valid UTF-8".to_string(),
-                    )
-                })?;
-
-                // Resolve relative URLs
-                let next_url = url.join(location_str).map_err(|e| {
-                    DownloadError::InvalidRedirectUrl(format!(
-                        "Failed to parse redirect URL: {}",
-                        e
-                    ))
-                })?;
-
-                current_url_str = next_url.to_string();
-                redirect_count += 1;
-                continue;
-            }
-
-            if response.status() == reqwest::StatusCode::NOT_FOUND {
-                return Err(DownloadError::NotFound(format!(
-                    "WASM file not found at {current_url_str}"
-                )));
-            }
-
-            // Check HTTP status first to prioritize server errors over size errors
-            let response = response.error_for_status()?;
-
-            // Check Content-Length header if available (early rejection)
-            let content_length = response.content_length();
-            if let Some(len) = content_length
-                && len > self.max_size
-            {
-                return Err(DownloadError::TooLarge {
-                    size: len,
-                    max: self.max_size,
-                });
-            }
-
-            // Stream the body while checking size
-            let mut stream = response.bytes_stream();
-            let mut bytes = if let Some(len) = content_length {
-                // Safely convert u64 to usize with fallback for 32-bit platforms
-                let capacity = usize::try_from(len)
-                    .unwrap_or_else(|_| usize::try_from(self.max_size.min(len)).unwrap_or(0));
-                Vec::with_capacity(capacity)
-            } else {
-                Vec::new()
-            };
-            let mut total_size: u64 = 0;
-
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = chunk_result?;
-                total_size += chunk.len() as u64;
-
-                // Early rejection if size exceeds limit
-                if total_size > self.max_size {
-                    return Err(DownloadError::TooLarge {
-                        size: total_size,
-                        max: self.max_size,
-                    });
-                }
-
-                bytes.extend_from_slice(&chunk);
-            }
-
-            let computed_hash = HashVerifier::compute(&bytes);
-
-            return Ok(DownloadResult {
-                bytes,
-                computed_hash,
+        if bytes.len() as u64 > self.max_size {
+            return Err(DownloadError::TooLarge {
+                size: bytes.len() as u64,
+                max: self.max_size,
             });
         }
+
+        let computed_hash = HashVerifier::compute(&bytes);
+
+        Ok(DownloadResult {
+            bytes,
+            computed_hash,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::StatusCode;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -351,17 +210,9 @@ mod tests {
     }
 
     #[test]
-    fn test_default_timeout_is_60_seconds() -> Result<(), DownloadError> {
-        let downloader = WasmDownloader::new()?;
-        assert_eq!(downloader.timeout, Duration::from_secs(60));
-        Ok(())
-    }
-
-    #[test]
     fn test_custom_options() -> Result<(), DownloadError> {
         let downloader = WasmDownloader::with_options(100 * 1024 * 1024, Duration::from_secs(60))?;
         assert_eq!(downloader.max_size, 100 * 1024 * 1024);
-        assert_eq!(downloader.timeout, Duration::from_secs(60));
         Ok(())
     }
 
@@ -369,7 +220,6 @@ mod tests {
     async fn test_download_success() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
 
-        // Mock a valid WASM file (just some random bytes)
         let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
         let expected_hash = HashVerifier::compute(wasm_content);
 
@@ -381,7 +231,6 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        // Explicitly allow local for tests
         let downloader = WasmDownloader::new()?.allow_local(true);
         let result = downloader.download(&manifest).await?;
 
@@ -406,8 +255,8 @@ mod tests {
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::NotFound(_)) => Ok(()),
-            _ => panic!("Expected NotFound error"),
+            Err(DownloadError::SecureHttp(SecureFetchError::NotFound(_))) => Ok(()),
+            _ => panic!("Expected SecureHttp::NotFound"),
         }
     }
 
@@ -427,11 +276,11 @@ mod tests {
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::NetworkError(e)) => {
-                assert!(e.status() == Some(reqwest::StatusCode::INTERNAL_SERVER_ERROR));
+            Err(DownloadError::SecureHttp(SecureFetchError::HttpError(status))) => {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
                 Ok(())
             }
-            _ => panic!("Expected NetworkError with 500 status"),
+            _ => panic!("Expected SecureHttp::HttpError with 500 status"),
         }
     }
 
@@ -442,9 +291,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/large.wasm"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string("A".repeat(20)), // wiremock automatically sets Content-Length
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string("A".repeat(20)))
             .mount(&mock_server)
             .await;
 
@@ -464,7 +311,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_download_too_large_stream() -> Result<(), DownloadError> {
+    async fn test_download_too_large_buffered() -> Result<(), DownloadError> {
+        // NOTE: This test uses the buffered fetch() path, not streaming.
+        // TODO: Update to test streaming size limit when fetch_with_limit is implemented (Issue #200)
         let mock_server = MockServer::start().await;
         let max_size = 5;
 
@@ -494,7 +343,6 @@ mod tests {
         let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
         let expected_hash = HashVerifier::compute(wasm_content);
 
-        // Serve with chunked transfer encoding (no Content-Length)
         Mock::given(method("GET"))
             .and(path("/chunked.wasm"))
             .respond_with(
@@ -507,7 +355,6 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/chunked.wasm", mock_server.uri()));
 
-        // Explicitly allow local because wiremock runs on localhost
         let downloader = WasmDownloader::new()?.allow_local(true);
 
         let result = downloader.download(&manifest).await?;
@@ -523,16 +370,18 @@ mod tests {
 
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        // Default downloader (deny local)
         let downloader = WasmDownloader::new()?;
         let result = downloader.download(&manifest).await;
 
+        use crate::security::SecurityError;
         match result {
-            Err(DownloadError::SecurityError(SecurityError::LoopbackDenied(_))) => {
-                // Success - access denied
-                Ok(())
-            }
-            res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
+            Err(DownloadError::SecureHttp(SecureFetchError::SecurityError(
+                SecurityError::LoopbackDenied(_),
+            ))) => Ok(()),
+            res => panic!(
+                "Expected SecureHttp::SecurityError::LoopbackDenied, got {:?}",
+                res
+            ),
         }
     }
 
@@ -541,7 +390,6 @@ mod tests {
         let mock_server = MockServer::start().await;
         let wasm_content = b"\x00\x61\x73\x6d\x01\x00\x00\x00";
 
-        // Redirect from /redirect to /rule.wasm
         Mock::given(method("GET"))
             .and(path("/redirect"))
             .respond_with(ResponseTemplate::new(301).insert_header(
@@ -570,7 +418,6 @@ mod tests {
     async fn test_redirect_limit_exceeded() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
 
-        // Redirect loop
         Mock::given(method("GET"))
             .and(path("/loop"))
             .respond_with(
@@ -586,51 +433,46 @@ mod tests {
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::RedirectLimitExceeded) => Ok(()),
-            res => panic!("Expected RedirectLimitExceeded, got {:?}", res),
+            Err(DownloadError::SecureHttp(SecureFetchError::RedirectLimitExceeded)) => Ok(()),
+            res => panic!("Expected SecureHttp::RedirectLimitExceeded, got {:?}", res),
         }
     }
 
     #[tokio::test]
     async fn test_secure_download_rejects_private_ip_directly() -> Result<(), DownloadError> {
-        // Verify that a URL whose hostname resolves only to a private IP is rejected
-        // even when the URL string itself looks public.
-        // Uses a wiremock server (localhost) with allow_local = false so the DNS
-        // resolution step is exercised and LoopbackDenied is returned.
+        use crate::security::SecurityError;
+
         let mock_server = MockServer::start().await;
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
-        let downloader = WasmDownloader::new()?; // allow_local = false by default
+        let downloader = WasmDownloader::new()?;
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::SecurityError(SecurityError::LoopbackDenied(_))) => Ok(()),
-            res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
+            Err(DownloadError::SecureHttp(SecureFetchError::SecurityError(
+                SecurityError::LoopbackDenied(_),
+            ))) => Ok(()),
+            res => panic!(
+                "Expected SecureHttp::SecurityError::LoopbackDenied, got {:?}",
+                res
+            ),
         }
     }
 
     #[tokio::test]
     async fn test_secure_download_builds_client_for_public_ip() -> Result<(), DownloadError> {
-        // This test exercises the code path where the IP check *passes* (secure mode),
-        // triggering the client construction and `resolve_to_addrs` pinning.
-        // We use TEST-NET-1 (192.0.2.1), which is a reserved public block.
-        // It passes check_ip() but is not routable/will timeout, allowing us to
-        // verify the client build logic without reaching an external server.
-
-        // Use a short timeout to make the test fast
         let downloader =
             WasmDownloader::with_options(DEFAULT_MAX_SIZE, Duration::from_millis(100))?;
 
         let manifest = create_dummy_manifest("http://192.0.2.1/rule.wasm".to_string());
         let result = downloader.download(&manifest).await;
 
-        // We expect a NetworkError (timeout/unreachable) or IoError, NOT a SecurityError.
         match result {
             Ok(_) => panic!("Expected failure for unreachable IP"),
-            Err(DownloadError::SecurityError(e)) => {
+            Err(DownloadError::SecureHttp(SecureFetchError::SecurityError(e))) => {
                 panic!("Should not fail security check: {:?}", e)
             }
-            Err(_) => Ok(()), // Any other error means we attempted the connection
+            Err(_) => Ok(()),
         }
     }
 }

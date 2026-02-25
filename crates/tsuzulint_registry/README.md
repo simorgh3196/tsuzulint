@@ -27,17 +27,18 @@ A crate responsible for plugin registry and package management. Fetches and cach
 │ (Manifest Fetch)│  │(WASM Download)  │  │ (Cache Manager) │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
           │                    │                    │
-          ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  PluginSource   │  │ HashVerifier    │  │  File System    │
-│ (Source Type)   │  │ (SHA256 Verify) │  │  ~/.cache/...   │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-          │                    │
-          ▼                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    validate_url (Security)                       │
-│           SSRF Prevention: Loopback/Private IP Validation        │
-└─────────────────────────────────────────────────────────────────┘
+          └────────┬───────────┘                    │
+                   ▼                                ▼
+┌─────────────────────────────────────┐  ┌─────────────────┐
+│        SecureHttpClient             │  │  File System    │
+│  (SSRF + DNS Rebinding Protection)  │  │  ~/.cache/...   │
+└─────────────────────────────────────┘  └─────────────────┘
+          │
+          ▼
+┌─────────────────────────────────────┐
+│  validate_url / check_ip (Security) │
+│  SSRF + DNS Rebinding Protection    │
+└─────────────────────────────────────┘
 ```
 
 ## PluginSource (Plugin Source)
@@ -146,6 +147,17 @@ let fetcher = ManifestFetcher::new().allow_local(true);
 let downloader = WasmDownloader::new().allow_local(true);
 ```
 
+### DNS Rebinding Protection
+
+When `allow_local = false`, the client:
+
+1. Resolves DNS explicitly using `tokio::net::lookup_host`
+2. Validates all resolved IPs against the security policy
+3. Pins validated IPs to the HTTP client using `resolve_to_addrs`
+
+This prevents DNS rebinding attacks where an attacker-controlled domain
+initially resolves to a public IP but later resolves to a private IP.
+
 ### Hash Verification
 
 - Automatic SHA256 calculation of downloaded WASM
@@ -168,19 +180,52 @@ let downloader = WasmDownloader::new().allow_local(true);
 
 ```rust
 pub struct WasmDownloader {
-    max_size: usize,          // Default: 50MB
-    timeout: Duration,        // Default: 60 seconds
-    allow_local: bool,        // Default: false
+    http_client: SecureHttpClient,  // Handles HTTP with SSRF protection
+    max_size: u64,                   // Default: 50MB
+    timeout: Duration,               // Default: 60 seconds (stored for allow_local rebuild)
 }
 ```
 
 **Features:**
 
-- Streaming download (supports large files)
-- Size limit checking (two-stage: pre-check and during streaming)
+- Size limit checking after download
 - Timeout configuration
 - `{version}` placeholder substitution
 - Automatic hash calculation
+- Uses `SecureHttpClient` for SSRF/DNS Rebinding protection
+
+## SecureHttpClient
+
+```rust
+pub struct SecureHttpClient {
+    timeout: Duration,        // Default: 10 seconds
+    allow_local: bool,        // Default: false
+    max_redirects: u32,       // Default: 10
+}
+```
+
+**Features:**
+
+- DNS resolution with timeout
+- IP validation (SSRF protection)
+- DNS pinning (DNS Rebinding protection)
+- Manual redirect handling with validation per hop
+- Maximum redirect limit (default: 10)
+
+**Usage:**
+
+```rust
+use tsuzulint_registry::http_client::SecureHttpClient;
+use std::time::Duration;
+
+let client = SecureHttpClient::builder()
+    .timeout(Duration::from_secs(30))
+    .allow_local(true)
+    .max_redirects(5)
+    .build();
+
+let content = client.fetch("https://example.com/data").await?;
+```
 
 ## Usage Examples
 
@@ -245,6 +290,7 @@ tzlint plugin cache clean
 | `lib.rs` | Entry point, public API re-exports |
 | `fetcher.rs` | Plugin manifest fetching |
 | `downloader.rs` | WASM binary download |
+| `http_client.rs` | Secure HTTP fetch with SSRF/DNS protection |
 | `resolver.rs` | Plugin resolution integration |
 | `cache.rs` | Local plugin cache |
 | `security.rs` | URL security validation |
