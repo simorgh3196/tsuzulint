@@ -394,7 +394,6 @@ fn filter_overridden_diagnostics(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
