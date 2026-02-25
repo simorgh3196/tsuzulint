@@ -85,10 +85,8 @@ pub fn lint_file_internal(
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
-    let (global_rule_names, block_rule_names) =
+    let (global_rule_names, block_rule_names, needs_morphology) =
         get_classified_rules(host.loaded_rules(), host, enabled_rules);
-
-    let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), host, enabled_rules);
 
     let tokens = if needs_morphology {
         tokenizer
@@ -358,13 +356,14 @@ fn get_classified_rules<'a, I, P>(
     rules: I,
     host: &P,
     enabled_rules: &HashSet<&str>,
-) -> (Vec<String>, Vec<String>)
+) -> (Vec<String>, Vec<String>, bool)
 where
     I: Iterator<Item = &'a String>,
     P: ManifestProvider,
 {
     let mut global_rules = Vec::new();
     let mut block_rules = Vec::new();
+    let mut needs_morphology = false;
 
     for name in rules {
         if !enabled_rules.contains(name.as_str()) {
@@ -375,12 +374,15 @@ where
                 IsolationLevel::Global => global_rules.push(name.clone()),
                 IsolationLevel::Block => block_rules.push(name.clone()),
             }
+            if !needs_morphology && manifest.needs_morphology() {
+                needs_morphology = true;
+            }
         } else {
             warn!("Rule '{}' is enabled but has no manifest; skipping", name);
         }
     }
 
-    (global_rules, block_rules)
+    (global_rules, block_rules, needs_morphology)
 }
 
 fn filter_overridden_diagnostics(
@@ -392,23 +394,6 @@ fn filter_overridden_diagnostics(
     }
 }
 
-fn any_rule_needs_morphology<'a, I, P>(rules: I, host: &P, enabled_rules: &HashSet<&str>) -> bool
-where
-    I: Iterator<Item = &'a String>,
-    P: ManifestProvider,
-{
-    for name in rules {
-        if !enabled_rules.contains(name.as_str()) {
-            continue;
-        }
-        if let Some(manifest) = host.get_manifest(name)
-            && manifest.needs_morphology()
-        {
-            return true;
-        }
-    }
-    false
-}
 
 #[cfg(test)]
 mod tests {
@@ -475,9 +460,10 @@ mod tests {
         enabled_rules.insert(block_name);
         enabled_rules.insert(missing_manifest_name); // Enabled but no manifest
 
-        let (global_rules, block_rules) =
+        let (global_rules, block_rules, needs_morphology) =
             get_classified_rules(loaded_rules.iter(), &provider, &enabled_rules);
 
+        assert!(!needs_morphology);
         assert!(global_rules.contains(&global_name.to_string()));
         assert!(!global_rules.contains(&disabled_name.to_string()));
         assert!(!global_rules.contains(&missing_manifest_name.to_string()));
@@ -486,6 +472,27 @@ mod tests {
 
         assert_eq!(global_rules.len(), 1);
         assert_eq!(block_rules.len(), 1);
+    }
+
+    #[test]
+    fn test_get_classified_rules_with_morphology() {
+        use tsuzulint_plugin::Capability;
+
+        let rule_name = "morph-rule";
+        let mut manifests = HashMap::new();
+        let mut manifest = create_manifest(IsolationLevel::Global);
+        manifest.capabilities.push(Capability::Morphology);
+        manifests.insert(rule_name.to_string(), manifest);
+
+        let provider = MockManifestProvider { manifests };
+        let loaded_rules = [rule_name.to_string()];
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert(rule_name);
+
+        let (_, _, needs_morphology) =
+            get_classified_rules(loaded_rules.iter(), &provider, &enabled_rules);
+
+        assert!(needs_morphology);
     }
 
     #[test]
