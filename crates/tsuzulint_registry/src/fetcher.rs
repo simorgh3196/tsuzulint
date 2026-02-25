@@ -340,11 +340,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_from_path_too_large() {
-        use std::io::Write;
         use tempfile::NamedTempFile;
 
         // Create a file slightly larger than MAX_MANIFEST_SIZE
-        let mut file = NamedTempFile::new().unwrap();
+        let file = NamedTempFile::new().unwrap();
         let target_size = MAX_MANIFEST_SIZE + 1;
         file.as_file().set_len(target_size).unwrap();
 
