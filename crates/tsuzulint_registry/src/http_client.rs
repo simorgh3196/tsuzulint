@@ -226,6 +226,8 @@ impl SecureHttpClientBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn builder_default_values() {
@@ -257,5 +259,127 @@ mod tests {
         assert_eq!(client.timeout, built.timeout);
         assert_eq!(client.allow_local, built.allow_local);
         assert_eq!(client.max_redirects, built.max_redirects);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/data"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("test content"))
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().allow_local(true).build();
+        let url = format!("{}/data", mock_server.uri());
+        let result = client.fetch(&url).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), b"test content");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_redirect_loop() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/loop"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("Location", format!("{}/loop", mock_server.uri())),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().allow_local(true).build();
+        let url = format!("{}/loop", mock_server.uri());
+        let result = client.fetch(&url).await;
+
+        assert!(matches!(
+            result,
+            Err(SecureFetchError::RedirectLimitExceeded)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_redirect_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/redirect"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("Location", format!("{}/target", mock_server.uri())),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/target"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("redirected"))
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().allow_local(true).build();
+        let url = format!("{}/redirect", mock_server.uri());
+        let result = client.fetch(&url).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), b"redirected");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_local_denied_by_default() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/data"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("test"))
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().build(); // allow_local = false
+        let url = format!("{}/data", mock_server.uri());
+        let result = client.fetch(&url).await;
+
+        assert!(matches!(result, Err(SecureFetchError::SecurityError(_))));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_not_found() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/missing"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().allow_local(true).build();
+        let url = format!("{}/missing", mock_server.uri());
+        let result = client.fetch(&url).await;
+
+        assert!(matches!(result, Err(SecureFetchError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_invalid_utf8_redirect() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/bad-redirect"))
+            .respond_with(ResponseTemplate::new(301).append_header("Location", b"\xFF".as_slice()))
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().allow_local(true).build();
+        let url = format!("{}/bad-redirect", mock_server.uri());
+        let result = client.fetch(&url).await;
+
+        assert!(matches!(
+            result,
+            Err(SecureFetchError::InvalidRedirectUrl(_))
+        ));
     }
 }
