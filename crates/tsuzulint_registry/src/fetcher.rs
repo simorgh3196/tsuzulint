@@ -132,7 +132,7 @@ impl ManifestFetcher {
     /// Fetch manifest from a URL.
     async fn fetch_from_url(&self, url_str: &str) -> Result<ExternalRuleManifest, FetchError> {
         let bytes = self.http_client.fetch(url_str).await?;
-        let text = String::from_utf8_lossy(&bytes).to_string();
+        let text = String::from_utf8(bytes)?;
         let manifest = validate_manifest(&text)?;
         Ok(manifest)
     }

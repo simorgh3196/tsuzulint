@@ -2,6 +2,7 @@
 
 use crate::ManifestError;
 use crate::security::SecurityError;
+use std::string::FromUtf8Error;
 use thiserror::Error;
 
 /// Error type for manifest fetch operations.
@@ -30,4 +31,8 @@ pub enum FetchError {
     /// Secure HTTP fetch error.
     #[error("Secure fetch error: {0}")]
     SecureFetchError(#[from] crate::http_client::SecureFetchError),
+
+    /// Invalid UTF-8 in response body.
+    #[error("Invalid UTF-8 in response: {0}")]
+    InvalidUtf8(#[from] FromUtf8Error),
 }
