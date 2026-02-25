@@ -96,7 +96,9 @@ tsuzulint_wasm                             # Browser WASM bindings
 
 ## Code Style
 
-- **Comments**: All code comments must be in English.
+- **Comments**:
+  - Core crates (`crates/tsuzulint_*`), PDK (`rules/rules-pdk`), and shared infrastructure: All code comments must be in English.
+  - Language-specific rules (`rules/*`): Comments may be in the target language (e.g., Japanese for Japanese rules like `no-doubled-joshi`).
 - **Error Handling**: Use `thiserror` for definitions, `miette` for user-facing display. Avoid `.unwrap()` in library code.
 - **Formatting**: rustfmt with `edition = "2024"`.
 

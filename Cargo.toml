@@ -12,6 +12,7 @@ members = [
     "crates/tsuzulint_manifest",
     "crates/tsuzulint_wasm",
     "crates/tsuzulint_text",
+    "tests/integration",
 ]
 
 [workspace.package]

@@ -202,6 +202,8 @@ fn generate_minimal_manifest(
             fixable: false,
             node_types: vec![],
             isolation_level: IsolationLevel::Global,
+            languages: vec![],
+            capabilities: vec![],
         },
         artifacts: Artifacts {
             wasm: "rule.wasm".to_string(),
@@ -529,6 +531,8 @@ mod manifest_tests {
                     fixable: false,
                     node_types: vec![],
                     isolation_level: IsolationLevel::Global,
+                    languages: vec![],
+                    capabilities: vec![],
                 },
                 artifacts: Artifacts {
                     wasm: "old-name.wasm".to_string(),

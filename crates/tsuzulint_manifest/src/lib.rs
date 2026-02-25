@@ -54,6 +54,10 @@ pub struct RuleMetadata {
     pub node_types: Vec<String>,
     #[serde(default = "default_isolation_level")]
     pub isolation_level: IsolationLevel,
+    #[serde(default)]
+    pub languages: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -358,6 +362,8 @@ mod tests {
                 fixable: false,
                 node_types: vec![],
                 isolation_level: IsolationLevel::Global,
+                languages: vec![],
+                capabilities: vec![],
             },
             artifacts: Artifacts {
                 wasm: "rule.wasm".to_string(),
@@ -412,6 +418,8 @@ mod tests {
                 fixable: false,
                 node_types: vec![],
                 isolation_level: IsolationLevel::Global,
+                languages: vec![],
+                capabilities: vec![],
             },
             artifacts: Artifacts {
                 wasm: "rule.wasm".to_string(),

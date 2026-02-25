@@ -4475,6 +4475,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsuzulint-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "predicates",
+ "tempfile",
+]
+
+[[package]]
 name = "tsuzulint_ast"
 version = "0.1.0"
 dependencies = [

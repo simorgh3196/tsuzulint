@@ -51,4 +51,4 @@ pub use diagnostic::{Diagnostic, Fix, Severity};
 pub use error::PluginError;
 pub use executor::{LoadResult, RuleExecutor};
 pub use host::{PluginHost, PreparedLintRequest};
-pub use manifest::{IsolationLevel, RuleManifest};
+pub use manifest::{Capability, IsolationLevel, KnownLanguage, RuleManifest};

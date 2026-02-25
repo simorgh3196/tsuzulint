@@ -129,12 +129,36 @@ fn convert_manifest(
     external: &tsuzulint_manifest::ExternalRuleManifest,
 ) -> tsuzulint_plugin::RuleManifest {
     use tsuzulint_manifest::IsolationLevel as ExternalIsolationLevel;
-    use tsuzulint_plugin::IsolationLevel as PluginIsolationLevel;
+    use tsuzulint_plugin::{Capability, IsolationLevel as PluginIsolationLevel, KnownLanguage};
 
     let isolation_level = match external.rule.isolation_level {
         ExternalIsolationLevel::Global => PluginIsolationLevel::Global,
         ExternalIsolationLevel::Block => PluginIsolationLevel::Block,
     };
+
+    let languages: Vec<KnownLanguage> = external
+        .rule
+        .languages
+        .iter()
+        .filter_map(|s| match s.as_str() {
+            "ja" => Some(KnownLanguage::Ja),
+            "en" => Some(KnownLanguage::En),
+            "zh" => Some(KnownLanguage::Zh),
+            "ko" => Some(KnownLanguage::Ko),
+            _ => None,
+        })
+        .collect();
+
+    let capabilities: Vec<Capability> = external
+        .rule
+        .capabilities
+        .iter()
+        .filter_map(|s| match s.as_str() {
+            "morphology" => Some(Capability::Morphology),
+            "sentences" => Some(Capability::Sentences),
+            _ => None,
+        })
+        .collect();
 
     tsuzulint_plugin::RuleManifest {
         name: external.rule.name.clone(),
@@ -144,6 +168,8 @@ fn convert_manifest(
         node_types: external.rule.node_types.clone(),
         isolation_level,
         schema: None,
+        languages,
+        capabilities,
     }
 }
 
