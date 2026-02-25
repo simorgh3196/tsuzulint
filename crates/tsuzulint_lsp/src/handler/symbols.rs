@@ -112,8 +112,8 @@ impl<'a> SymbolExtractor<'a> {
         if node.node_type == NodeType::Str {
             let start = node.span.start as usize;
             let end = node.span.end as usize;
-            if start <= end && end <= self.text.len() {
-                out.push_str(&self.text[start..end]);
+            if let Some(slice) = self.text.get(start..end) {
+                out.push_str(slice);
             }
         }
         for child in node.children.iter() {
@@ -125,4 +125,117 @@ impl<'a> SymbolExtractor<'a> {
 fn get_document_content(state: &SharedState, uri: &Url) -> Option<String> {
     let docs = state.documents.read().ok()?;
     docs.get(uri).map(|d| d.text.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tsuzulint_ast::{AstArena, Span, TxtNode};
+
+    fn make_text_node(start: u32, end: u32) -> TxtNode<'static> {
+        TxtNode::new_text(NodeType::Str, Span::new(start, end), "")
+    }
+
+    #[test]
+    fn test_collect_text_valid_ascii() {
+        let text = "Hello, World!";
+        let extractor = SymbolExtractor::new(text);
+        let node = make_text_node(0, 5);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "Hello");
+    }
+
+    #[test]
+    fn test_collect_text_multibyte_utf8() {
+        let text = "こんにちは世界";
+        let extractor = SymbolExtractor::new(text);
+        let node = make_text_node(0, 15);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "こんにちは");
+    }
+
+    #[test]
+    fn test_collect_text_nested_nodes() {
+        let text = "Hello World";
+        let extractor = SymbolExtractor::new(text);
+        let arena = AstArena::new();
+        let child = arena.alloc(make_text_node(0, 5));
+        let children = arena.alloc_slice_copy(&[*child]);
+        let parent = TxtNode::new_parent(NodeType::Header, Span::new(0, 11), children);
+        let mut out = String::new();
+        extractor.collect_text(&parent, &mut out);
+        assert_eq!(out, "Hello");
+    }
+
+    #[test]
+    fn test_collect_text_empty_range() {
+        let text = "Hello";
+        let extractor = SymbolExtractor::new(text);
+        let node = make_text_node(2, 2);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn test_collect_text_invalid_range_start_greater_than_end() {
+        let text = "Hello";
+        let extractor = SymbolExtractor::new(text);
+        let node = make_text_node(3, 1);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn test_collect_text_out_of_bounds() {
+        let text = "Hello";
+        let extractor = SymbolExtractor::new(text);
+        let node = make_text_node(0, 100);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn test_collect_text_invalid_utf8_boundary() {
+        let text = "日本語";
+        let extractor = SymbolExtractor::new(text);
+        let node = make_text_node(0, 4);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn test_collect_text_partial_multibyte_at_start() {
+        let text = "日本語";
+        let extractor = SymbolExtractor::new(text);
+        let node = make_text_node(1, 6);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn test_collect_text_partial_multibyte_at_end() {
+        let text = "日本語";
+        let extractor = SymbolExtractor::new(text);
+        let node = make_text_node(0, 4);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn test_collect_text_non_str_node_ignored() {
+        let text = "Hello";
+        let extractor = SymbolExtractor::new(text);
+        let node = TxtNode::new_parent(NodeType::Header, Span::new(0, 5), &[]);
+        let mut out = String::new();
+        extractor.collect_text(&node, &mut out);
+        assert_eq!(out, "");
+    }
 }
