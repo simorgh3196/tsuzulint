@@ -74,7 +74,10 @@ impl ManifestFetcher {
     /// Create a new manifest fetcher.
     pub fn new() -> Self {
         Self {
-            http_client: SecureHttpClient::builder().timeout(DEFAULT_TIMEOUT).build(),
+            http_client: SecureHttpClient::builder()
+                .timeout(DEFAULT_TIMEOUT)
+                .max_redirects(DEFAULT_MAX_REDIRECTS)
+                .build(),
             github_base_url: "https://github.com".to_string(),
             timeout: DEFAULT_TIMEOUT,
             max_redirects: DEFAULT_MAX_REDIRECTS,

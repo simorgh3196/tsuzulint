@@ -4,7 +4,6 @@ use crate::hash::HashVerifier;
 use crate::http_client::SecureFetchError;
 use crate::http_client::SecureHttpClient;
 use crate::manifest::ExternalRuleManifest;
-use crate::security::SecurityError;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -29,13 +28,9 @@ pub enum DownloadError {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// Security error (SSRF protection).
-    #[error("Security error: {0}")]
-    SecurityError(#[from] SecurityError),
-
-    /// Secure fetch error.
-    #[error("Fetch error: {0}")]
-    FetchError(#[from] SecureFetchError),
+    /// Secure HTTP fetch error.
+    #[error("Secure fetch error: {0}")]
+    SecureHttp(#[from] SecureFetchError),
 }
 
 /// Result of a successful WASM download.
@@ -148,6 +143,7 @@ impl WasmDownloader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::StatusCode;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -259,8 +255,8 @@ mod tests {
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::FetchError(SecureFetchError::NotFound(_))) => Ok(()),
-            _ => panic!("Expected FetchError::NotFound"),
+            Err(DownloadError::SecureHttp(SecureFetchError::NotFound(_))) => Ok(()),
+            _ => panic!("Expected SecureHttp::NotFound"),
         }
     }
 
@@ -280,11 +276,11 @@ mod tests {
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::FetchError(SecureFetchError::HttpError(status))) => {
-                assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+            Err(DownloadError::SecureHttp(SecureFetchError::HttpError(status))) => {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
                 Ok(())
             }
-            _ => panic!("Expected FetchError::HttpError with 500 status"),
+            _ => panic!("Expected SecureHttp::HttpError with 500 status"),
         }
     }
 
@@ -315,7 +311,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_download_too_large_stream() -> Result<(), DownloadError> {
+    async fn test_download_too_large_buffered() -> Result<(), DownloadError> {
+        // NOTE: This test uses the buffered fetch() path, not streaming.
+        // TODO: Update to test streaming size limit when fetch_with_limit is implemented (Issue #200)
         let mock_server = MockServer::start().await;
         let max_size = 5;
 
@@ -375,12 +373,13 @@ mod tests {
         let downloader = WasmDownloader::new()?;
         let result = downloader.download(&manifest).await;
 
+        use crate::security::SecurityError;
         match result {
-            Err(DownloadError::FetchError(SecureFetchError::SecurityError(
+            Err(DownloadError::SecureHttp(SecureFetchError::SecurityError(
                 SecurityError::LoopbackDenied(_),
             ))) => Ok(()),
             res => panic!(
-                "Expected FetchError::SecurityError::LoopbackDenied, got {:?}",
+                "Expected SecureHttp::SecurityError::LoopbackDenied, got {:?}",
                 res
             ),
         }
@@ -434,13 +433,15 @@ mod tests {
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::FetchError(SecureFetchError::RedirectLimitExceeded)) => Ok(()),
-            res => panic!("Expected FetchError::RedirectLimitExceeded, got {:?}", res),
+            Err(DownloadError::SecureHttp(SecureFetchError::RedirectLimitExceeded)) => Ok(()),
+            res => panic!("Expected SecureHttp::RedirectLimitExceeded, got {:?}", res),
         }
     }
 
     #[tokio::test]
     async fn test_secure_download_rejects_private_ip_directly() -> Result<(), DownloadError> {
+        use crate::security::SecurityError;
+
         let mock_server = MockServer::start().await;
         let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
 
@@ -448,11 +449,11 @@ mod tests {
         let result = downloader.download(&manifest).await;
 
         match result {
-            Err(DownloadError::FetchError(SecureFetchError::SecurityError(
+            Err(DownloadError::SecureHttp(SecureFetchError::SecurityError(
                 SecurityError::LoopbackDenied(_),
             ))) => Ok(()),
             res => panic!(
-                "Expected FetchError::SecurityError::LoopbackDenied, got {:?}",
+                "Expected SecureHttp::SecurityError::LoopbackDenied, got {:?}",
                 res
             ),
         }
@@ -468,7 +469,7 @@ mod tests {
 
         match result {
             Ok(_) => panic!("Expected failure for unreachable IP"),
-            Err(DownloadError::FetchError(SecureFetchError::SecurityError(e))) => {
+            Err(DownloadError::SecureHttp(SecureFetchError::SecurityError(e))) => {
                 panic!("Should not fail security check: {:?}", e)
             }
             Err(_) => Ok(()),
