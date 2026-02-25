@@ -1,51 +1,105 @@
 //! Secure HTTP client with SSRF and DNS Rebinding protection.
 
+#![allow(unused_assignments)]
+
 use std::time::Duration;
 
 use crate::security::SecurityError;
 use crate::security::{check_ip, validate_url};
+use futures_util::StreamExt;
+use miette::Diagnostic;
 use reqwest::Url;
 use thiserror::Error;
 use tokio::net::lookup_host;
 
 /// Error type for secure HTTP fetch operations.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
 pub enum SecureFetchError {
     /// Too many redirects.
     #[error("Too many redirects")]
+    #[diagnostic(
+        code(tsuzulint::http::redirect_limit),
+        help("Check for redirect loops or increase max_redirects in the client configuration")
+    )]
     RedirectLimitExceeded,
 
     /// Invalid redirect URL.
     #[error("Invalid redirect URL: {0}")]
+    #[diagnostic(
+        code(tsuzulint::http::invalid_redirect),
+        help("The server returned an invalid redirect URL. Check the server configuration.")
+    )]
     InvalidRedirectUrl(String),
 
     /// DNS resolution returned no addresses.
     #[error("DNS resolution returned no addresses for host: {0}")]
+    #[diagnostic(
+        code(tsuzulint::http::dns_no_address),
+        help("The hostname could not be resolved. Check the hostname or your DNS configuration.")
+    )]
     DnsNoAddress(String),
 
     /// DNS resolution timed out.
     #[error("DNS resolution timed out")]
+    #[diagnostic(
+        code(tsuzulint::http::dns_timeout),
+        help("Check your network connection or DNS server configuration.")
+    )]
     DnsTimeout,
 
     /// Network request failed.
     #[error("Network error: {0}")]
+    #[diagnostic(
+        code(tsuzulint::http::network_error),
+        help("A network error occurred. Check your internet connection and try again.")
+    )]
     NetworkError(#[from] reqwest::Error),
 
     /// Security error (SSRF protection).
     #[error("Security error: {0}")]
+    #[diagnostic(
+        code(tsuzulint::http::security_error),
+        help(
+            "The request was blocked for security reasons (SSRF protection). \
+              Use allow_local(true) if you need to access local network addresses."
+        )
+    )]
     SecurityError(#[from] SecurityError),
 
     /// Resource not found.
     #[error("Not found: {0}")]
+    #[diagnostic(
+        code(tsuzulint::http::not_found),
+        help("The requested resource was not found. Verify the URL is correct.")
+    )]
     NotFound(String),
 
     /// HTTP error status.
     #[error("HTTP error: {0}")]
+    #[diagnostic(
+        code(tsuzulint::http::http_error),
+        help("The server returned an error status. Check the status code for more details.")
+    )]
     HttpError(reqwest::StatusCode),
 
     /// Failed to build HTTP client.
     #[error("Failed to build HTTP client: {0}")]
+    #[diagnostic(
+        code(tsuzulint::http::client_build_error),
+        help("Failed to create HTTP client. This may be a configuration issue.")
+    )]
     ClientBuildError(String),
+
+    /// Response body exceeds size limit.
+    #[error("Response body too large: {size} bytes exceeds maximum of {max} bytes")]
+    #[diagnostic(
+        code(tsuzulint::http::response_too_large),
+        help(
+            "The response body exceeds the configured size limit. \
+              Increase the limit or check if you're downloading the correct resource."
+        )
+    )]
+    ResponseTooLarge { size: u64, max: u64 },
 }
 
 /// Default timeout for HTTP requests.
@@ -159,6 +213,102 @@ impl SecureHttpClient {
 
             let bytes = response.bytes().await?.to_vec();
             return Ok(bytes);
+        }
+    }
+
+    /// Fetch content with streaming and size limit.
+    ///
+    /// This method streams the response body and checks the running total against
+    /// `max_size`, returning `ResponseTooLarge` error immediately when the limit
+    /// is exceeded. This avoids buffering the entire response for oversized files.
+    pub async fn fetch_with_size_limit(
+        &self,
+        url: &str,
+        max_size: u64,
+    ) -> Result<Vec<u8>, SecureFetchError> {
+        let mut current_url_str = url.to_string();
+        let mut redirect_count = 0;
+
+        loop {
+            let parsed_url = Url::parse(&current_url_str)
+                .map_err(|e| SecureFetchError::NotFound(format!("Invalid URL: {}", e)))?;
+
+            validate_url(&parsed_url, self.allow_local)?;
+
+            let client = self.build_client(&parsed_url).await?;
+
+            let response = client
+                .get(parsed_url.clone())
+                .timeout(self.timeout)
+                .send()
+                .await?;
+
+            if response.status().is_redirection() {
+                let location = response
+                    .headers()
+                    .get(reqwest::header::LOCATION)
+                    .ok_or_else(|| {
+                        SecureFetchError::InvalidRedirectUrl(
+                            "Redirect response missing Location header".to_string(),
+                        )
+                    })?;
+
+                let location_str = location.to_str().map_err(|_| {
+                    SecureFetchError::InvalidRedirectUrl(
+                        "Location header is not valid UTF-8".to_string(),
+                    )
+                })?;
+
+                let next_url = parsed_url.join(location_str).map_err(|e| {
+                    SecureFetchError::InvalidRedirectUrl(format!(
+                        "Failed to parse redirect URL: {}",
+                        e
+                    ))
+                })?;
+
+                redirect_count += 1;
+                if redirect_count >= self.max_redirects {
+                    return Err(SecureFetchError::RedirectLimitExceeded);
+                }
+
+                current_url_str = next_url.to_string();
+                continue;
+            }
+
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Err(SecureFetchError::NotFound(format!(
+                    "Resource not found at {}",
+                    current_url_str
+                )));
+            }
+
+            let response = response.error_for_status().map_err(|e| {
+                if let Some(status) = e.status() {
+                    SecureFetchError::HttpError(status)
+                } else {
+                    SecureFetchError::NetworkError(e)
+                }
+            })?;
+
+            let mut stream = response.bytes_stream();
+            let mut buffer = Vec::new();
+            let mut total_size: u64 = 0;
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+                total_size += chunk.len() as u64;
+
+                if total_size > max_size {
+                    return Err(SecureFetchError::ResponseTooLarge {
+                        size: total_size,
+                        max: max_size,
+                    });
+                }
+
+                buffer.extend_from_slice(&chunk);
+            }
+
+            return Ok(buffer);
         }
     }
 
@@ -387,6 +537,70 @@ mod tests {
         assert!(matches!(
             result,
             Err(SecureFetchError::InvalidRedirectUrl(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_with_size_limit_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/data"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("test content"))
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().allow_local(true).build();
+        let url = format!("{}/data", mock_server.uri());
+        let result = client.fetch_with_size_limit(&url, 100).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), b"test content");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_with_size_limit_exceeded() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/large"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("A".repeat(100)))
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().allow_local(true).build();
+        let url = format!("{}/large", mock_server.uri());
+        let result = client.fetch_with_size_limit(&url, 50).await;
+
+        match result {
+            Err(SecureFetchError::ResponseTooLarge { size, max }) => {
+                assert!(size > 50);
+                assert_eq!(max, 50);
+            }
+            _ => panic!("Expected ResponseTooLarge error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_with_size_limit_exact_boundary() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/exact"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("A".repeat(10)))
+            .mount(&mock_server)
+            .await;
+
+        let client = SecureHttpClient::builder().allow_local(true).build();
+        let url = format!("{}/exact", mock_server.uri());
+
+        let result = client.fetch_with_size_limit(&url, 10).await;
+        assert!(result.is_ok());
+
+        let result = client.fetch_with_size_limit(&url, 9).await;
+        assert!(matches!(
+            result,
+            Err(SecureFetchError::ResponseTooLarge { .. })
         ));
     }
 }
