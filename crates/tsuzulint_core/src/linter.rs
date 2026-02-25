@@ -107,6 +107,8 @@ impl Linter {
             .lock()
             .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
 
+        let rule_versions = crate::rule_loader::get_rule_versions_from_host(&host);
+
         let enabled_rules_vec = self.config.enabled_rules();
         let enabled_rules: HashSet<&str> = enabled_rules_vec.iter().map(|(n, _)| *n).collect();
 
@@ -117,6 +119,7 @@ impl Linter {
             &self.config_hash,
             &self.cache,
             &enabled_rules,
+            &rule_versions,
             self.config.timings,
         )
     }
@@ -128,6 +131,14 @@ impl Linter {
     }
 
     pub fn lint_files(&self, paths: &[PathBuf]) -> LintFilesResult {
+        let rule_versions = {
+            let host = self
+                .plugin_host
+                .lock()
+                .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
+            crate::rule_loader::get_rule_versions_from_host(&host)
+        };
+
         lint_files_parallel(
             paths,
             &self.config,
@@ -135,6 +146,7 @@ impl Linter {
             &self.tokenizer,
             &self.cache,
             &self.dynamic_rules,
+            &rule_versions,
         )
     }
 

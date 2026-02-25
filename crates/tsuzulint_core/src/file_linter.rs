@@ -27,6 +27,7 @@ pub fn lint_file_internal(
     config_hash: &str,
     cache: &Mutex<CacheManager>,
     enabled_rules: &HashSet<&str>,
+    rule_versions: &HashMap<String, String>,
     timings_enabled: bool,
 ) -> Result<LintResult, LinterError> {
     debug!("Linting {}", path.display());
@@ -58,7 +59,6 @@ pub fn lint_file_internal(
         .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
 
     let content_hash = CacheManager::hash_content(&content);
-    let rule_versions = super::rule_loader::get_rule_versions_from_host(host);
 
     {
         let cache_guard = cache
@@ -244,7 +244,7 @@ pub fn lint_file_internal(
         let entry = tsuzulint_cache::CacheEntry::new(
             content_hash,
             config_hash.to_string(),
-            rule_versions,
+            rule_versions.clone(),
             final_diagnostics.clone(),
             new_blocks,
         );

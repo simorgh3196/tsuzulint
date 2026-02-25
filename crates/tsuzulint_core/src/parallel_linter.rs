@@ -22,6 +22,7 @@ pub fn lint_files(
     tokenizer: &Arc<Tokenizer>,
     cache: &std::sync::Mutex<CacheManager>,
     dynamic_rules: &std::sync::Mutex<Vec<PathBuf>>,
+    rule_versions: &std::collections::HashMap<String, String>,
 ) -> LintFilesResult {
     let enabled_rules_vec = config.enabled_rules();
     let enabled_rules: std::collections::HashSet<&str> =
@@ -53,6 +54,7 @@ pub fn lint_files(
                     config_hash,
                     cache,
                     &enabled_rules,
+                    rule_versions,
                     timings_enabled,
                 )
                 .map_err(|e| (path.clone(), e))
@@ -111,6 +113,7 @@ mod tests {
             &tokenizer,
             &cache,
             &dynamic_rules,
+            &std::collections::HashMap::new(),
         );
         assert!(result.is_ok());
 
