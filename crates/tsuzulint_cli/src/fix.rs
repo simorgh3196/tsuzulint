@@ -63,22 +63,24 @@ pub fn apply_fixes(results: &[LintResult], dry_run: bool) -> Result<FixSummary> 
 
 /// Outputs the fix summary.
 pub fn output_fix_summary(summary: &FixSummary, dry_run: bool) {
-    if summary.total_fixes == 0 {
+    if summary.total_fixes == 0 && summary.errors.is_empty() {
         println!("No fixable issues found.");
         return;
     }
 
-    let action = if dry_run { "Would fix" } else { "Fixed" };
-    let qualifier = if dry_run { "approximately " } else { "" };
+    if summary.total_fixes > 0 {
+        let action = if dry_run { "Would fix" } else { "Fixed" };
+        let qualifier = if dry_run { "approximately " } else { "" };
 
-    println!(
-        "\n{} {}{} issues in {} files:",
-        action, qualifier, summary.total_fixes, summary.files_fixed
-    );
-    print_fix_list(&summary.fixes_by_file);
+        println!(
+            "\n{} {}{} issues in {} files:",
+            action, qualifier, summary.total_fixes, summary.files_fixed
+        );
+        print_fix_list(&summary.fixes_by_file);
 
-    if dry_run {
-        println!("\nRun without --dry-run to apply fixes.");
+        if dry_run {
+            println!("\nRun without --dry-run to apply fixes.");
+        }
     }
 
     if !summary.errors.is_empty() {
