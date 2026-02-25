@@ -294,9 +294,9 @@ fn check_doubled_particles(
         }
 
         if !config.strict {
-            if matches.len() == 2
-                && matches[0].pos_subtype == Some("並立助詞".to_string())
-                && matches[1].pos_subtype == Some("並立助詞".to_string())
+            if matches
+                .iter()
+                .all(|p| p.pos_subtype == Some("並立助詞".to_string()))
             {
                 continue;
             }
@@ -682,6 +682,29 @@ mod tests {
         // 両方とも並立助詞
         assert!(particles[0].pos_subtype == Some("並立助詞".to_string()));
         assert!(particles[1].pos_subtype == Some("並立助詞".to_string()));
+    }
+
+    #[test]
+    fn valid_three_parallel_particles() {
+        // 3個以上の並立助詞も許容される
+        let config = Config::default();
+        let source = "食べたり飲んだり寝たりする。";
+        let tokens = vec![
+            create_token("食べ", vec!["動詞"], 0, 6),
+            create_token("たり", vec!["助詞", "並立助詞"], 6, 12),
+            create_token("飲ん", vec!["動詞"], 12, 18),
+            create_token("だり", vec!["助詞", "並立助詞"], 18, 24),
+            create_token("寝", vec!["動詞"], 24, 27),
+            create_token("たり", vec!["助詞", "並立助詞"], 27, 33),
+        ];
+        let particles = extract_particles_from_tokens(&tokens, &config);
+        assert_eq!(particles.len(), 3);
+
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        assert!(
+            diagnostics.is_empty(),
+            "3個の並立助詞はエラーにならないべき"
+        );
     }
 
     #[test]
