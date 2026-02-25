@@ -92,6 +92,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_verify_invalid_format_short() {
+        let data = b"hello world";
+        let hash = "abc123";
+        match HashVerifier::verify(data, hash) {
+            Err(IntegrityError::InvalidFormat(h)) => assert_eq!(h, hash),
+            _ => panic!("Expected InvalidFormat error for short hash"),
+        }
+    }
+
+    #[test]
+    fn test_verify_invalid_format_long() {
+        let data = b"hello world";
+        let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9extra";
+        match HashVerifier::verify(data, hash) {
+            Err(IntegrityError::InvalidFormat(h)) => assert_eq!(h, hash),
+            _ => panic!("Expected InvalidFormat error for long hash"),
+        }
+    }
+
+    #[test]
+    fn test_verify_invalid_format_non_hex() {
+        let data = b"hello world";
+        let hash = "g94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        match HashVerifier::verify(data, hash) {
+            Err(IntegrityError::InvalidFormat(h)) => assert_eq!(h, hash),
+            _ => panic!("Expected InvalidFormat error for non-hex chars"),
+        }
+    }
+
     use proptest::prelude::*;
 
     proptest! {
