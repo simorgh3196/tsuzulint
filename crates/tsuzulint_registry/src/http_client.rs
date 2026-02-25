@@ -3,7 +3,10 @@
 use std::time::Duration;
 
 use crate::security::SecurityError;
+use crate::security::{check_ip, validate_url};
+use reqwest::Url;
 use thiserror::Error;
+use tokio::net::lookup_host;
 
 /// Error type for secure HTTP fetch operations.
 #[derive(Debug, Error)]
@@ -85,10 +88,113 @@ impl SecureHttpClient {
     }
 
     /// Fetch content from URL with SSRF/DNS Rebinding protection.
-    #[allow(unused_variables)]
     pub async fn fetch(&self, url: &str) -> Result<Vec<u8>, SecureFetchError> {
-        // Implementation in next task
-        todo!()
+        let mut current_url_str = url.to_string();
+        let mut redirect_count = 0;
+
+        loop {
+            if redirect_count >= self.max_redirects {
+                return Err(SecureFetchError::RedirectLimitExceeded);
+            }
+
+            let parsed_url = Url::parse(&current_url_str)
+                .map_err(|e| SecureFetchError::NotFound(format!("Invalid URL: {}", e)))?;
+
+            // 1. Basic URL validation
+            validate_url(&parsed_url, self.allow_local)?;
+
+            // 2. Build client with DNS pinning
+            let client = self.build_client(&parsed_url).await?;
+
+            // 3. Perform request
+            let response = client
+                .get(parsed_url.clone())
+                .timeout(self.timeout)
+                .send()
+                .await?;
+
+            // 4. Handle redirects
+            if response.status().is_redirection()
+                && let Some(location) = response.headers().get(reqwest::header::LOCATION)
+            {
+                let location_str = location.to_str().map_err(|_| {
+                    SecureFetchError::InvalidRedirectUrl(
+                        "Location header is not valid UTF-8".to_string(),
+                    )
+                })?;
+
+                let next_url = parsed_url.join(location_str).map_err(|e| {
+                    SecureFetchError::InvalidRedirectUrl(format!(
+                        "Failed to parse redirect URL: {}",
+                        e
+                    ))
+                })?;
+
+                current_url_str = next_url.to_string();
+                redirect_count += 1;
+                continue;
+            }
+
+            // 5. Handle response status
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Err(SecureFetchError::NotFound(format!(
+                    "Resource not found at {}",
+                    current_url_str
+                )));
+            }
+
+            let response = response.error_for_status().map_err(|e| {
+                if let Some(status) = e.status() {
+                    SecureFetchError::HttpError(status)
+                } else {
+                    SecureFetchError::NetworkError(e)
+                }
+            })?;
+
+            let bytes = response.bytes().await?.to_vec();
+            return Ok(bytes);
+        }
+    }
+
+    async fn build_client(&self, url: &Url) -> Result<reqwest::Client, SecureFetchError> {
+        if self.allow_local {
+            return reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|e| SecureFetchError::ClientBuildError(e.to_string()));
+        }
+
+        let Some(host) = url.host_str() else {
+            return reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|e| SecureFetchError::ClientBuildError(e.to_string()));
+        };
+
+        let port = url.port_or_known_default().unwrap_or(80);
+
+        // DNS resolution with timeout
+        let addrs: Vec<_> = tokio::time::timeout(self.timeout, lookup_host((host, port)))
+            .await
+            .map_err(|_| SecureFetchError::DnsTimeout)?
+            .map_err(|e| SecureFetchError::NotFound(format!("DNS resolution failed: {}", e)))?
+            .collect();
+
+        if addrs.is_empty() {
+            return Err(SecureFetchError::DnsNoAddress(host.to_string()));
+        }
+
+        // Validate all resolved IPs
+        for addr in &addrs {
+            check_ip(addr.ip())?;
+        }
+
+        // Build client with DNS pinning
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve_to_addrs(host, &addrs)
+            .build()
+            .map_err(|e| SecureFetchError::ClientBuildError(e.to_string()))
     }
 }
 
