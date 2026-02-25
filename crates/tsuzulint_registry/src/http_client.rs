@@ -56,7 +56,6 @@ pub const DEFAULT_MAX_REDIRECTS: u32 = 10;
 
 /// Secure HTTP client with SSRF and DNS Rebinding protection.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct SecureHttpClient {
     timeout: Duration,
     allow_local: bool,
@@ -165,10 +164,7 @@ impl SecureHttpClient {
         }
 
         let Some(host) = url.host_str() else {
-            return reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .map_err(|e| SecureFetchError::ClientBuildError(e.to_string()));
+            return Err(SecureFetchError::NotFound("URL has no host".to_string()));
         };
 
         let port = url.port_or_known_default().unwrap_or(80);
