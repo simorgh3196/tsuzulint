@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 use tsuzulint_ast::AstArena;
 use tsuzulint_cache::CacheManager;
 use tsuzulint_parser::{MarkdownParser, Parser, PlainTextParser};
-use tsuzulint_plugin::{IsolationLevel, PluginHost};
+use tsuzulint_plugin::{IsolationLevel, PluginHost, RuleManifest};
 use tsuzulint_text::{SentenceSplitter, Tokenizer};
 
 use crate::block_extractor::{extract_blocks, visit_blocks};
@@ -99,13 +99,14 @@ pub fn lint_file_internal(
         cache_guard.reconcile_blocks(path, &current_blocks, config_hash, &rule_versions)
     };
 
+    let (global_rule_names, block_rule_names) =
+        get_classified_rules(host.loaded_rules(), host, enabled_rules);
+
     let mut global_diagnostics = Vec::new();
     let mut block_diagnostics = Vec::new();
     let mut timings = HashMap::new();
 
     {
-        let global_rule_names =
-            get_rule_names_by_isolation(host, enabled_rules, IsolationLevel::Global);
         if !global_rule_names.is_empty() {
             if global_rule_names.len() == 1 {
                 let rule = &global_rule_names[0];
@@ -122,7 +123,7 @@ pub fn lint_file_internal(
                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                 }
                 if timings_enabled {
-                    timings.insert(rule.clone(), start.elapsed());
+                    *timings.entry(rule.clone()).or_insert(Duration::ZERO) += start.elapsed();
                 }
             } else {
                 let ast_raw = to_raw_value(&ast, "AST")?;
@@ -132,21 +133,19 @@ pub fn lint_file_internal(
                         LinterError::Internal(format!("Failed to prepare lint request: {}", e))
                     })?;
 
-                for rule in global_rule_names {
+                for rule in &global_rule_names {
                     let start = Instant::now();
-                    match host.run_rule_with_prepared(&rule, &request_bytes) {
+                    match host.run_rule_with_prepared(rule, &request_bytes) {
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
                     if timings_enabled {
-                        timings.insert(rule, start.elapsed());
+                        *timings.entry(rule.clone()).or_insert(Duration::ZERO) += start.elapsed();
                     }
                 }
             }
         }
 
-        let block_rule_names =
-            get_rule_names_by_isolation(host, enabled_rules, IsolationLevel::Block);
         if !block_rule_names.is_empty() {
             let single_block_rule = block_rule_names.len() == 1;
             let mut block_index = 0;
@@ -168,7 +167,7 @@ pub fn lint_file_internal(
                                 Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                             }
                             if timings_enabled {
-                                *timings.entry(rule.clone()).or_insert(Duration::new(0, 0)) +=
+                                *timings.entry(rule.clone()).or_insert(Duration::ZERO) +=
                                     start.elapsed();
                             }
                         } else if let Ok(node_raw) = to_raw_value(node, "block node") {
@@ -190,7 +189,7 @@ pub fn lint_file_internal(
                                         if timings_enabled {
                                             *timings
                                                 .entry(rule.clone())
-                                                .or_insert(Duration::new(0, 0)) += start.elapsed();
+                                                .or_insert(Duration::ZERO) += start.elapsed();
                                         }
                                     }
                                 }
@@ -214,12 +213,7 @@ pub fn lint_file_internal(
     // Filter out diagnostics that are covered by global rules (by checking rule ID).
     // Global rules take precedence, and their diagnostics should not be stored in block cache.
     // This is faster than hashing entire Diagnostic objects.
-    let global_rule_names_for_filter =
-        get_rule_names_by_isolation(host, enabled_rules, IsolationLevel::Global);
-    let global_rule_ids: HashSet<&str> = global_rule_names_for_filter
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
+    let global_rule_ids: HashSet<&str> = global_rule_names.iter().map(|s| s.as_str()).collect();
 
     filter_overridden_diagnostics(&mut local_diagnostics, &global_rule_ids);
 
@@ -335,22 +329,43 @@ fn to_raw_value<T: serde::Serialize>(
         .map_err(|e| LinterError::Internal(format!("Failed to serialize {}: {}", label, e)))
 }
 
-fn get_rule_names_by_isolation(
-    host: &PluginHost,
-    enabled_rules: &HashSet<&str>,
-    level: IsolationLevel,
-) -> Vec<String> {
-    let mut names = Vec::new();
+trait ManifestProvider {
+    fn get_manifest(&self, name: &str) -> Option<&RuleManifest>;
+}
 
-    for name in host.loaded_rules() {
-        if enabled_rules.contains(name.as_str())
-            && let Some(manifest) = host.get_manifest(name)
-            && manifest.isolation_level == level
-        {
-            names.push(name.clone());
+impl ManifestProvider for PluginHost {
+    fn get_manifest(&self, name: &str) -> Option<&RuleManifest> {
+        self.get_manifest(name)
+    }
+}
+
+fn get_classified_rules<'a, I, P>(
+    rules: I,
+    host: &P,
+    enabled_rules: &HashSet<&str>,
+) -> (Vec<String>, Vec<String>)
+where
+    I: Iterator<Item = &'a String>,
+    P: ManifestProvider,
+{
+    let mut global_rules = Vec::new();
+    let mut block_rules = Vec::new();
+
+    for name in rules {
+        if !enabled_rules.contains(name.as_str()) {
+            continue;
+        }
+        if let Some(manifest) = host.get_manifest(name) {
+            match manifest.isolation_level {
+                IsolationLevel::Global => global_rules.push(name.clone()),
+                IsolationLevel::Block => block_rules.push(name.clone()),
+            }
+        } else {
+            warn!("Rule '{}' is enabled but has no manifest; skipping", name);
         }
     }
-    names
+
+    (global_rules, block_rules)
 }
 
 fn filter_overridden_diagnostics(
@@ -367,6 +382,76 @@ mod tests {
     use super::*;
     use tsuzulint_ast::Span;
     use tsuzulint_plugin::Diagnostic;
+
+    struct MockManifestProvider {
+        manifests: HashMap<String, RuleManifest>,
+    }
+
+    impl ManifestProvider for MockManifestProvider {
+        fn get_manifest(&self, name: &str) -> Option<&RuleManifest> {
+            self.manifests.get(name)
+        }
+    }
+
+    fn create_manifest(level: IsolationLevel) -> RuleManifest {
+        RuleManifest {
+            name: "test-rule".to_string(),
+            version: "1.0.0".to_string(),
+            description: None,
+            fixable: false,
+            node_types: vec![],
+            isolation_level: level,
+            schema: None,
+        }
+    }
+
+    #[test]
+    fn test_get_classified_rules() {
+        let global_name = "global-rule";
+        let block_name = "block-rule";
+        let disabled_name = "disabled-rule";
+        let missing_manifest_name = "missing-manifest-rule";
+
+        let mut manifests = HashMap::new();
+        manifests.insert(
+            global_name.to_string(),
+            create_manifest(IsolationLevel::Global),
+        );
+        manifests.insert(
+            block_name.to_string(),
+            create_manifest(IsolationLevel::Block),
+        );
+        manifests.insert(
+            disabled_name.to_string(),
+            create_manifest(IsolationLevel::Global),
+        );
+
+        let provider = MockManifestProvider { manifests };
+
+        let loaded_rules = [
+            global_name.to_string(),
+            block_name.to_string(),
+            disabled_name.to_string(),
+            missing_manifest_name.to_string(),
+        ];
+
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert(global_name);
+        enabled_rules.insert(block_name);
+        enabled_rules.insert(missing_manifest_name); // Enabled but no manifest
+
+        let (global_rules, block_rules) =
+            get_classified_rules(loaded_rules.iter(), &provider, &enabled_rules);
+
+        assert!(global_rules.contains(&global_name.to_string()));
+        assert!(!global_rules.contains(&disabled_name.to_string()));
+        assert!(!global_rules.contains(&missing_manifest_name.to_string()));
+
+        assert!(block_rules.contains(&block_name.to_string()));
+
+        assert_eq!(global_rules.len(), 1);
+        assert_eq!(block_rules.len(), 1);
+    }
 
     #[test]
     fn test_filter_overridden_diagnostics() {
