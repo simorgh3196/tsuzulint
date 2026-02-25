@@ -135,16 +135,31 @@ impl PluginResolver {
         manifest: ExternalRuleManifest,
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
-        if let Some(cached) = self.cache.get(source, version)
-            && let Ok(cached_bytes) = std::fs::read(&cached.wasm_path)
-            && HashVerifier::verify(&cached_bytes, &manifest.artifacts.sha256).is_ok()
-        {
-            return Ok(ResolvedPlugin {
-                wasm_path: cached.wasm_path,
-                manifest_path: cached.manifest_path,
-                manifest,
-                alias,
-            });
+        if let Some(cached) = self.cache.get(source, version) {
+            match std::fs::read(&cached.wasm_path) {
+                Ok(cached_bytes) => {
+                    if HashVerifier::verify(&cached_bytes, &manifest.artifacts.sha256).is_ok() {
+                        return Ok(ResolvedPlugin {
+                            wasm_path: cached.wasm_path,
+                            manifest_path: cached.manifest_path,
+                            manifest,
+                            alias,
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Cache integrity check failed for {:?}, re-downloading",
+                            cached.wasm_path
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to read cached WASM at {:?}: {}, re-downloading",
+                        cached.wasm_path,
+                        e
+                    );
+                }
+            }
         }
 
         let result = self.downloader.download(&manifest).await?;
@@ -194,7 +209,6 @@ impl PluginResolver {
 mod tests {
     use super::*;
     use crate::security::SecurityError;
-    use HashVerifier;
     use serde_json::json;
     use tempfile::tempdir;
     use wiremock::matchers::{method, path};
