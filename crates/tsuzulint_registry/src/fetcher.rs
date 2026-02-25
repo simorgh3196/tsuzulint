@@ -1,9 +1,10 @@
 //! Manifest fetcher for plugin sources.
 
 use crate::error::FetchError;
-use crate::http_client::SecureHttpClient;
+use crate::http_client::{DEFAULT_TIMEOUT, SecureHttpClient};
 use crate::manifest::{ExternalRuleManifest, validate_manifest};
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// Source of a plugin manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +60,7 @@ impl PluginSource {
 pub struct ManifestFetcher {
     http_client: SecureHttpClient,
     github_base_url: String,
+    timeout: Duration,
 }
 
 impl Default for ManifestFetcher {
@@ -73,6 +75,7 @@ impl ManifestFetcher {
         Self {
             http_client: SecureHttpClient::builder().build(),
             github_base_url: "https://github.com".to_string(),
+            timeout: DEFAULT_TIMEOUT,
         }
     }
 
@@ -85,8 +88,12 @@ impl ManifestFetcher {
     /// Configure whether to allow fetching from local network addresses.
     pub fn allow_local(self, allow: bool) -> Self {
         Self {
-            http_client: SecureHttpClient::builder().allow_local(allow).build(),
+            http_client: SecureHttpClient::builder()
+                .timeout(self.timeout)
+                .allow_local(allow)
+                .build(),
             github_base_url: self.github_base_url,
+            timeout: self.timeout,
         }
     }
 
@@ -252,6 +259,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_local_denied_by_default() {
+        use crate::http_client::SecureFetchError;
         use wiremock::MockServer;
 
         let mock_server = MockServer::start().await;
@@ -261,8 +269,13 @@ mod tests {
         let result = fetcher.fetch(&PluginSource::Url(url)).await;
 
         match result {
-            Err(FetchError::SecurityError(SecurityError::LoopbackDenied(_))) => {}
-            res => panic!("Expected SecurityError::LoopbackDenied, got {:?}", res),
+            Err(FetchError::SecureFetchError(SecureFetchError::SecurityError(
+                SecurityError::LoopbackDenied(_),
+            ))) => {}
+            res => panic!(
+                "Expected SecureFetchError::SecurityError::LoopbackDenied, got {:?}",
+                res
+            ),
         }
     }
 }
