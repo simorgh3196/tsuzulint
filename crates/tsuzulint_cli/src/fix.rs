@@ -64,7 +64,11 @@ pub fn apply_fixes(results: &[LintResult], dry_run: bool) -> Result<FixSummary> 
 /// Outputs the fix summary.
 pub fn output_fix_summary(summary: &FixSummary, dry_run: bool) {
     if summary.total_fixes == 0 && summary.errors.is_empty() {
-        println!("No fixable issues found.");
+        if dry_run {
+            println!("No fixable issues found.");
+        } else {
+            println!("No issues were fixed.");
+        }
         return;
     }
 
