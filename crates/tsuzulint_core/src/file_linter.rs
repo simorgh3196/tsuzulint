@@ -99,8 +99,7 @@ pub fn lint_file_internal(
         cache_guard.reconcile_blocks(path, &current_blocks, config_hash, &rule_versions)
     };
 
-    let (global_rule_names, block_rule_names) =
-        get_classified_rules(host, enabled_rules);
+    let (global_rule_names, block_rule_names) = get_classified_rules(host, enabled_rules);
 
     let mut global_diagnostics = Vec::new();
     let mut block_diagnostics = Vec::new();
@@ -344,10 +343,7 @@ impl ManifestProvider for PluginHost {
 /// This function iterates over `enabled_rules` (O(M)) instead of all loaded rules (O(N))
 /// to optimize performance when M << N. It sorts the results to ensure deterministic
 /// output since `enabled_rules` iteration order is arbitrary.
-fn get_classified_rules<P>(
-    host: &P,
-    enabled_rules: &HashSet<&str>,
-) -> (Vec<String>, Vec<String>)
+fn get_classified_rules<P>(host: &P, enabled_rules: &HashSet<&str>) -> (Vec<String>, Vec<String>)
 where
     P: ManifestProvider,
 {
@@ -434,8 +430,7 @@ mod tests {
         enabled_rules.insert(block_name);
         enabled_rules.insert(missing_manifest_name); // Enabled but no manifest
 
-        let (global_rules, block_rules) =
-            get_classified_rules(&provider, &enabled_rules);
+        let (global_rules, block_rules) = get_classified_rules(&provider, &enabled_rules);
 
         assert!(global_rules.contains(&global_name.to_string()));
         assert!(!global_rules.contains(&disabled_name.to_string()));
