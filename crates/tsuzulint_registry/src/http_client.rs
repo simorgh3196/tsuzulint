@@ -1,5 +1,7 @@
 //! Secure HTTP client with SSRF and DNS Rebinding protection.
 
+use std::time::Duration;
+
 use crate::security::SecurityError;
 use thiserror::Error;
 
@@ -43,8 +45,6 @@ pub enum SecureFetchError {
     ClientBuildError(String),
 }
 
-use std::time::Duration;
-
 /// Default timeout for HTTP requests.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -53,6 +53,7 @@ pub const DEFAULT_MAX_REDIRECTS: u32 = 10;
 
 /// Secure HTTP client with SSRF and DNS Rebinding protection.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SecureHttpClient {
     timeout: Duration,
     allow_local: bool,
@@ -84,6 +85,7 @@ impl SecureHttpClient {
     }
 
     /// Fetch content from URL with SSRF/DNS Rebinding protection.
+    #[allow(unused_variables)]
     pub async fn fetch(&self, url: &str) -> Result<Vec<u8>, SecureFetchError> {
         // Implementation in next task
         todo!()
@@ -116,5 +118,42 @@ impl SecureHttpClientBuilder {
             allow_local: self.allow_local,
             max_redirects: self.max_redirects,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builder_default_values() {
+        let client = SecureHttpClient::builder().build();
+
+        assert_eq!(client.timeout, Duration::from_secs(10));
+        assert!(!client.allow_local);
+        assert_eq!(client.max_redirects, 10);
+    }
+
+    #[test]
+    fn builder_custom_values() {
+        let client = SecureHttpClient::builder()
+            .timeout(Duration::from_secs(30))
+            .allow_local(true)
+            .max_redirects(5)
+            .build();
+
+        assert_eq!(client.timeout, Duration::from_secs(30));
+        assert!(client.allow_local);
+        assert_eq!(client.max_redirects, 5);
+    }
+
+    #[test]
+    fn default_impl_uses_builder_defaults() {
+        let client = SecureHttpClient::default();
+        let built = SecureHttpClient::builder().build();
+
+        assert_eq!(client.timeout, built.timeout);
+        assert_eq!(client.allow_local, built.allow_local);
+        assert_eq!(client.max_redirects, built.max_redirects);
     }
 }
