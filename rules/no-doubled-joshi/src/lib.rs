@@ -204,17 +204,28 @@ fn concat_adjacent_particles(particles: Vec<ParticleInfo>) -> Vec<ParticleInfo> 
 ///
 /// 「〜するかどうか検討する」のような表現では、
 /// 「か」が連続するが、意味的に問題ないため許容する。
+///
+/// 3個以上の「か」がある場合、連続するペアを走査して「かどうか」パターンを探す。
 fn is_ka_douka_pattern(particles: &[&ParticleInfo], all_tokens: &[Token]) -> bool {
-    if particles.len() != 2 {
-        return false;
+    // 連続する「か」のペアを走査
+    for i in 0..particles.len().saturating_sub(1) {
+        if is_single_ka_douka_pair(particles[i], particles[i + 1], all_tokens) {
+            return true;
+        }
     }
-    if particles[0].surface != "か" || particles[1].surface != "か" {
+    false
+}
+
+/// 2つの助詞が「かどうか」パターンを形成するかチェックする。
+fn is_single_ka_douka_pair(p1: &ParticleInfo, p2: &ParticleInfo, all_tokens: &[Token]) -> bool {
+    if p1.surface != "か" || p2.surface != "か" {
         return false;
     }
 
-    let idx1 = particles[0].token_index;
-    let idx2 = particles[1].token_index;
+    let idx1 = p1.token_index;
+    let idx2 = p2.token_index;
 
+    // 「か」の間に「どう」があるかチェック（トークンインデックス差が2）
     if idx2 == idx1 + 2 && idx1 + 1 < all_tokens.len() {
         let middle = &all_tokens[idx1 + 1];
         if middle.surface == "どう" {
@@ -300,15 +311,17 @@ fn check_doubled_particles(
             {
                 continue;
             }
-
-            if is_ka_douka_pattern(&matches, all_tokens) {
-                continue;
-            }
         }
 
         for i in 1..matches.len() {
             let prev = matches[i - 1];
             let curr = matches[i];
+
+            // ペアレベルで「かどうか」パターンをチェック
+            if !config.strict && is_single_ka_douka_pair(prev, curr, all_tokens) {
+                continue;
+            }
+
             let interval = calculate_interval(prev, curr, source, config);
 
             if interval < config.min_interval {
@@ -728,6 +741,72 @@ mod tests {
         // 「かどうか」パターンを確認
         let ka_refs: Vec<&ParticleInfo> = ka_particles.iter().map(|p| *p).collect();
         assert!(is_ka_douka_pattern(&ka_refs, &tokens));
+    }
+
+    #[test]
+    fn valid_three_ka_with_ka_douka() {
+        // 3個以上の「か」がある場合、「かどうか」パターンを形成するペアのみスキップ
+        // 「AかBかどうか検討する」のようなケース
+        // - 1つ目と2つ目の「か」: 「かどうか」ではない → エラーになる
+        // - 2つ目と3つ目の「か」: 「かどうか」パターン → スキップ
+        let config = Config::default();
+        let source = "これにするかあれにするかどうか検討する";
+        let tokens = vec![
+            create_token("これ", vec!["名詞"], 0, 6),
+            create_token("に", vec!["助詞", "格助詞"], 6, 9),
+            create_token("する", vec!["動詞"], 9, 15),
+            create_token("か", vec!["助詞", "副助詞"], 15, 18),
+            create_token("あれ", vec!["名詞"], 18, 24),
+            create_token("に", vec!["助詞", "格助詞"], 24, 27),
+            create_token("する", vec!["動詞"], 27, 33),
+            create_token("か", vec!["助詞", "副助詞"], 33, 36),
+            create_token("どう", vec!["副詞"], 36, 42),
+            create_token("か", vec!["助詞", "副助詞"], 42, 45),
+            create_token("検討", vec!["名詞", "サ変接続"], 45, 51),
+        ];
+
+        let particles = extract_particles_from_tokens(&tokens, &config);
+        let ka_particles: Vec<&ParticleInfo> =
+            particles.iter().filter(|p| p.surface == "か").collect();
+        assert_eq!(ka_particles.len(), 3);
+
+        // 「かどうか」パターンが検出されることを確認
+        let ka_refs: Vec<&ParticleInfo> = ka_particles.iter().map(|p| *p).collect();
+        assert!(
+            is_ka_douka_pattern(&ka_refs, &tokens),
+            "3個の「か」から「かどうか」パターンを検出すべき"
+        );
+
+        // 1つ目と2つ目の「か」はエラーになる（「かどうか」パターンではないため）
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "1つ目と2つ目の「か」のみエラーになるべき"
+        );
+    }
+
+    #[test]
+    fn valid_pure_ka_douka() {
+        // 「かどうか」のみのケース（2個の「か」）
+        let config = Config::default();
+        let source = "これにするかどうか検討する";
+        let tokens = vec![
+            create_token("これ", vec!["名詞"], 0, 6),
+            create_token("に", vec!["助詞", "格助詞"], 6, 9),
+            create_token("する", vec!["動詞"], 9, 15),
+            create_token("か", vec!["助詞", "副助詞"], 15, 18),
+            create_token("どう", vec!["副詞"], 18, 24),
+            create_token("か", vec!["助詞", "副助詞"], 24, 27),
+            create_token("検討", vec!["名詞", "サ変接続"], 27, 33),
+        ];
+
+        let particles = extract_particles_from_tokens(&tokens, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        assert!(
+            diagnostics.is_empty(),
+            "「かどうか」パターンはエラーにならないべき"
+        );
     }
 
     #[test]
