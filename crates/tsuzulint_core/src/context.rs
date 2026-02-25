@@ -351,20 +351,17 @@ impl<'a> LintContext<'a> {
         Some(&self.source[info.start as usize..end as usize])
     }
 
-    /// Extracts text content from a node and its children.
+    /// Extracts text content from a node and its children using iterative traversal.
     fn extract_text(node: &TxtNode<'a>) -> String {
         let mut text = String::new();
-        Self::collect_text(node, &mut text);
+        let mut stack = vec![node];
+        while let Some(n) = stack.pop() {
+            if let Some(v) = n.value {
+                text.push_str(v);
+            }
+            stack.extend(n.children.iter().rev());
+        }
         text
-    }
-
-    fn collect_text(node: &TxtNode<'a>, text: &mut String) {
-        if let Some(v) = node.value {
-            text.push_str(v);
-        }
-        for child in node.children {
-            Self::collect_text(child, text);
-        }
     }
 
     /// Builds document structure from an AST node.

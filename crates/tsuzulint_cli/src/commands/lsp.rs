@@ -1,14 +1,12 @@
 //! LSP command implementation
 
-use miette::{IntoDiagnostic, Result};
+use miette::Result;
+
+use crate::utils::create_tokio_runtime;
 
 pub fn run_lsp() -> Result<()> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .into_diagnostic()?
-        .block_on(async {
-            tsuzulint_lsp::run().await;
-        });
+    create_tokio_runtime()?.block_on(async {
+        tsuzulint_lsp::run().await;
+    });
     Ok(())
 }

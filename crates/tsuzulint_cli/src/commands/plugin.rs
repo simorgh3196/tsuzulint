@@ -7,6 +7,7 @@ use tracing::{info, warn};
 use tsuzulint_registry::resolver::{PluginSource, PluginSpec};
 
 use crate::config::editor::update_config_with_plugin;
+use crate::utils::create_tokio_runtime;
 
 pub fn run_plugin_cache_clean() -> Result<()> {
     use tsuzulint_registry::cache::PluginCache;
@@ -43,7 +44,8 @@ pub fn run_plugin_install(
             alias,
         }
     } else if let Some(s) = spec_str {
-        let json_value = serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s));
+        let json_value =
+            serde_json::from_str(&s).unwrap_or_else(|_| serde_json::Value::String(s.clone()));
         let mut spec = PluginSpec::parse(&json_value).into_diagnostic()?;
 
         if let Some(a) = alias {
@@ -57,10 +59,7 @@ pub fn run_plugin_install(
     info!("Resolving plugin...");
     let resolver = tsuzulint_registry::resolver::PluginResolver::new().into_diagnostic()?;
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .into_diagnostic()?;
+    let runtime = create_tokio_runtime()?;
 
     let resolve_result = runtime.block_on(async { resolver.resolve(&spec).await });
 
