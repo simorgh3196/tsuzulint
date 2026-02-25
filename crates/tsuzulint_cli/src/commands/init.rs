@@ -41,8 +41,10 @@ pub fn run_init(force: bool) -> Result<()> {
                     ));
                 }
 
-                if std::fs::symlink_metadata(&config_path).is_ok() {
-                    std::fs::remove_file(&config_path).into_diagnostic()?;
+                match std::fs::remove_file(&config_path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e).into_diagnostic(),
                 }
             }
             Err(e) => return Err(e).into_diagnostic(),
