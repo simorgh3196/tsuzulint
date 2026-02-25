@@ -468,9 +468,12 @@ mod tests {
 
     #[test]
     fn test_get_classified_rules_separates_global_and_block() {
-        // Only run this test if the fixture exists (it might not be built in all envs)
         let rule_path = get_test_rule_path();
         if !rule_path.exists() {
+            eprintln!(
+                "skipping test test_get_classified_rules_separates_global_and_block: fixture not built at {:?}",
+                rule_path
+            );
             return;
         }
 
@@ -494,6 +497,10 @@ mod tests {
     fn test_get_classified_rules_skips_disabled_rules() {
         let rule_path = get_test_rule_path();
         if !rule_path.exists() {
+            eprintln!(
+                "skipping test test_get_classified_rules_skips_disabled_rules: fixture not built at {:?}",
+                rule_path
+            );
             return;
         }
 
