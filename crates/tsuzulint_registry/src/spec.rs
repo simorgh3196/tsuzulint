@@ -21,6 +21,7 @@ pub enum ParseError {
 pub struct PluginSpec {
     pub source: PluginSource,
     pub alias: Option<String>,
+    pub sha256: Option<String>,
 }
 
 impl PluginSpec {
@@ -33,6 +34,10 @@ impl PluginSpec {
     }
 
     fn parse_string(s: &str) -> Result<Self, ParseError> {
+        Self::parse_string_with_sha256(s, None)
+    }
+
+    fn parse_string_with_sha256(s: &str, sha256: Option<String>) -> Result<Self, ParseError> {
         let parts: Vec<&str> = s.split('@').collect();
         let (name_part, version) = match parts.len() {
             1 => (parts[0], None),
@@ -65,6 +70,7 @@ impl PluginSpec {
                 version,
             },
             alias: None,
+            sha256,
         })
     }
 
@@ -76,6 +82,7 @@ impl PluginSpec {
             path: Option<String>,
             #[serde(rename = "as")]
             alias: Option<String>,
+            sha256: Option<String>,
         }
 
         let obj: SpecObj = serde_json::from_value(value.clone())
@@ -93,10 +100,11 @@ impl PluginSpec {
         }
 
         if let Some(github) = obj.github {
-            let spec = Self::parse_string(&github)?;
+            let spec = Self::parse_string_with_sha256(&github, obj.sha256)?;
             return Ok(Self {
                 source: spec.source,
                 alias: obj.alias,
+                sha256: spec.sha256,
             });
         }
 
@@ -109,6 +117,7 @@ impl PluginSpec {
             return Ok(Self {
                 source: PluginSource::Url(url),
                 alias: obj.alias,
+                sha256: obj.sha256,
             });
         }
 
@@ -116,6 +125,7 @@ impl PluginSpec {
             return Ok(Self {
                 source: PluginSource::Path(PathBuf::from(path_str)),
                 alias: obj.alias,
+                sha256: obj.sha256,
             });
         }
 
@@ -217,6 +227,17 @@ mod tests {
         });
         let spec = PluginSpec::parse(&value).expect("Parsing should succeed");
         assert_eq!(spec.alias, None);
+    }
+
+    #[test]
+    fn test_parse_object_with_sha256() {
+        let hash = "a".repeat(64);
+        let value = json!({
+            "github": "owner/repo",
+            "sha256": hash
+        });
+        let spec = PluginSpec::parse(&value).unwrap();
+        assert_eq!(spec.sha256, Some(hash));
     }
 
     #[test]

@@ -88,17 +88,29 @@ impl PluginResolver {
         match &spec.source {
             PluginSource::GitHub { version, .. } => {
                 let version_str = version.as_ref().unwrap_or(&manifest.rule.version).clone();
-                self.resolve_remote(&fetcher_source, &version_str, manifest, alias)
-                    .await
+                self.resolve_remote(
+                    &fetcher_source,
+                    &version_str,
+                    manifest,
+                    alias,
+                    spec.sha256.clone(),
+                )
+                .await
             }
             PluginSource::Url(_) => {
                 let version_str = manifest.rule.version.clone();
-                self.resolve_remote(&fetcher_source, &version_str, manifest, alias)
-                    .await
+                self.resolve_remote(
+                    &fetcher_source,
+                    &version_str,
+                    manifest,
+                    alias,
+                    spec.sha256.clone(),
+                )
+                .await
             }
             PluginSource::Path(_) => {
                 let manifest_path = manifest_path_buf.expect("Path source must have manifest path");
-                self.resolve_local(&manifest_path, &manifest, alias)
+                self.resolve_local(&manifest_path, &manifest, alias, spec.sha256.as_deref())
             }
         }
     }
@@ -135,8 +147,15 @@ impl PluginResolver {
         version: &str,
         manifest: ExternalRuleManifest,
         alias: String,
+        expected_sha256: Option<String>,
     ) -> Result<ResolvedPlugin, ResolveError> {
         if let Some(cached) = self.cache.get(source, version) {
+            // Even if cached, if a specific hash is requested, we should verify it.
+            if let Some(expected) = &expected_sha256 {
+                let bytes = std::fs::read(&cached.wasm_path).map_err(DownloadError::IoError)?;
+                crate::hash::HashVerifier::verify(&bytes, expected)?;
+            }
+
             return Ok(ResolvedPlugin {
                 wasm_path: cached.wasm_path,
                 manifest_path: cached.manifest_path,
@@ -147,11 +166,17 @@ impl PluginResolver {
 
         let result = self.downloader.download(&manifest).await?;
 
+        // 1. Verify against manifest hash (author's claim)
         if result.computed_hash != manifest.artifacts.sha256 {
             return Err(ResolveError::HashMismatch(HashError::Mismatch {
                 expected: manifest.artifacts.sha256.clone(),
                 actual: result.computed_hash,
             }));
+        }
+
+        // 2. Verify against user's provided hash (if any)
+        if let Some(expected) = &expected_sha256 {
+            crate::hash::HashVerifier::verify(&result.bytes, expected)?;
         }
 
         let manifest_json = serde_json::to_string(&manifest)
@@ -174,6 +199,7 @@ impl PluginResolver {
         manifest_path: &Path,
         manifest: &ExternalRuleManifest,
         alias: String,
+        expected_sha256: Option<&str>,
     ) -> Result<ResolvedPlugin, ResolveError> {
         let wasm_relative = Path::new(&manifest.artifacts.wasm);
         let parent = manifest_path.parent().unwrap_or(Path::new("."));
@@ -183,11 +209,17 @@ impl PluginResolver {
         let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
         let computed_hash = crate::hash::HashVerifier::compute(&bytes);
 
+        // 1. Verify against manifest hash
         if computed_hash != manifest.artifacts.sha256 {
             return Err(ResolveError::HashMismatch(HashError::Mismatch {
                 expected: manifest.artifacts.sha256.clone(),
                 actual: computed_hash,
             }));
+        }
+
+        // 2. Verify against user's provided hash (if any)
+        if let Some(expected) = expected_sha256 {
+            crate::hash::HashVerifier::verify(&bytes, expected)?;
         }
 
         Ok(ResolvedPlugin {
@@ -381,6 +413,35 @@ mod tests {
                 SecurityError::FileNotFound { .. }
             ))
         ));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_expected_hash_mismatch() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let wasm_content = b"local wasm";
+        std::fs::write(&wasm_path, wasm_content).unwrap();
+
+        let manifest = json!({
+            "rule": { "name": "local-rule", "version": "1.0.0" },
+            "artifacts": {
+                "wasm": "rule.wasm",
+                "sha256": HashVerifier::compute(wasm_content)
+            }
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let resolver = PluginResolver::new().unwrap();
+        let spec = PluginSpec {
+            source: PluginSource::Path(manifest_path),
+            alias: None,
+            sha256: Some("f".repeat(64)), // Wrong expected hash
+        };
+
+        let result = resolver.resolve(&spec).await;
+        assert!(matches!(result, Err(ResolveError::HashMismatch(_))));
     }
 
     #[tokio::test]

@@ -43,6 +43,11 @@
                 "type": "string",
                 "description": "Alias for this rule (used in options)",
                 "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              },
+              "sha256": {
+                "type": "string",
+                "description": "Expected SHA-256 hash of the rule WASM file",
+                "pattern": "^[a-fA-F0-9]{64}$"
               }
             },
             "additionalProperties": false
@@ -67,6 +72,11 @@
                 "type": "string",
                 "description": "Alias for this rule (required for URL sources)",
                 "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              },
+              "sha256": {
+                "type": "string",
+                "description": "Expected SHA-256 hash of the rule WASM file",
+                "pattern": "^[a-fA-F0-9]{64}$"
               }
             },
             "additionalProperties": false
@@ -89,6 +99,11 @@
                 "type": "string",
                 "description": "Optional alias to override rule name from manifest",
                 "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              },
+              "sha256": {
+                "type": "string",
+                "description": "Expected SHA-256 hash of the rule WASM file",
+                "pattern": "^[a-fA-F0-9]{64}$"
               }
             },
             "additionalProperties": false

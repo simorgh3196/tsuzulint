@@ -380,6 +380,53 @@ mod tests {
     }
 
     #[test]
+    fn test_load_rule_hash_mismatch() {
+        let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() else {
+            return;
+        };
+
+        let temp_dir = tempdir().unwrap();
+        let manifest_path = temp_dir.path().join("tsuzulint-rule.json");
+        let dest_wasm_path = temp_dir.path().join("rule.wasm");
+
+        fs::copy(&wasm_path, &dest_wasm_path).unwrap();
+
+        let wasm_bytes = fs::read(&dest_wasm_path).unwrap();
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&wasm_bytes);
+        let actual_hash = hex::encode(hasher.finalize());
+
+        let json = format!(r#"{{
+            "rule": {{ "name": "hash-rule", "version": "1.0.0" }},
+            "artifacts": {{ "wasm": "rule.wasm", "sha256": "{}" }}
+        }}"#, actual_hash);
+        fs::write(&manifest_path, json).unwrap();
+
+        let mut config = LinterConfig::new();
+        config.base_dir = Some(temp_dir.path().to_path_buf());
+
+        // Wrong hash in config
+        config.rules.push(crate::config::RuleDefinition::Detail(
+            crate::config::RuleDefinitionDetail {
+                github: None,
+                url: None,
+                path: Some("tsuzulint-rule.json".to_string()),
+                r#as: None,
+                sha256: Some("f".repeat(64)),
+            },
+        ));
+
+        let linter = Linter::new(config).unwrap();
+        let host = linter.plugin_host.lock().unwrap();
+        let loaded: Vec<String> = host.loaded_rules().cloned().collect();
+        assert!(
+            !loaded.contains(&"hash-rule".to_string()),
+            "Rule should not be loaded due to hash mismatch"
+        );
+    }
+
+    #[test]
     fn test_load_rule_absolute_path_security() {
         let Some(wasm_path) = crate::test_utils::build_simple_rule_wasm() else {
             println!("Skipping test: WASM build failed");
@@ -392,18 +439,24 @@ mod tests {
 
         fs::copy(&wasm_path, &dest_wasm_path).unwrap();
 
-        let json = r#"{
-            "rule": {
+        let wasm_bytes = fs::read(&dest_wasm_path).unwrap();
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&wasm_bytes);
+        let actual_hash = hex::encode(hasher.finalize());
+
+        let json = format!(r#"{{
+            "rule": {{
                 "name": "abs-path-rule",
                 "version": "1.0.0",
                 "description": "Test rule",
                 "fixable": false
-            },
-            "artifacts": {
+            }},
+            "artifacts": {{
                 "wasm": "rule.wasm",
-                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
-        }"#;
+                "sha256": "{}"
+            }}
+        }}"#, actual_hash);
         fs::write(&manifest_path, json).unwrap();
 
         let abs_manifest_path = manifest_path.canonicalize().unwrap();
@@ -418,6 +471,7 @@ mod tests {
                 url: None,
                 path: Some(abs_manifest_path.to_string_lossy().to_string()),
                 r#as: None,
+                sha256: None,
             },
         ));
 

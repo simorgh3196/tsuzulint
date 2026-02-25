@@ -125,6 +125,8 @@ pub struct RuleDefinitionDetail {
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#as: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 /// Configuration for a single rule (in options map).
@@ -564,6 +566,7 @@ mod tests {
             url: None,
             path: None,
             r#as: Some("alias".to_string()),
+            sha256: Some("a".repeat(64)),
         };
 
         let def2 = RuleDefinitionDetail {
@@ -571,6 +574,7 @@ mod tests {
             url: None,
             path: None,
             r#as: Some("alias".to_string()),
+            sha256: Some("a".repeat(64)),
         };
 
         let def3 = RuleDefinitionDetail {
@@ -578,6 +582,7 @@ mod tests {
             url: None,
             path: None,
             r#as: Some("alias".to_string()),
+            sha256: None,
         };
 
         assert_eq!(def1, def2);

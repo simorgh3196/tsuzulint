@@ -73,6 +73,35 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                                     rule_name,
                                     manifest_path.display()
                                 );
+                                // Verify against config hash if provided
+                                if let Some(expected_hash) = &detail.sha256 {
+                                    let wasm_bytes = match std::fs::read(&wasm_path) {
+                                        Ok(b) => b,
+                                        Err(e) => {
+                                            warn!(
+                                                "Failed to read WASM file '{}' for rule '{}': {}",
+                                                wasm_path.display(),
+                                                rule_name,
+                                                e
+                                            );
+                                            continue;
+                                        }
+                                    };
+
+                                    use sha2::{Digest, Sha256};
+                                    let mut hasher = Sha256::new();
+                                    hasher.update(&wasm_bytes);
+                                    let actual_hash = hex::encode(hasher.finalize());
+
+                                    if !actual_hash.eq_ignore_ascii_case(expected_hash) {
+                                        warn!(
+                                            "Hash mismatch for rule '{}': expected {}, actual {}",
+                                            rule_name, expected_hash, actual_hash
+                                        );
+                                        continue;
+                                    }
+                                }
+
                                 match host.load_rule(&wasm_path) {
                                     Ok(loaded_manifest) => {
                                         let internal_name = loaded_manifest.name.clone();

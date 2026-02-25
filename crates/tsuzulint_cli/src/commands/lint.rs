@@ -92,6 +92,7 @@ pub fn run_lint(
                 url: None,
                 path: Some(path_str),
                 r#as: original_alias.or(Some(resolved.alias)),
+                sha256: Some(resolved.manifest.artifacts.sha256.clone()),
             });
             new_rules.push(new_rule);
             modified = true;

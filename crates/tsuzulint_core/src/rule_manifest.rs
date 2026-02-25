@@ -87,6 +87,29 @@ pub fn load_rule_manifest(
         )));
     }
 
+    // Security: Verify WASM hash against manifest
+    let wasm_bytes = fs::read(&canonical_wasm_path).map_err(|e| {
+        LinterError::Config(format!(
+            "Failed to read WASM file '{}': {}",
+            canonical_wasm_path.display(),
+            e
+        ))
+    })?;
+
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(&wasm_bytes);
+    let actual_hash = hex::encode(hasher.finalize());
+
+    if !actual_hash.eq_ignore_ascii_case(&manifest.artifacts.sha256) {
+        return Err(LinterError::Config(format!(
+            "Hash mismatch for WASM file '{}': expected {}, actual {}",
+            canonical_wasm_path.display(),
+            manifest.artifacts.sha256,
+            actual_hash
+        )));
+    }
+
     Ok((manifest, canonical_wasm_path))
 }
 
@@ -106,19 +129,22 @@ mod tests {
         // Create dummy WASM file
         File::create(&wasm_path).unwrap().write_all(b"").unwrap();
 
+        // SHA-256 for empty file
+        let empty_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
         // Create manifest
-        let json = r#"{
-            "rule": {
+        let json = format!(r#"{{
+            "rule": {{
                 "name": "test-rule",
                 "version": "1.0.0",
                 "description": "Test rule",
                 "fixable": false
-            },
-            "artifacts": {
+            }},
+            "artifacts": {{
                 "wasm": "rule.wasm",
-                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
-        }"#;
+                "sha256": "{}"
+            }}
+        }}"#, empty_hash);
         fs::write(&manifest_path, json).unwrap();
 
         let (manifest, resolved_wasm) = load_rule_manifest(&manifest_path).unwrap();
