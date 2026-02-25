@@ -68,6 +68,13 @@ impl PluginResolver {
         self
     }
 
+    /// Set the plugin cache (for testing).
+    #[cfg(test)]
+    pub fn with_cache(mut self, cache: PluginCache) -> Self {
+        self.cache = cache;
+        self
+    }
+
     pub async fn resolve(&self, spec: &PluginSpec) -> Result<ResolvedPlugin, ResolveError> {
         let (fetcher_source, manifest_path_buf) = self.prepare_source(&spec.source);
 
@@ -254,9 +261,15 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        // Use isolated cache directory to prevent race conditions
+        let temp_dir = tempdir().unwrap();
+        println!("Deleted test cache dir: {:?}", temp_dir.path());
+        let cache = PluginCache::with_dir(temp_dir.path());
+
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(cache);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -577,9 +590,14 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        // Use isolated cache directory to prevent race conditions
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(cache);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -633,9 +651,14 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        // Use isolated cache directory to prevent race conditions
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(cache);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -692,9 +715,14 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        // Use isolated cache directory to prevent race conditions
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(cache);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -709,6 +737,16 @@ mod tests {
 
         assert!(resolved2.wasm_path.exists());
         let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
+
+        // Debug output
+        if wasm_bytes != wasm_content {
+            println!("Expected: {:?}", wasm_content);
+            println!("Got: {:?}", wasm_bytes);
+            if let Ok(s) = String::from_utf8(wasm_bytes.clone()) {
+                println!("Got string: {}", s);
+            }
+        }
+
         assert_eq!(wasm_bytes, wasm_content);
     }
 }
