@@ -1,9 +1,8 @@
 //! Manifest fetcher for plugin sources.
 
 use crate::error::FetchError;
+use crate::http_client::SecureHttpClient;
 use crate::manifest::{ExternalRuleManifest, validate_manifest};
-use crate::security::validate_url;
-use reqwest::Url;
 use std::path::PathBuf;
 
 /// Source of a plugin manifest.
@@ -58,9 +57,8 @@ impl PluginSource {
 
 /// Fetcher for plugin manifests from various sources.
 pub struct ManifestFetcher {
-    client: reqwest::Client,
+    http_client: SecureHttpClient,
     github_base_url: String,
-    allow_local: bool,
 }
 
 impl Default for ManifestFetcher {
@@ -73,9 +71,8 @@ impl ManifestFetcher {
     /// Create a new manifest fetcher.
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            http_client: SecureHttpClient::builder().build(),
             github_base_url: "https://github.com".to_string(),
-            allow_local: false,
         }
     }
 
@@ -86,9 +83,11 @@ impl ManifestFetcher {
     }
 
     /// Configure whether to allow fetching from local network addresses.
-    pub fn allow_local(mut self, allow: bool) -> Self {
-        self.allow_local = allow;
-        self
+    pub fn allow_local(self, allow: bool) -> Self {
+        Self {
+            http_client: SecureHttpClient::builder().allow_local(allow).build(),
+            github_base_url: self.github_base_url,
+        }
     }
 
     /// Fetch a manifest from the given source.
@@ -125,21 +124,8 @@ impl ManifestFetcher {
 
     /// Fetch manifest from a URL.
     async fn fetch_from_url(&self, url_str: &str) -> Result<ExternalRuleManifest, FetchError> {
-        let url =
-            Url::parse(url_str).map_err(|e| FetchError::NotFound(format!("Invalid URL: {}", e)))?;
-
-        // Security check
-        validate_url(&url, self.allow_local)?;
-
-        let response = self.client.get(url).send().await?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(FetchError::NotFound(format!(
-                "Manifest not found at {url_str}"
-            )));
-        }
-
-        let text = response.error_for_status()?.text().await?;
+        let bytes = self.http_client.fetch(url_str).await?;
+        let text = String::from_utf8_lossy(&bytes).to_string();
         let manifest = validate_manifest(&text)?;
         Ok(manifest)
     }

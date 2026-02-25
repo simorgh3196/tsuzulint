@@ -27,3 +27,31 @@ pub enum FetchError {
     #[error("Security error: {0}")]
     SecurityError(#[from] SecurityError),
 }
+
+impl From<crate::http_client::SecureFetchError> for FetchError {
+    fn from(e: crate::http_client::SecureFetchError) -> Self {
+        match e {
+            crate::http_client::SecureFetchError::NotFound(msg) => FetchError::NotFound(msg),
+            crate::http_client::SecureFetchError::NetworkError(e) => FetchError::NetworkError(e),
+            crate::http_client::SecureFetchError::SecurityError(e) => FetchError::SecurityError(e),
+            crate::http_client::SecureFetchError::DnsNoAddress(host) => {
+                FetchError::NotFound(format!("DNS resolution failed for host: {}", host))
+            }
+            crate::http_client::SecureFetchError::DnsTimeout => {
+                FetchError::NotFound("DNS resolution timed out".to_string())
+            }
+            crate::http_client::SecureFetchError::RedirectLimitExceeded => {
+                FetchError::NotFound("Too many redirects".to_string())
+            }
+            crate::http_client::SecureFetchError::InvalidRedirectUrl(msg) => {
+                FetchError::NotFound(format!("Invalid redirect: {}", msg))
+            }
+            crate::http_client::SecureFetchError::HttpError(status) => {
+                FetchError::NotFound(format!("HTTP error: {}", status))
+            }
+            crate::http_client::SecureFetchError::ClientBuildError(msg) => {
+                FetchError::NotFound(format!("Client build error: {}", msg))
+            }
+        }
+    }
+}
