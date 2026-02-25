@@ -373,7 +373,7 @@ impl Token {
     /// Returns the conjugation type (detail[0]).
     /// Example: "五段・ワ行促音便", "一段"
     pub fn conjugation_type(&self) -> Option<&str> {
-        self.detail.get(0).map(|s| s.as_str())
+        self.detail.first().map(|s| s.as_str())
     }
 
     /// Returns the conjugation form (detail[1]).
@@ -621,20 +621,20 @@ impl Fix {
 #[serde(rename_all = "lowercase")]
 pub enum KnownLanguage {
     #[default]
-    Ja, // Japanese
-    En, // English
-    /// Chinese (not yet implemented; reserved for future use).
-    Zh,
-    /// Korean (not yet implemented; reserved for future use).
-    Ko,
+    Ja,
+    En,
+    // Zh, // Chinese (not yet implemented)
+    // Ko, // Korean (not yet implemented)
 }
 
 /// Required analysis capabilities for a rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Capability {
-    Morphology, // Morphological analysis (tokens)
-    Sentences,  // Sentence splitting
+    /// Morphological analysis (tokenization).
+    Morphology,
+    /// Sentence boundary detection.
+    Sentences,
 }
 
 /// Rule manifest for registration.
@@ -1874,6 +1874,20 @@ mod tests {
     }
 
     #[test]
+    fn token_accessors_empty_pos_and_detail_return_none() {
+        let token = Token::new("x", vec![], TextSpan::new(0, 1));
+        assert!(token.major_pos().is_none());
+        assert!(token.pos_detail(0).is_none());
+        assert!(token.pos_detail(1).is_none());
+        assert!(token.conjugation_type().is_none());
+        assert!(token.conjugation_form().is_none());
+        assert!(token.base_form().is_none());
+        assert!(token.reading().is_none());
+        assert!(!token.is_verb());
+        assert!(!token.is_renyoukei());
+    }
+
+    #[test]
     fn token_pos_shortcuts() {
         let verb = Token::new("行う", vec!["動詞".to_string()], TextSpan::new(0, 9));
         assert!(verb.is_verb());
@@ -1915,8 +1929,11 @@ mod tests {
     fn known_language_serialization() {
         assert_eq!(serde_json::to_string(&KnownLanguage::Ja).unwrap(), "\"ja\"");
         assert_eq!(serde_json::to_string(&KnownLanguage::En).unwrap(), "\"en\"");
-        assert_eq!(serde_json::to_string(&KnownLanguage::Zh).unwrap(), "\"zh\"");
-        assert_eq!(serde_json::to_string(&KnownLanguage::Ko).unwrap(), "\"ko\"");
+    }
+
+    #[test]
+    fn known_language_default_is_japanese() {
+        assert_eq!(KnownLanguage::default(), KnownLanguage::Ja);
     }
 
     #[test]
