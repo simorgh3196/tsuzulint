@@ -63,12 +63,12 @@ impl Default for Config {
 
 /// Returns the rule manifest.
 #[plugin_fn]
-pub fn get_manifest() -> FnResult<String> {
+pub fn get_manifest() -> FnResult<Vec<u8>> {
     let manifest = RuleManifest::new(RULE_ID, VERSION)
         .with_description("Check sentence length")
         .with_fixable(false)
         .with_node_types(vec!["Str".to_string()]);
-    Ok(serde_json::to_string(&manifest)?)
+    Ok(rmp_serde::to_vec_named(&manifest)?)
 }
 
 /// Lints a node for sentence length.

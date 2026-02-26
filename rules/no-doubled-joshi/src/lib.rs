@@ -350,14 +350,14 @@ fn check_doubled_particles(
 }
 
 #[plugin_fn]
-pub fn get_manifest() -> FnResult<String> {
+pub fn get_manifest() -> FnResult<Vec<u8>> {
     let manifest = RuleManifest::new(RULE_ID, VERSION)
         .with_description("Detect repeated Japanese particles (助詞)")
         .with_fixable(true)
         .with_node_types(vec!["Str".to_string()])
         .with_languages(vec![KnownLanguage::Ja])
         .with_capabilities(vec![Capability::Morphology]);
-    Ok(serde_json::to_string(&manifest)?)
+    Ok(rmp_serde::to_vec_named(&manifest)?)
 }
 
 #[plugin_fn]
@@ -565,10 +565,11 @@ mod tests {
         assert!(manifest.languages.contains(&KnownLanguage::Ja));
         assert!(manifest.capabilities.contains(&Capability::Morphology));
 
-        let json = serde_json::to_string(&manifest).unwrap();
-        assert!(json.contains(RULE_ID));
-        assert!(json.contains("\"ja\""));
-        assert!(json.contains("\"morphology\""));
+        let bytes = rmp_serde::to_vec_named(&manifest).unwrap();
+        let decoded: RuleManifest = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.name, RULE_ID);
+        assert!(decoded.languages.contains(&KnownLanguage::Ja));
+        assert!(decoded.capabilities.contains(&Capability::Morphology));
     }
 
     #[test]

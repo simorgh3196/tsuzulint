@@ -69,12 +69,12 @@ impl Config {
 
 /// Returns the rule manifest.
 #[plugin_fn]
-pub fn get_manifest() -> FnResult<String> {
+pub fn get_manifest() -> FnResult<Vec<u8>> {
     let manifest = RuleManifest::new(RULE_ID, VERSION)
         .with_description("Disallow TODO/FIXME comments in text")
         .with_fixable(false)
         .with_node_types(vec!["Str".to_string()]);
-    Ok(serde_json::to_string(&manifest)?)
+    Ok(rmp_serde::to_vec_named(&manifest)?)
 }
 
 /// Lints a node for TODO patterns.
@@ -215,8 +215,9 @@ mod tests {
         assert!(!manifest.fixable);
         assert!(manifest.node_types.contains(&"Str".to_string()));
 
-        // Verify it serializes correctly
-        let json = serde_json::to_string(&manifest).unwrap();
-        assert!(json.contains(RULE_ID));
+        // Verify it serializes correctly via MsgPack
+        let bytes = rmp_serde::to_vec_named(&manifest).unwrap();
+        let decoded: RuleManifest = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.name, RULE_ID);
     }
 }
