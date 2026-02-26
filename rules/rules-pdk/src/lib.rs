@@ -69,6 +69,78 @@ pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
     }
 }
 
+/// A minimal AST node representation for lint rules.
+///
+/// Rules only need the node type and byte range to perform linting.
+/// Unknown fields from the host (children, position, etc.) are
+/// ignored during deserialization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AstNode {
+    /// Node type identifier (e.g., "Str", "Paragraph", "Heading").
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// Byte range [start, end] in source text.
+    #[serde(default)]
+    pub range: Option<[u32; 2]>,
+}
+
+impl AstNode {
+    /// Creates a new node (used in tests).
+    pub fn new(type_: impl Into<String>, range: Option<[u32; 2]>) -> Self {
+        Self {
+            type_: type_.into(),
+            range,
+        }
+    }
+}
+
+#[cfg(test)]
+mod ast_node_tests {
+    use super::*;
+
+    #[test]
+    fn ast_node_deserialize_from_msgpack_with_unknown_fields() {
+        // ホストは多くのフィールドを持つノードを送るが、AstNodeは必要なフィールドのみ取得する
+        #[derive(Serialize)]
+        struct FullNode {
+            #[serde(rename = "type")]
+            type_: &'static str,
+            range: [u32; 2],
+            children: Vec<String>, // 無視されるべきフィールド
+            value: &'static str,   // 無視されるべきフィールド
+        }
+
+        let full = FullNode {
+            type_: "Str",
+            range: [10, 20],
+            children: vec![],
+            value: "hello",
+        };
+
+        let bytes = rmp_serde::to_vec_named(&full).unwrap();
+        let node: AstNode = rmp_serde::from_slice(&bytes).unwrap();
+
+        assert_eq!(node.type_, "Str");
+        assert_eq!(node.range, Some([10, 20]));
+    }
+
+    #[test]
+    fn ast_node_deserialize_without_range() {
+        #[derive(Serialize)]
+        struct NodeWithoutRange {
+            #[serde(rename = "type")]
+            type_: &'static str,
+        }
+
+        let node_data = NodeWithoutRange { type_: "Root" };
+        let bytes = rmp_serde::to_vec_named(&node_data).unwrap();
+        let node: AstNode = rmp_serde::from_slice(&bytes).unwrap();
+
+        assert_eq!(node.type_, "Root");
+        assert_eq!(node.range, None);
+    }
+}
+
 /// Request sent to a rule's lint function.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintRequest {
