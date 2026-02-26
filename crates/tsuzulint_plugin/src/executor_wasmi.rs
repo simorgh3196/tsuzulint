@@ -33,8 +33,8 @@ struct HostState {
     memory: Option<Memory>,
     /// Resource limits for the store.
     limits: StoreLimits,
-    /// Current rule configuration (JSON string).
-    config: String,
+    /// Current rule configuration (MsgPack bytes).
+    config: Vec<u8>,
 }
 
 impl HostState {
@@ -46,7 +46,8 @@ impl HostState {
             limits: StoreLimitsBuilder::new()
                 .memory_size(DEFAULT_MEMORY_LIMIT_BYTES)
                 .build(),
-            config: "{}".to_string(),
+            // Empty MsgPack map: fixmap with 0 entries (0x80)
+            config: vec![0x80],
         }
     }
 }
@@ -229,8 +230,7 @@ impl RuleExecutor for WasmiExecutor {
         linker
             .func_wrap("extism:host/user", "tsuzulint_get_config", {
                 |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
-                    let config = caller.data().config.clone();
-                    let bytes = config.as_bytes();
+                    let bytes: &[u8] = &caller.data().config.clone();
                     let total_len = bytes.len() as i64;
 
                     if len == 0 {
@@ -328,10 +328,10 @@ impl RuleExecutor for WasmiExecutor {
             .get_mut(rule_name)
             .ok_or_else(|| PluginError::not_found(rule_name))?;
 
-        let config_json = serde_json::to_string(config)
+        let config_bytes = rmp_serde::to_vec_named(config)
             .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
 
-        rule.store.data_mut().config = config_json;
+        rule.store.data_mut().config = config_bytes;
         Ok(())
     }
 
@@ -778,9 +778,9 @@ mod tests {
         let wasm = wat_to_wasm(&wat);
         executor.load(&wasm).expect("Failed to load rule");
 
-        // Default config is empty object "{}"
+        // Default config is empty MsgPack map (0x80)
         let res = executor.call_lint("config-rule", b"").unwrap();
-        assert_eq!(res, b"{}");
+        assert_eq!(res, vec![0x80]);
 
         // Update config
         let config = serde_json::json!({"foo": "bar"});
@@ -788,9 +788,10 @@ mod tests {
             .configure("config-rule", &config)
             .expect("Failed to configure");
 
-        // Check new config
+        // Check new config (MsgPack encoding of {"foo": "bar"})
+        let expected_msgpack = rmp_serde::to_vec_named(&config).unwrap();
         let res = executor.call_lint("config-rule", b"").unwrap();
-        assert_eq!(res, b"{\"foo\":\"bar\"}");
+        assert_eq!(res, expected_msgpack);
     }
 
     #[test]
