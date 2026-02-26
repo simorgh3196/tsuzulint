@@ -220,6 +220,20 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// Creates a PluginResolver with a temporary isolated cache for test use.
+    fn resolver_with_temp_cache(
+        fetcher: ManifestFetcher,
+        downloader: WasmDownloader,
+    ) -> (PluginResolver, tempfile::TempDir) {
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path());
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .expect("Failed to create resolver")
+            .with_downloader(downloader)
+            .with_cache(cache);
+        (resolver, temp_dir)
+    }
+
     #[tokio::test]
     async fn test_resolve_github_success() {
         let mock_server = MockServer::start().await;
@@ -260,13 +274,7 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
-        let temp_dir = tempdir().unwrap();
-        let cache = PluginCache::with_dir(temp_dir.path());
-
-        let resolver = PluginResolver::with_fetcher(fetcher)
-            .expect("Failed to create resolver")
-            .with_downloader(downloader)
-            .with_cache(cache);
+        let (resolver, _temp_dir) = resolver_with_temp_cache(fetcher, downloader);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -311,13 +319,7 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
-        let temp_dir = tempdir().unwrap();
-        let cache = PluginCache::with_dir(temp_dir.path());
-
-        let resolver = PluginResolver::with_fetcher(fetcher)
-            .expect("Failed to create resolver")
-            .with_downloader(downloader)
-            .with_cache(cache);
+        let (resolver, _temp_dir) = resolver_with_temp_cache(fetcher, downloader);
 
         let spec = PluginSpec::parse(&json!({
             "url": format!("{}/manifest.json", mock_server.uri()),
@@ -591,13 +593,7 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
-        let temp_dir = tempdir().unwrap();
-        let cache = PluginCache::with_dir(temp_dir.path());
-
-        let resolver = PluginResolver::with_fetcher(fetcher)
-            .expect("Failed to create resolver")
-            .with_downloader(downloader)
-            .with_cache(cache);
+        let (resolver, _temp_dir) = resolver_with_temp_cache(fetcher, downloader);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -651,13 +647,7 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
-        let temp_dir = tempdir().unwrap();
-        let cache = PluginCache::with_dir(temp_dir.path());
-
-        let resolver = PluginResolver::with_fetcher(fetcher)
-            .expect("Failed to create resolver")
-            .with_downloader(downloader)
-            .with_cache(cache);
+        let (resolver, _temp_dir) = resolver_with_temp_cache(fetcher, downloader);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -714,13 +704,7 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
-        let temp_dir = tempdir().unwrap();
-        let cache = PluginCache::with_dir(temp_dir.path());
-
-        let resolver = PluginResolver::with_fetcher(fetcher)
-            .expect("Failed to create resolver")
-            .with_downloader(downloader)
-            .with_cache(cache);
+        let (resolver, _temp_dir) = resolver_with_temp_cache(fetcher, downloader);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
