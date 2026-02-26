@@ -24,7 +24,7 @@ jsonc-parser = { workspace = true, features = ["serde"] }
 blake3 = { workspace = true }
 rayon = { workspace = true }
 thiserror = { workspace = true }
-miette = { workspace = true, features = ["fancy"] }
+miette = { workspace = true }
 tracing = { workspace = true }
 walkdir = { workspace = true }
 globset = { workspace = true }

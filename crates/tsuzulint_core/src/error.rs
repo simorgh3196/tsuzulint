@@ -16,27 +16,27 @@ pub enum LinterError {
 
     /// File I/O error.
     #[error("File error: {0}")]
-    #[diagnostic(code(tsuzulint::file))]
+    #[diagnostic(code(tsuzulint::file), help("Ensure the file exists and has the correct permissions."))]
     File(String),
 
     /// Parse error.
     #[error("Parse error: {0}")]
-    #[diagnostic(code(tsuzulint::parse))]
+    #[diagnostic(code(tsuzulint::parse), help("Check the file for syntax errors."))]
     Parse(String),
 
     /// Plugin error.
     #[error("Plugin error: {0}")]
-    #[diagnostic(code(tsuzulint::plugin))]
+    #[diagnostic(code(tsuzulint::plugin), help("Verify the plugin is installed and compatible."))]
     Plugin(#[from] tsuzulint_plugin::PluginError),
 
     /// Cache error.
     #[error("Cache error: {0}")]
-    #[diagnostic(code(tsuzulint::cache))]
+    #[diagnostic(code(tsuzulint::cache), help("Try clearing the cache and re-running."))]
     Cache(#[from] tsuzulint_cache::CacheError),
 
     /// I/O error.
     #[error("I/O error: {0}")]
-    #[diagnostic(code(tsuzulint::io))]
+    #[diagnostic(code(tsuzulint::io), help("Check file system permissions and disk space."))]
     Io(#[from] std::io::Error),
 
     /// Internal error.
