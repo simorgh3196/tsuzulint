@@ -159,19 +159,23 @@ impl ManifestFetcher {
             )));
         }
 
-        let metadata = tokio::fs::metadata(path).await?;
-        if metadata.len() > MAX_MANIFEST_SIZE {
+        use tokio::io::AsyncReadExt;
+        let mut file = tokio::fs::File::open(path).await?;
+        let mut content = String::new();
+        let read = file
+            .take(MAX_MANIFEST_SIZE + 1)
+            .read_to_string(&mut content)
+            .await?;
+        if read as u64 > MAX_MANIFEST_SIZE {
             return Err(FetchError::IoError(std::io::Error::new(
                 std::io::ErrorKind::FileTooLarge,
                 format!(
                     "Manifest file too large: {} bytes (max {} bytes)",
-                    metadata.len(),
-                    MAX_MANIFEST_SIZE
+                    read, MAX_MANIFEST_SIZE
                 ),
             )));
         }
 
-        let content = tokio::fs::read_to_string(path).await?;
         let manifest = validate_manifest(&content)?;
         Ok(manifest)
     }
@@ -311,12 +315,7 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
-        // Mock a response slightly larger than MAX_MANIFEST_SIZE
-        // We can't generate 10MB string easily in memory without allocation,
-        // so we'll just check if it fails for > MAX_MANIFEST_SIZE.
-        // Actually, let's just use a smaller max size for testing if possible?
-        // But MAX_MANIFEST_SIZE is const.
-        // We can create a large string, 10MB is fine for test environment usually.
+        // Mock a response slightly larger than MAX_MANIFEST_SIZE to trigger the limit.
         let large_manifest = " ".repeat((MAX_MANIFEST_SIZE + 100) as usize);
 
         Mock::given(method("GET"))
@@ -343,9 +342,11 @@ mod tests {
         use tempfile::NamedTempFile;
 
         // Create a file slightly larger than MAX_MANIFEST_SIZE
-        let file = NamedTempFile::new().unwrap();
+        let file = NamedTempFile::new().expect("failed to create temp file");
         let target_size = MAX_MANIFEST_SIZE + 1;
-        file.as_file().set_len(target_size).unwrap();
+        file.as_file()
+            .set_len(target_size)
+            .expect("failed to resize temp file");
 
         let fetcher = ManifestFetcher::new();
         let result = fetcher

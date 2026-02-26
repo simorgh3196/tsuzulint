@@ -262,8 +262,8 @@ mod tests {
             .allow_local(true);
 
         // Use isolated cache directory to prevent race conditions
-        let temp_dir = tempdir().unwrap();
-        println!("Deleted test cache dir: {:?}", temp_dir.path());
+        let temp_dir =
+            tempdir().expect("failed to create temporary directory for github success test");
         let cache = PluginCache::with_dir(temp_dir.path());
 
         let resolver = PluginResolver::with_fetcher(fetcher)
@@ -333,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_path_success() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("failed to create temporary directory for test");
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let wasm_path = dir.path().join("rule.wasm");
 
@@ -370,7 +370,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_path_not_found() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("failed to create temporary directory for test");
         let manifest_path = dir.path().join("tsuzulint-rule.json");
 
         let manifest = json!({
@@ -403,7 +403,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_path_hash_mismatch() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("failed to create temporary directory for test");
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let wasm_path = dir.path().join("rule.wasm");
 
@@ -437,7 +437,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_path_traversal() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("failed to create temporary directory for test");
 
         let safe_dir = dir.path().join("safe");
         std::fs::create_dir(&safe_dir).unwrap();
@@ -490,7 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_path_optional_alias() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("failed to create temporary directory for test");
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let wasm_path = dir.path().join("rule.wasm");
         let wasm_content = b"wasm content";
@@ -520,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_path_directory() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("failed to create temporary directory for test");
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let wasm_path = dir.path().join("rule.wasm");
         let wasm_content = b"wasm content";
@@ -591,7 +591,7 @@ mod tests {
             .allow_local(true);
 
         // Use isolated cache directory to prevent race conditions
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().expect("failed to create temporary directory for test");
         let cache = PluginCache::with_dir(temp_dir.path());
 
         let resolver = PluginResolver::with_fetcher(fetcher)
@@ -652,7 +652,7 @@ mod tests {
             .allow_local(true);
 
         // Use isolated cache directory to prevent race conditions
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().expect("failed to create temporary directory for test");
         let cache = PluginCache::with_dir(temp_dir.path());
 
         let resolver = PluginResolver::with_fetcher(fetcher)
@@ -716,7 +716,7 @@ mod tests {
             .allow_local(true);
 
         // Use isolated cache directory to prevent race conditions
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().expect("failed to create temporary directory for test");
         let cache = PluginCache::with_dir(temp_dir.path());
 
         let resolver = PluginResolver::with_fetcher(fetcher)
@@ -737,15 +737,6 @@ mod tests {
 
         assert!(resolved2.wasm_path.exists());
         let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
-
-        // Debug output
-        if wasm_bytes != wasm_content {
-            println!("Expected: {:?}", wasm_content);
-            println!("Got: {:?}", wasm_bytes);
-            if let Ok(s) = String::from_utf8(wasm_bytes.clone()) {
-                println!("Got string: {}", s);
-            }
-        }
 
         assert_eq!(wasm_bytes, wasm_content);
     }
