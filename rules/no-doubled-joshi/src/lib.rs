@@ -350,27 +350,21 @@ fn check_doubled_particles(
 }
 
 #[plugin_fn]
-pub fn get_manifest() -> FnResult<Vec<u8>> {
-    let manifest = RuleManifest::new(RULE_ID, VERSION)
+pub fn get_manifest() -> FnResult<RuleManifest> {
+    Ok(RuleManifest::new(RULE_ID, VERSION)
         .with_description("Detect repeated Japanese particles (助詞)")
         .with_fixable(true)
         .with_node_types(vec!["Str".to_string()])
         .with_languages(vec![KnownLanguage::Ja])
-        .with_capabilities(vec![Capability::Morphology]);
-    Ok(rmp_serde::to_vec_named(&manifest)?)
+        .with_capabilities(vec![Capability::Morphology]))
 }
 
 #[plugin_fn]
-pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
-    lint_impl(input)
-}
-
-fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
-    let request: LintRequest = rmp_serde::from_slice(&input)?;
+pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
     let mut diagnostics = Vec::new();
 
     if !is_node_type(&request.node, "Str") {
-        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
+        return Ok(LintResponse { diagnostics });
     }
 
     let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
@@ -380,7 +374,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
         if let Some((s, e, t)) = extract_node_text(&request.node, &request.source) {
             (s, e, t)
         } else {
-            return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
+            return Ok(LintResponse { diagnostics });
         };
 
     let node_tokens: Vec<Token> = if !tokens.is_empty() {
@@ -394,7 +388,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
     };
 
     if node_tokens.is_empty() {
-        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
+        return Ok(LintResponse { diagnostics });
     }
 
     let mut particles = extract_particles_from_tokens(&node_tokens, &config);
@@ -402,7 +396,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
 
     diagnostics = check_doubled_particles(&particles, &node_tokens, &request.source, &config);
 
-    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
+    Ok(LintResponse { diagnostics })
 }
 
 #[cfg(test)]

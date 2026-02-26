@@ -8,7 +8,6 @@
 //! | Option | Type | Default | Description |
 //! |--------|------|---------|-------------|
 //! | max | number | 100 | Maximum sentence length in characters |
-//! | skip_code | boolean | true | Skip code blocks and inline code |
 //!
 //! # Example
 //!
@@ -39,51 +38,37 @@ struct Config {
     /// Maximum sentence length in characters.
     #[serde(default = "default_max")]
     max: usize,
-    /// Skip code blocks and inline code.
-    #[serde(default = "default_true", rename = "skip_code", alias = "_skip_code")]
-    skip_code: bool,
 }
 
 fn default_max() -> usize {
     DEFAULT_MAX_LENGTH
 }
 
-fn default_true() -> bool {
-    true
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
             max: DEFAULT_MAX_LENGTH,
-            skip_code: true,
         }
     }
 }
 
 /// Returns the rule manifest.
 #[plugin_fn]
-pub fn get_manifest() -> FnResult<Vec<u8>> {
-    let manifest = RuleManifest::new(RULE_ID, VERSION)
+pub fn get_manifest() -> FnResult<RuleManifest> {
+    Ok(RuleManifest::new(RULE_ID, VERSION)
         .with_description("Check sentence length")
         .with_fixable(false)
-        .with_node_types(vec!["Str".to_string()]);
-    Ok(rmp_serde::to_vec_named(&manifest)?)
+        .with_node_types(vec!["Str".to_string()]))
 }
 
 /// Lints a node for sentence length.
 #[plugin_fn]
-pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
-    lint_impl(input)
-}
-
-fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
-    let request: LintRequest = rmp_serde::from_slice(&input)?;
+pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
     let mut diagnostics = Vec::new();
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
+        return Ok(LintResponse { diagnostics });
     }
 
     // Parse configuration
@@ -111,7 +96,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
         }
     }
 
-    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
+    Ok(LintResponse { diagnostics })
 }
 
 #[cfg(test)]
@@ -130,8 +115,7 @@ mod tests {
             text.to_string(),
         );
 
-        let output = lint_impl(rmp_serde::to_vec_named(&request).unwrap()).unwrap();
-        let response: LintResponse = rmp_serde::from_slice(&output).unwrap();
+        let response = lint(request).unwrap();
 
         // "Short sentence." is 15 chars (fine)
         // "Very long sentence..." is > 20 chars (warning)
@@ -140,27 +124,6 @@ mod tests {
             response.diagnostics[0]
                 .message
                 .contains("Sentence is too long")
-        );
-    }
-
-    #[test]
-    fn test_lint_alias_config() {
-        // Test compatibility with old _skip_code key
-        // Verify that both `_skip_code` (legacy alias) and `skip_code` keys
-        // are correctly deserialized into the Config struct.
-
-        let config_json = r#"{ "max": 100, "_skip_code": false }"#;
-        let config: Config = serde_json::from_str(config_json).unwrap();
-        assert!(
-            !config.skip_code,
-            "legacy _skip_code key should be deserialized"
-        );
-
-        let config_json_new = r#"{ "max": 100, "skip_code": false }"#;
-        let config_new: Config = serde_json::from_str(config_json_new).unwrap();
-        assert!(
-            !config_new.skip_code,
-            "skip_code key should be deserialized"
         );
     }
 }

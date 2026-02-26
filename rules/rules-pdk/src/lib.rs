@@ -264,6 +264,12 @@ impl LintRequest {
     }
 }
 
+impl FromBytesOwned for LintRequest {
+    fn from_bytes_owned(data: &[u8]) -> Result<Self, Error> {
+        rmp_serde::from_slice(data).map_err(|e| Error::msg(e.to_string()))
+    }
+}
+
 /// Pre-computed helper information for lint rules.
 ///
 /// This provides commonly needed data that would otherwise require
@@ -560,6 +566,19 @@ pub struct LintResponse {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+impl FromBytesOwned for LintResponse {
+    fn from_bytes_owned(data: &[u8]) -> Result<Self, Error> {
+        rmp_serde::from_slice(data).map_err(|e| Error::msg(e.to_string()))
+    }
+}
+
+impl ToBytes<'_> for LintResponse {
+    type Bytes = Vec<u8>;
+    fn to_bytes(&self) -> Result<Self::Bytes, Error> {
+        rmp_serde::to_vec_named(self).map_err(|e| Error::msg(e.to_string()))
+    }
+}
+
 /// A diagnostic message from a lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostic {
@@ -779,13 +798,23 @@ impl RuleManifest {
     }
 }
 
+impl FromBytesOwned for RuleManifest {
+    fn from_bytes_owned(data: &[u8]) -> Result<Self, Error> {
+        rmp_serde::from_slice(data).map_err(|e| Error::msg(e.to_string()))
+    }
+}
+
+impl ToBytes<'_> for RuleManifest {
+    type Bytes = Vec<u8>;
+    fn to_bytes(&self) -> Result<Self::Bytes, Error> {
+        rmp_serde::to_vec_named(self).map_err(|e| Error::msg(e.to_string()))
+    }
+}
+
 /// Helper to extract text range from a node.
 ///
 /// Returns `(start, end, text)` where `start` and `end` are byte offsets.
-pub fn extract_node_text<'a>(
-    node: &AstNode,
-    source: &'a str,
-) -> Option<(usize, usize, &'a str)> {
+pub fn extract_node_text<'a>(node: &AstNode, source: &'a str) -> Option<(usize, usize, &'a str)> {
     let [start, end] = node.range?;
     let (start, end) = (start as usize, end as usize);
     if end <= source.len() && start <= end {
@@ -1523,8 +1552,8 @@ mod tests {
     #[test]
     fn lint_request_with_file_path() {
         let node = AstNode::new("Str", None);
-        let request = LintRequest::single(node, "source".to_string())
-            .with_file_path(Some("test.md"));
+        let request =
+            LintRequest::single(node, "source".to_string()).with_file_path(Some("test.md"));
 
         assert_eq!(request.file_path, Some("test.md".to_string()));
     }
@@ -1536,8 +1565,7 @@ mod tests {
             text: Some("sample text".to_string()),
             ..Default::default()
         };
-        let request = LintRequest::single(node, "source".to_string())
-            .with_helpers(helpers);
+        let request = LintRequest::single(node, "source".to_string()).with_helpers(helpers);
 
         assert!(request.helpers.is_some());
         assert_eq!(
@@ -1852,11 +1880,9 @@ mod tests {
             text_context: Some(text_ctx),
             ..Default::default()
         };
-        let request = LintRequest::single(
-            AstNode::new("Str", Some([0, 18])),
-            "私は学生。".to_string(),
-        )
-        .with_helpers(helpers);
+        let request =
+            LintRequest::single(AstNode::new("Str", Some([0, 18])), "私は学生。".to_string())
+                .with_helpers(helpers);
 
         let bytes = rmp_serde::to_vec_named(&request).unwrap();
         let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();

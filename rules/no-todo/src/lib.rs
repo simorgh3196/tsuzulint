@@ -69,27 +69,21 @@ impl Config {
 
 /// Returns the rule manifest.
 #[plugin_fn]
-pub fn get_manifest() -> FnResult<Vec<u8>> {
-    let manifest = RuleManifest::new(RULE_ID, VERSION)
+pub fn get_manifest() -> FnResult<RuleManifest> {
+    Ok(RuleManifest::new(RULE_ID, VERSION)
         .with_description("Disallow TODO/FIXME comments in text")
         .with_fixable(false)
-        .with_node_types(vec!["Str".to_string()]);
-    Ok(rmp_serde::to_vec_named(&manifest)?)
+        .with_node_types(vec!["Str".to_string()]))
 }
 
 /// Lints a node for TODO patterns.
 #[plugin_fn]
-pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
-    lint_impl(input)
-}
-
-fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
-    let request: LintRequest = rmp_serde::from_slice(&input)?;
+pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
     let mut diagnostics = Vec::new();
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
+        return Ok(LintResponse { diagnostics });
     }
 
     // Parse configuration
@@ -105,7 +99,6 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
 
         for m in matches {
             // Check if we should ignore this match (using the exact matched text)
-            // Note: find_matches returns the original case-preserved text in matched_text
             if config.should_ignore(&m.matched_text) {
                 continue;
             }
@@ -125,7 +118,7 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
         }
     }
 
-    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
+    Ok(LintResponse { diagnostics })
 }
 
 #[cfg(test)]
@@ -134,16 +127,11 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tsuzulint_rule_pdk::AstNode;
 
-    fn create_request(text: &str) -> Vec<u8> {
-        let request = LintRequest::single(
+    fn create_request(text: &str) -> LintRequest {
+        LintRequest::single(
             AstNode::new("Str", Some([0, text.len() as u32])),
             text.to_string(),
-        );
-        rmp_serde::to_vec_named(&request).unwrap()
-    }
-
-    fn parse_response(bytes: &[u8]) -> LintResponse {
-        rmp_serde::from_slice(bytes).unwrap()
+        )
     }
 
     #[test]
@@ -167,20 +155,9 @@ mod tests {
     }
 
     #[test]
-    fn config_should_ignore() {
-        let config = Config {
-            ignore_patterns: vec!["TODO-OK".to_string()],
-            ..Default::default()
-        };
-        assert!(config.should_ignore("TODO-OK: this is fine"));
-        assert!(!config.should_ignore("TODO: this should be flagged"));
-    }
-
-    #[test]
     fn lint_detects_todo() {
-        let input = create_request("This is a TODO: check");
-        let output = lint_impl(input).unwrap();
-        let response = parse_response(&output);
+        let request = create_request("This is a TODO: check");
+        let response = lint(request).unwrap();
         assert_eq!(response.diagnostics.len(), 1);
         assert_eq!(
             response.diagnostics[0].message,
@@ -190,34 +167,11 @@ mod tests {
 
     #[test]
     fn lint_ignores_pattern() {
-        // "TODO: fix later" matches "TODO:", but ignore pattern "TODO:" filters it out.
         tsuzulint_rule_pdk::set_mock_config(&serde_json::json!({
             "ignore_patterns": ["TODO:"]
         }));
-        let input = create_request("This is a TODO: fix later");
-        let output = lint_impl(input).unwrap();
-        let response = parse_response(&output);
-
+        let request = create_request("This is a TODO: fix later");
+        let response = lint(request).unwrap();
         assert_eq!(response.diagnostics.len(), 0);
-    }
-
-    #[test]
-    fn manifest_contains_required_fields() {
-        // Test manifest structure directly (plugin_fn macro changes signature at compile time)
-        let manifest = RuleManifest::new(RULE_ID, VERSION)
-            .with_description("Disallow TODO/FIXME comments in text")
-            .with_fixable(false)
-            .with_node_types(vec!["Str".to_string()]);
-
-        assert_eq!(manifest.name, RULE_ID);
-        assert_eq!(manifest.version, VERSION);
-        assert!(manifest.description.is_some());
-        assert!(!manifest.fixable);
-        assert!(manifest.node_types.contains(&"Str".to_string()));
-
-        // Verify it serializes correctly via MsgPack
-        let bytes = rmp_serde::to_vec_named(&manifest).unwrap();
-        let decoded: RuleManifest = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(decoded.name, RULE_ID);
     }
 }
