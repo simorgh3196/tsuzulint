@@ -198,7 +198,11 @@ impl LinterConfig {
         let path = path.as_ref();
 
         let metadata = fs::metadata(path).map_err(|e| {
-            LinterError::config(format!("Failed to read metadata for {}: {}", path.display(), e))
+            LinterError::config(format!(
+                "Failed to read metadata for {}: {}",
+                path.display(),
+                e
+            ))
         })?;
 
         if metadata.len() > MAX_CONFIG_SIZE {
@@ -517,7 +521,8 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("Failed to read config") || err_msg.contains("Failed to read metadata"),
+            err_msg.contains("Failed to read config")
+                || err_msg.contains("Failed to read metadata"),
             "Error message '{}' does not contain expected text",
             err_msg
         );
@@ -679,6 +684,11 @@ mod tests {
 
         let result = LinterConfig::from_file(&config_path);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Config file too large"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Config file too large")
+        );
     }
 }
