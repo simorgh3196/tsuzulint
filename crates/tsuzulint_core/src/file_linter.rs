@@ -371,6 +371,8 @@ where
                 IsolationLevel::Global => global_rules.push(name.to_string()),
                 IsolationLevel::Block => block_rules.push(name.to_string()),
             }
+        } else {
+            warn!("Missing manifest for enabled rule: {}", name);
         }
     }
 
@@ -473,8 +475,43 @@ mod tests {
 
         assert!(block_rules.contains(&block_name.to_string()));
 
-        assert_eq!(global_rules.len(), 1);
-        assert_eq!(block_rules.len(), 1);
+        assert_eq!(global_rules, vec!["global-rule".to_string()]);
+        assert_eq!(block_rules, vec!["block-rule".to_string()]);
+    }
+
+    #[test]
+    fn test_get_classified_rules_returns_sorted_output() {
+        let mut manifests = HashMap::new();
+        manifests.insert(
+            "z-global".to_string(),
+            create_manifest(IsolationLevel::Global),
+        );
+        manifests.insert(
+            "a-global".to_string(),
+            create_manifest(IsolationLevel::Global),
+        );
+        manifests.insert(
+            "z-block".to_string(),
+            create_manifest(IsolationLevel::Block),
+        );
+        manifests.insert(
+            "a-block".to_string(),
+            create_manifest(IsolationLevel::Block),
+        );
+
+        let provider = MockManifestProvider { manifests };
+        let enabled_rules = HashSet::from(["z-global", "a-global", "z-block", "a-block"]);
+
+        let (global_rules, block_rules) = get_classified_rules(&provider, &enabled_rules);
+
+        assert_eq!(
+            global_rules,
+            vec!["a-global".to_string(), "z-global".to_string()]
+        );
+        assert_eq!(
+            block_rules,
+            vec!["a-block".to_string(), "z-block".to_string()]
+        );
     }
 
     #[test]
