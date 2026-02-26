@@ -132,19 +132,15 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use tsuzulint_rule_pdk::AstNode;
 
     fn create_request(text: &str, config: serde_json::Value) -> Vec<u8> {
         tsuzulint_rule_pdk::set_mock_config(config);
 
-        let node = serde_json::json!({
-            "type": "Str",
-            "range": [0, text.len()]
-        });
-        let request = serde_json::json!({
-            "node": node,
-            "source": text,
-            "file_path": null
-        });
+        let request = LintRequest::single(
+            AstNode::new("Str", Some([0, text.len() as u32])),
+            text.to_string(),
+        );
         rmp_serde::to_vec_named(&request).unwrap()
     }
 

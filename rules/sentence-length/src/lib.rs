@@ -118,22 +118,17 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use tsuzulint_rule_pdk::AstNode;
 
     #[test]
     fn test_lint_simple() {
         let text = "Short sentence. Very long sentence that exceeds the limit definitely.";
-        let node = serde_json::json!({
-            "type": "Str",
-            "range": [0, text.len()]
-        });
-        let config = serde_json::json!({ "max": 20 });
-        tsuzulint_rule_pdk::set_mock_config(config);
+        tsuzulint_rule_pdk::set_mock_config(serde_json::json!({ "max": 20 }));
 
-        let request = serde_json::json!({
-            "node": node,
-            "source": text,
-            "file_path": null
-        });
+        let request = LintRequest::single(
+            AstNode::new("Str", Some([0, text.len() as u32])),
+            text.to_string(),
+        );
 
         let output = lint_impl(rmp_serde::to_vec_named(&request).unwrap()).unwrap();
         let response: LintResponse = rmp_serde::from_slice(&output).unwrap();
@@ -151,12 +146,6 @@ mod tests {
     #[test]
     fn test_lint_alias_config() {
         // Test compatibility with old _skip_code key
-        let text = "`code block`";
-        let node = serde_json::json!({
-            "type": "Str",
-            "range": [0, text.len()]
-        });
-
         // Verify that both `_skip_code` (legacy alias) and `skip_code` keys
         // are correctly deserialized into the Config struct.
 
