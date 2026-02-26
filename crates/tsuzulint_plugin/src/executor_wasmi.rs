@@ -292,10 +292,7 @@ impl RuleExecutor for WasmiExecutor {
             .map_err(|e| PluginError::call(format!("Failed to get manifest: {}", e)))?;
 
         let manifest_bytes = Self::read_bytes(&store, manifest_ptr, manifest_len)?;
-        let manifest_json = String::from_utf8(manifest_bytes).map_err(|e| {
-            PluginError::invalid_manifest(format!("Invalid UTF-8 in manifest: {}", e))
-        })?;
-        let rule_manifest: RuleManifest = serde_json::from_str(&manifest_json)
+        let rule_manifest: RuleManifest = rmp_serde::from_slice(&manifest_bytes)
             .map_err(|e| PluginError::invalid_manifest(e.to_string()))?;
 
         debug!(
@@ -381,7 +378,7 @@ impl RuleExecutor for WasmiExecutor {
 #[cfg(test)]
 #[cfg(feature = "test-utils")]
 mod tests {
-    use crate::test_utils::{valid_rule_wat, wat_to_wasm};
+    use crate::test_utils::{bytes_to_wat_data, manifest_to_msgpack, valid_rule_wat, wat_to_wasm};
 
     use super::*;
 
@@ -472,26 +469,27 @@ mod tests {
     fn test_executor_lint_error() {
         let mut executor = WasmiExecutor::new();
         // Lint function traps (unreachable)
-        let json = r#"{"name":"error-rule","version":"1.0.0","description":"Error rule"}"#;
-        let len = json.len();
+        let manifest = RuleManifest::new("error-rule", "1.0.0")
+            .with_description("Error rule".to_string());
+        let msgpack_bytes = manifest_to_msgpack(&manifest);
+        let len = msgpack_bytes.len();
+        let data = bytes_to_wat_data(&msgpack_bytes);
         let wasm = wat_to_wasm(&format!(
             r#"
             (module
                 (memory (export "memory") 1)
                 (func (export "get_manifest") (result i32 i32)
                     (i32.const 0)
-                    (i32.const {})
+                    (i32.const {len})
                 )
                 (func (export "lint") (param i32 i32) (result i32 i32)
                     unreachable
                 )
                 (func (export "alloc") (param i32) (result i32) (i32.const 128))
 
-                (data (i32.const 0) "{}")
+                (data (i32.const 0) "{data}")
             )
             "#,
-            len,
-            json.replace("\"", "\\\"")
         ));
 
         executor.load(&wasm).expect("Failed to load rule");
@@ -578,29 +576,30 @@ mod tests {
         executor.load(&wasm1).expect("Failed to load rule 1");
 
         // Load second rule (different name)
-        let json2 = r#"{"name":"test-rule-2","version":"1.0.0","description":"Test rule 2"}"#;
-        let len2 = json2.len();
+        let manifest2 = RuleManifest::new("test-rule-2", "1.0.0")
+            .with_description("Test rule 2".to_string());
+        let msgpack_bytes2 = manifest_to_msgpack(&manifest2);
+        let len2 = msgpack_bytes2.len();
+        let data2 = bytes_to_wat_data(&msgpack_bytes2);
         let wasm2 = wat_to_wasm(&format!(
             r#"
             (module
                 (memory (export "memory") 1)
                 (func (export "get_manifest") (result i32 i32)
                     (i32.const 0)
-                    (i32.const {})
+                    (i32.const {len2})
                 )
                 (func (export "lint") (param i32 i32) (result i32 i32)
-                    (i32.const 100)
+                    (i32.const 512)
                     (i32.const 2)
                 )
                 (func (export "alloc") (param i32) (result i32)
                     (i32.const 128)
                 )
-                (data (i32.const 0) "{}")
-                (data (i32.const 100) "[]")
+                (data (i32.const 0) "{data2}")
+                (data (i32.const 512) "[]")
             )
             "#,
-            len2,
-            json2.replace("\"", "\\\"")
         ));
         executor.load(&wasm2).expect("Failed to load rule 2");
 
@@ -616,30 +615,31 @@ mod tests {
         let mut executor = WasmiExecutor::new();
 
         // Create a rule that returns invalid UTF-8 bytes
-        let json = r#"{"name":"invalid-utf8","version":"1.0.0","description":"Invalid"}"#;
-        let len = json.len();
+        let manifest = RuleManifest::new("invalid-utf8", "1.0.0")
+            .with_description("Invalid".to_string());
+        let msgpack_bytes = manifest_to_msgpack(&manifest);
+        let len = msgpack_bytes.len();
+        let data = bytes_to_wat_data(&msgpack_bytes);
         let wasm = wat_to_wasm(&format!(
             r#"
             (module
                 (memory (export "memory") 1)
                 (func (export "get_manifest") (result i32 i32)
                     (i32.const 0)
-                    (i32.const {})
+                    (i32.const {len})
                 )
                 (func (export "lint") (param i32 i32) (result i32 i32)
-                    (i32.const 100)
+                    (i32.const 512)
                     (i32.const 2)
                 )
                 (func (export "alloc") (param i32) (result i32)
                     (i32.const 128)
                 )
-                (data (i32.const 0) "{}")
-                ;; Invalid UTF-8 sequence at offset 100
-                (data (i32.const 100) "\ff\fe")
+                (data (i32.const 0) "{data}")
+                ;; Invalid UTF-8 sequence at offset 512
+                (data (i32.const 512) "\ff\fe")
             )
             "#,
-            len,
-            json.replace("\"", "\\\"")
         ));
 
         executor.load(&wasm).expect("Failed to load rule");
@@ -684,16 +684,18 @@ mod tests {
         let mut executor = WasmiExecutor::new();
 
         // Infinite loop rule
-        let json =
-            r#"{"name":"infinite-loop","version":"1.0.0","description":"Infinite loop rule"}"#;
-        let len = json.len();
+        let manifest = RuleManifest::new("infinite-loop", "1.0.0")
+            .with_description("Infinite loop rule".to_string());
+        let msgpack_bytes = manifest_to_msgpack(&manifest);
+        let len = msgpack_bytes.len();
+        let data = bytes_to_wat_data(&msgpack_bytes);
         let wasm = wat_to_wasm(&format!(
             r#"
             (module
                 (memory (export "memory") 1)
                 (func (export "get_manifest") (result i32 i32)
                     (i32.const 0) ;; ptr
-                    (i32.const {}) ;; len
+                    (i32.const {len}) ;; len
                 )
                 (func (export "lint") (param i32 i32) (result i32 i32)
                     (loop
@@ -704,12 +706,10 @@ mod tests {
                 (func (export "alloc") (param i32) (result i32)
                     (i32.const 128)
                 )
-                ;; Write manifest to memory at offset 0
-                (data (i32.const 0) "{}")
+                ;; Write MsgPack manifest to memory at offset 0
+                (data (i32.const 0) "{data}")
             )
             "#,
-            len,
-            json.replace("\"", "\\\"")
         ));
 
         executor.load(&wasm).expect("Failed to load rule");
@@ -730,8 +730,10 @@ mod tests {
     fn test_config_lifecycle() {
         let mut executor = WasmiExecutor::new();
 
-        let json = r#"{"name":"config-rule","version":"1.0.0"}"#;
-        let len = json.len();
+        let manifest = RuleManifest::new("config-rule", "1.0.0");
+        let msgpack_bytes = manifest_to_msgpack(&manifest);
+        let len = msgpack_bytes.len();
+        let data = bytes_to_wat_data(&msgpack_bytes);
 
         let wat = format!(
             r#"
@@ -740,11 +742,11 @@ mod tests {
                 (memory (export "memory") 1)
 
                 (func $get_manifest (export "get_manifest") (result i32 i32)
-                    (i32.const 0) (i32.const {})
+                    (i32.const 0) (i32.const {len})
                 )
 
                 (func $alloc (export "alloc") (param i32) (result i32)
-                    (i32.const 100)
+                    (i32.const 512)
                 )
 
                 (func $lint (export "lint") (param i32 i32) (result i32 i32)
@@ -755,8 +757,8 @@ mod tests {
                     (call $get_config (i64.const 0) (i64.const 0))
                     local.set $len
 
-                    ;; 2. Set ptr to 100
-                    i32.const 100
+                    ;; 2. Set ptr to 512
+                    i32.const 512
                     local.set $ptr
 
                     ;; 3. Read config
@@ -768,11 +770,9 @@ mod tests {
                     (i32.wrap_i64 (local.get $len))
                 )
 
-                (data (i32.const 0) "{}")
+                (data (i32.const 0) "{data}")
             )
             "#,
-            len,
-            json.replace("\"", "\\\"")
         );
 
         let wasm = wat_to_wasm(&wat);
@@ -797,8 +797,10 @@ mod tests {
     fn test_config_edge_cases() {
         let mut executor = WasmiExecutor::new();
 
-        let json = r#"{"name":"edge-case-rule","version":"1.0.0"}"#;
-        let len = json.len();
+        let manifest = RuleManifest::new("edge-case-rule", "1.0.0");
+        let msgpack_bytes = manifest_to_msgpack(&manifest);
+        let len = msgpack_bytes.len();
+        let data = bytes_to_wat_data(&msgpack_bytes);
 
         let wat = format!(
             r#"
@@ -807,11 +809,11 @@ mod tests {
                 (memory (export "memory") 1)
 
                 (func $get_manifest (export "get_manifest") (result i32 i32)
-                    (i32.const 0) (i32.const {})
+                    (i32.const 0) (i32.const {len})
                 )
 
                 (func $alloc (export "alloc") (param i32) (result i32)
-                    (i32.const 100)
+                    (i32.const 512)
                 )
 
                 (func $lint (export "lint") (param i32 i32) (result i32 i32)
@@ -829,11 +831,9 @@ mod tests {
                     (i32.const 0) (i32.const 0)
                 )
 
-                (data (i32.const 0) "{}")
+                (data (i32.const 0) "{data}")
             )
             "#,
-            len,
-            json.replace("\"", "\\\"")
         );
 
         let wasm = wat_to_wasm(&wat);

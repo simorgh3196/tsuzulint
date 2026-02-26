@@ -149,11 +149,11 @@ impl ExtismExecutor {
 
     fn fetch_manifest(plugin: &mut Plugin) -> Result<RuleManifest, PluginError> {
         // Get the rule manifest by calling get_manifest()
-        let manifest_json: String = plugin
+        let manifest_bytes: Vec<u8> = plugin
             .call("get_manifest", "")
             .map_err(|e| PluginError::call(format!("Failed to get manifest: {}", e)))?;
 
-        serde_json::from_str(&manifest_json)
+        rmp_serde::from_slice(&manifest_bytes)
             .map_err(|e| PluginError::invalid_manifest(e.to_string()))
     }
 
@@ -286,7 +286,7 @@ impl RuleExecutor for ExtismExecutor {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "test-utils")]
-    use crate::test_utils::wat_to_wasm;
+    use crate::test_utils::{bytes_to_wat_data, manifest_to_msgpack, wat_to_wasm};
 
     use super::*;
 
@@ -415,17 +415,19 @@ mod tests {
     fn test_config_lifecycle() {
         let mut executor = ExtismExecutor::new();
 
-        let json = r#"{"name":"config-rule","version":"1.0.0"}"#;
-        // Construct WAT instructions to write the JSON to memory at offset 0
+        let manifest = RuleManifest::new("config-rule", "1.0.0");
+        let msgpack_bytes = manifest_to_msgpack(&manifest);
+        // Construct WAT instructions to write the MsgPack bytes to memory at offset 1024
         // This avoids relying on data segments which seem flaky in some contexts or with Extism
         let mut store_instrs = String::new();
-        for (i, b) in json.bytes().enumerate() {
+        for (i, b) in msgpack_bytes.iter().enumerate() {
             store_instrs.push_str(&format!(
                 "(call $store_u8 (i64.const {}) (i32.const {}))\n",
                 1024 + i,
                 b
             ));
         }
+        let manifest_len = msgpack_bytes.len();
 
         // Extism provides 'config' in the environment which we can access via extism:host/env::config_get
         // We'll write a test rule that reads this config.
@@ -442,8 +444,8 @@ mod tests {
                 (memory (export "memory") 1)
 
                 (func $get_manifest (export "get_manifest") (result i32)
-                    {}
-                    (call $output_set (i64.const 1024) (i64.const {}))
+                    {store_instrs}
+                    (call $output_set (i64.const 1024) (i64.const {manifest_len}))
                     (i32.const 0)
                 )
 
@@ -480,8 +482,6 @@ mod tests {
                 )
             )
             "#,
-            store_instrs,
-            json.len()
         );
 
         // NOTE: Writing pure WAT to test Extism config is complex because it involves
@@ -509,15 +509,17 @@ mod tests {
 
         // This test specifically calls the tsuzulint_get_config host function
         // which is a stub in ExtismExecutor (returns 0).
-        let json = r#"{"name":"stub-test","version":"1.0.0"}"#;
+        let manifest = RuleManifest::new("stub-test", "1.0.0");
+        let msgpack_bytes = manifest_to_msgpack(&manifest);
         let mut store_instrs = String::new();
-        for (i, b) in json.bytes().enumerate() {
+        for (i, b) in msgpack_bytes.iter().enumerate() {
             store_instrs.push_str(&format!(
                 "(call $store_u8 (i64.const {}) (i32.const {}))\n",
                 1024 + i,
                 b
             ));
         }
+        let manifest_len = msgpack_bytes.len();
 
         let wat = format!(
             r#"
@@ -528,8 +530,8 @@ mod tests {
                 (memory (export "memory") 1)
 
                 (func $get_manifest (export "get_manifest") (result i32)
-                    {}
-                    (call $output_set (i64.const 1024) (i64.const {}))
+                    {store_instrs}
+                    (call $output_set (i64.const 1024) (i64.const {manifest_len}))
                     (i32.const 0)
                 )
 
@@ -541,8 +543,6 @@ mod tests {
                 )
             )
             "#,
-            store_instrs,
-            json.len()
         );
 
         let wasm = wat_to_wasm(&wat);
