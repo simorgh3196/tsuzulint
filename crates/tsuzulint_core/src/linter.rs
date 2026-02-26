@@ -38,7 +38,7 @@ pub use crate::parallel_linter::LintFilesResult;
 pub struct Linter {
     tokenizer: Arc<Tokenizer>,
     config: LinterConfig,
-    config_hash: String,
+    config_hash: [u8; 32],
     plugin_host: Mutex<PluginHost>,
     cache: Mutex<CacheManager>,
     dynamic_rules: Mutex<Vec<PathBuf>>,

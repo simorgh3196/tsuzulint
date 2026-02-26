@@ -18,7 +18,7 @@ pub type LintFilesResult = Result<(Vec<LintResult>, Vec<(PathBuf, LinterError)>)
 pub fn lint_files(
     paths: &[PathBuf],
     config: &LinterConfig,
-    config_hash: &str,
+    config_hash: &[u8; 32],
     tokenizer: &Arc<Tokenizer>,
     cache: &std::sync::Mutex<CacheManager>,
     dynamic_rules: &std::sync::Mutex<Vec<PathBuf>>,

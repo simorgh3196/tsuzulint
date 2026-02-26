@@ -30,8 +30,8 @@ A crate that provides a file-level caching system. Implements incremental cachin
 ├─────────────────────────────────────────────────────────────┤
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │                    CacheEntry                          │  │
-│  │  - content_hash: String (BLAKE3)                      │  │
-│  │  - config_hash: String                                │  │
+│  │  - content_hash: [u8; 32] (BLAKE3)                    │  │
+│  │  - config_hash: [u8; 32]                              │  │
 │  │  - rule_versions: HashMap<String, String>             │  │
 │  │  - diagnostics: Vec<Diagnostic>                       │  │
 │  │  - blocks: Vec<BlockCacheEntry>                       │  │
@@ -48,8 +48,8 @@ A crate that provides a file-level caching system. Implements incremental cachin
 ### Implementation
 
 ```rust
-pub fn hash_content(content: &str) -> String {
-    blake3::hash(content.as_bytes()).to_hex().to_string()
+pub fn hash_content(content: &str) -> BlockHash {
+    blake3::hash(content.as_bytes()).into()
 }
 ```
 
@@ -57,12 +57,12 @@ pub fn hash_content(content: &str) -> String {
 
 - **High Performance**: Faster than SHA-256 (with SIMD optimization support)
 - **Security**: Cryptographically secure hash function
-- **Consistency**: Always generates the same 256-bit (64-character hexadecimal) hash from identical input
+- **Consistency**: Always generates the same 256-bit (32-byte) hash from identical input
 
 ### Cache Key Components
 
-1. **Content Hash**: BLAKE3 hash of file contents
-2. **Config Hash**: Hash of lint configuration
+1. **Content Hash**: BLAKE3 hash of file contents (`[u8; 32]`)
+2. **Config Hash**: Hash of lint configuration (`[u8; 32]`)
 3. **Rule Versions**: Manages rule names and versions in `HashMap<String, String>` format
 4. **Block Hash**: 32-byte array (`[u8; 32]`) for block-level differential detection
 
@@ -73,12 +73,12 @@ pub fn hash_content(content: &str) -> String {
 ```rust
 pub fn is_valid(
     &self,
-    content_hash: &str,
-    config_hash: &str,
+    content_hash: &BlockHash,
+    config_hash: &BlockHash,
     rule_versions: &HashMap<String, String>,
 ) -> bool {
-    self.content_hash == content_hash
-        && self.config_hash == config_hash
+    self.content_hash == *content_hash
+        && self.config_hash == *config_hash
         && self.rule_versions == *rule_versions
 }
 ```
@@ -102,7 +102,7 @@ pub fn reconcile_blocks(
     &self,
     path: &Path,
     current_blocks: &[BlockCacheEntry],
-    config_hash: &str,
+    config_hash: &BlockHash,
     rule_versions: &HashMap<String, String>,
 ) -> (Vec<Diagnostic>, Vec<bool>)
 ```

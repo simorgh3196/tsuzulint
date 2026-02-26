@@ -24,7 +24,7 @@ pub fn lint_file_internal(
     path: &Path,
     host: &mut PluginHost,
     tokenizer: &Arc<Tokenizer>,
-    config_hash: &str,
+    config_hash: &[u8; 32],
     cache: &Mutex<CacheManager>,
     enabled_rules: &HashSet<&str>,
     timings_enabled: bool,
@@ -243,7 +243,7 @@ pub fn lint_file_internal(
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
         let entry = tsuzulint_cache::CacheEntry::new(
             content_hash,
-            config_hash.to_string(),
+            *config_hash,
             rule_versions,
             final_diagnostics.clone(),
             new_blocks,
