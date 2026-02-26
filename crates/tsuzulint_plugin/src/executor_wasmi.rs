@@ -227,16 +227,20 @@ impl RuleExecutor for WasmiExecutor {
             .map_err(|e| PluginError::load(format!("Failed to add config_get: {}", e)))?;
 
         // extism:host/user.tsuzulint_get_config
+        // Protocol: Returns (offset << 32 | length) packed into i64.
+        // For Wasmi: offset is always 0, so guest uses two-call protocol.
         linker
             .func_wrap("extism:host/user", "tsuzulint_get_config", {
                 |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
                     let bytes: &[u8] = &caller.data().config.clone();
-                    let total_len = bytes.len() as i64;
+                    let total_len = bytes.len() as u64;
 
                     if len == 0 {
-                        return total_len;
+                        // First call: return packed (offset=0 << 32 | length)
+                        return total_len as i64;
                     }
 
+                    // Second call: write to guest memory at ptr
                     if let Some(memory) = caller.data().memory {
                         if memory
                             .write(
@@ -246,7 +250,7 @@ impl RuleExecutor for WasmiExecutor {
                             )
                             .is_ok()
                         {
-                            return total_len;
+                            return total_len as i64;
                         }
                     }
                     -1

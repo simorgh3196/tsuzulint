@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use extism::{
     CurrentPlugin, Error, Function, Manifest, Plugin, PluginBuilder, UserData, Val, ValType, Wasm,
@@ -42,6 +42,25 @@ impl RuleSource {
     }
 }
 
+/// Config data shared with the WASM guest via tsuzulint_get_config host function.
+#[derive(Clone)]
+struct RuleConfig(Arc<Mutex<Vec<u8>>>);
+
+impl RuleConfig {
+    fn new_empty() -> Self {
+        // Empty MsgPack map: fixmap with 0 entries (0x80)
+        Self(Arc::new(Mutex::new(vec![0x80])))
+    }
+
+    fn set(&self, bytes: Vec<u8>) {
+        *self.0.lock().unwrap() = bytes;
+    }
+
+    fn get(&self) -> Vec<u8> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 /// A loaded rule using Extism.
 struct LoadedRule {
     /// The Extism plugin instance.
@@ -51,6 +70,8 @@ struct LoadedRule {
     manifest: RuleManifest,
     /// The source of the rule (for reloading).
     source: RuleSource,
+    /// Current rule configuration (MsgPack bytes).
+    config: RuleConfig,
 }
 
 /// Extism-based executor for native environments.
@@ -115,22 +136,17 @@ impl ExtismExecutor {
         manifest
     }
 
-    fn build_plugin(&self, source: &RuleSource, config_json: &str) -> Result<Plugin, PluginError> {
+    fn build_plugin(&self, source: &RuleSource, config_bytes: Vec<u8>) -> Result<Plugin, PluginError> {
         let wasm = source.to_wasm();
         let manifest = Manifest::new([wasm]);
-        let mut manifest = self.configure_manifest(manifest);
-
-        // Set configuration
-        manifest
-            .config
-            .insert("config".to_string(), config_json.to_string());
+        let manifest = self.configure_manifest(manifest);
 
         let f = Function::new(
             "tsuzulint_get_config",
             [ValType::I64, ValType::I64],
             [ValType::I64],
-            UserData::new(()),
-            tsuzulint_get_config_stub,
+            UserData::new(config_bytes),
+            tsuzulint_get_config_impl,
         )
         .with_namespace("extism:host/user");
 
@@ -158,7 +174,8 @@ impl ExtismExecutor {
     }
 
     fn load_rule(&mut self, source: RuleSource) -> Result<LoadResult, PluginError> {
-        let mut plugin = self.build_plugin(&source, "{}")?; // Default config
+        let config = RuleConfig::new_empty();
+        let mut plugin = self.build_plugin(&source, config.get())?;
         let rule_manifest = Self::fetch_manifest(&mut plugin)?;
 
         debug!(
@@ -173,6 +190,7 @@ impl ExtismExecutor {
                 plugin,
                 manifest: rule_manifest.clone(),
                 source,
+                config,
             },
         );
 
@@ -183,14 +201,42 @@ impl ExtismExecutor {
     }
 }
 
-/// Host function stub (unused in Extism mode).
-fn tsuzulint_get_config_stub(
-    _plugin: &mut CurrentPlugin,
-    _args: &[Val],
+/// Host function implementation for tsuzulint_get_config.
+///
+/// Protocol (packed return):
+/// - Returns (offset << 32 | length) packed into a u64.
+/// - For Extism: offset is the memory handle offset where config bytes are stored.
+/// - For Wasmi: offset is 0, length is the config byte count.
+///
+/// The PDK differentiates based on offset:
+/// - If offset != 0 (Extism): read directly from the returned offset.
+/// - If offset == 0 (Wasmi): make a second call to write to guest buffer.
+fn tsuzulint_get_config_impl(
+    plugin: &mut CurrentPlugin,
+    args: &[Val],
     results: &mut [Val],
-    _user_data: UserData<()>,
+    user_data: UserData<Vec<u8>>,
 ) -> Result<(), Error> {
-    results[0] = Val::I64(0);
+    let _ptr = args[0].unwrap_i64() as u64;
+    let len = args[1].unwrap_i64() as u64;
+
+    let bytes = user_data
+        .get()
+        .map_err(|e| Error::msg(format!("UserData error: {e}")))?;
+    let bytes_guard = bytes.lock().unwrap();
+    let bytes_slice = bytes_guard.as_slice();
+
+    if len == 0 {
+        // First call: allocate memory, copy bytes, return (offset << 32 | length)
+        let handle = plugin.memory_new(bytes_slice.to_vec())?;
+        let packed = ((handle.offset() as u64) << 32) | (bytes_slice.len() as u64);
+        results[0] = Val::I64(packed as i64);
+        return Ok(());
+    }
+
+    // Second call (len != 0): This is for Wasmi compatibility.
+    // For Extism, this shouldn't be called, but return error just in case.
+    results[0] = Val::I64(-1);
     Ok(())
 }
 
@@ -237,18 +283,23 @@ impl RuleExecutor for ExtismExecutor {
         rule_name: &str,
         config: &serde_json::Value,
     ) -> Result<(), PluginError> {
-        let source = {
-            let rule = self
-                .rules
-                .get(rule_name)
-                .ok_or_else(|| PluginError::not_found(rule_name))?;
-            rule.source.clone()
-        };
+        let rule = self
+            .rules
+            .get(rule_name)
+            .ok_or_else(|| PluginError::not_found(rule_name))?;
 
-        let config_json = serde_json::to_string(config)
+        let source = rule.source.clone();
+
+        // Serialize config to MsgPack bytes
+        let config_bytes = rmp_serde::to_vec_named(config)
             .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
 
-        let plugin = self.build_plugin(&source, &config_json)?;
+        // Update stored config
+        let config_ref = rule.config.clone();
+        config_ref.set(config_bytes.clone());
+
+        // Rebuild plugin with new config
+        let plugin = self.build_plugin(&source, config_bytes)?;
 
         if let Some(rule) = self.rules.get_mut(rule_name) {
             rule.plugin = plugin;
@@ -507,8 +558,8 @@ mod tests {
     fn test_config_fallback_stub() {
         let mut executor = ExtismExecutor::new();
 
-        // This test specifically calls the tsuzulint_get_config host function
-        // which is a stub in ExtismExecutor (returns 0).
+        // This test calls the tsuzulint_get_config host function.
+        // The protocol returns (offset << 32 | length) on first call.
         let manifest = RuleManifest::new("stub-test", "1.0.0");
         let msgpack_bytes = manifest_to_msgpack(&manifest);
         let mut store_instrs = String::new();
@@ -527,6 +578,7 @@ mod tests {
                 (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
                 (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
                 (import "extism:host/env" "store_u8" (func $store_u8 (param i64 i32)))
+                (import "extism:host/env" "load_u8" (func $load_u8 (param i64) (result i32)))
                 (memory (export "memory") 1)
 
                 (func $get_manifest (export "get_manifest") (result i32)
@@ -536,10 +588,28 @@ mod tests {
                 )
 
                 (func $lint (export "lint") (result i32)
-                    ;; Call the stub with arbitrary arguments
-                    (call $get_config (i64.const 0) (i64.const 10))
-                    ;; Convert result i64 to i32
-                    i32.wrap_i64
+                    (local $packed i64)
+                    (local $offset i64)
+                    (local $len i64)
+                    (local $i i64)
+
+                    ;; Call get_config with (0, 0) to get packed (offset << 32 | length)
+                    (call $get_config (i64.const 0) (i64.const 0))
+                    local.set $packed
+
+                    ;; Extract offset (high 32 bits) and length (low 32 bits)
+                    ;; offset = packed >> 32
+                    (i64.shr_u (local.get $packed) (i64.const 32))
+                    local.set $offset
+
+                    ;; len = packed & 0xFFFFFFFF
+                    (i64.and (local.get $packed) (i64.const 0xFFFFFFFF))
+                    local.set $len
+
+                    ;; Read config bytes from offset and output them
+                    (call $output_set (local.get $offset) (local.get $len))
+
+                    (i32.const 0)
                 )
             )
             "#,
@@ -549,9 +619,9 @@ mod tests {
         executor.load(&wasm).expect("Failed to load rule");
 
         let res = executor.call_lint("stub-test", b"{}");
-        // The stub returns 0, and we don't call output_set in lint, so result is empty
+        // Should return the empty MsgPack map (0x80)
         assert!(res.is_ok());
-        assert_eq!(res.unwrap(), Vec::<u8>::new());
+        assert_eq!(res.unwrap(), vec![0x80]);
     }
 
     #[test]

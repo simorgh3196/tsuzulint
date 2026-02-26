@@ -31,29 +31,40 @@ pub fn set_mock_config<T: serde::Serialize>(config: &T) {
 pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
     #[cfg(target_arch = "wasm32")]
     {
-        // Fallback to custom host function (for Wasmi)
-        let len = unsafe { tsuzulint_get_config(0, 0) };
+        // First call to get packed result (offset << 32 | length)
+        let packed = unsafe { tsuzulint_get_config(0, 0) };
 
         // Check for error sentinel (u64::MAX from -1 i64)
-        if len == u64::MAX {
-            return Err(Error::msg("Failed to get config: memory write error").into());
+        if packed == u64::MAX {
+            return Err(Error::msg("Failed to get config: host error").into());
         }
+
+        let offset = (packed >> 32) as u32 as usize;
+        let len = (packed & 0xFFFFFFFF) as u32 as usize;
 
         if len == 0 {
             // Empty MsgPack map: fixmap with 0 entries (0x80)
             return Ok(rmp_serde::from_slice(&[0x80])?);
         }
 
-        // Allocate buffer and get content
-        let mut buf = vec![0u8; len as usize];
-        let result = unsafe { tsuzulint_get_config(buf.as_mut_ptr() as u64, len) };
+        let bytes = if offset != 0 {
+            // Extism: read from the allocated memory at offset
+            let memory = extism_pdk::Memory::find(offset as u64)
+                .ok_or_else(|| Error::msg("Failed to find config memory"))?;
+            memory.to_vec()
+        } else {
+            // Wasmi: second call to write to guest-allocated buffer
+            let mut buf = vec![0u8; len];
+            let result = unsafe { tsuzulint_get_config(buf.as_mut_ptr() as u64, len as u64) };
 
-        // Check for error sentinel on second call
-        if result == u64::MAX {
-            return Err(Error::msg("Failed to get config: memory write error").into());
-        }
+            // Check for error sentinel on second call
+            if result == u64::MAX {
+                return Err(Error::msg("Failed to get config: memory write error").into());
+            }
+            buf
+        };
 
-        Ok(rmp_serde::from_slice(&buf)?)
+        Ok(rmp_serde::from_slice(&bytes)?)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
