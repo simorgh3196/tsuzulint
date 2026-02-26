@@ -24,7 +24,10 @@ pub enum LinterError {
 
     /// Parse error.
     #[error("Parse error: {0}")]
-    #[diagnostic(code(tsuzulint::parse), help("Check the file for syntax errors."))]
+    #[diagnostic(
+        code(tsuzulint::parse),
+        help("Check the file content for syntax errors.")
+    )]
     Parse(String),
 
     /// Plugin error.
@@ -37,7 +40,10 @@ pub enum LinterError {
 
     /// Cache error.
     #[error("Cache error: {0}")]
-    #[diagnostic(code(tsuzulint::cache), help("Try clearing the cache and re-running."))]
+    #[diagnostic(
+        code(tsuzulint::cache),
+        help("Try clearing the cache with `tsuzulint plugin cache clean`.")
+    )]
     Cache(#[from] tsuzulint_cache::CacheError),
 
     /// I/O error.
