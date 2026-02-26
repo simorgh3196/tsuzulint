@@ -15,6 +15,9 @@ use std::sync::OnceLock;
 const SCHEMA_JSON: &str = include_str!("../../../schemas/v1/config.json");
 static CONFIG_SCHEMA: OnceLock<Validator> = OnceLock::new();
 
+/// Maximum allowed size for configuration files (1 MB).
+const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
+
 /// Configuration for the linter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinterConfig {
@@ -193,6 +196,19 @@ impl LinterConfig {
     /// Supports `.tsuzulint.jsonc`, `.tsuzulint.json`.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, LinterError> {
         let path = path.as_ref();
+
+        let metadata = fs::metadata(path).map_err(|e| {
+            LinterError::config(format!("Failed to read metadata for {}: {}", path.display(), e))
+        })?;
+
+        if metadata.len() > MAX_CONFIG_SIZE {
+            return Err(LinterError::config(format!(
+                "Config file too large: {} bytes exceeds limit of {} bytes",
+                metadata.len(),
+                MAX_CONFIG_SIZE
+            )));
+        }
+
         let content = fs::read_to_string(path)
             .map_err(|e| LinterError::config(format!("Failed to read config: {}", e)))?;
 
@@ -499,11 +515,11 @@ mod tests {
     fn test_config_from_file_not_found() {
         let result = LinterConfig::from_file("non_existent_file_xyz.json");
         assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
         assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Failed to read config")
+            err_msg.contains("Failed to read config") || err_msg.contains("Failed to read metadata"),
+            "Error message '{}' does not contain expected text",
+            err_msg
         );
     }
 
@@ -646,5 +662,23 @@ mod tests {
             }
             _ => panic!("Expected Detail"),
         }
+    }
+
+    #[test]
+    fn test_config_from_file_too_large() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("large_config.json");
+
+        // Create a file slightly larger than MAX_CONFIG_SIZE
+        let size = MAX_CONFIG_SIZE as usize + 1;
+        let content = " ".repeat(size); // Valid JSON whitespace
+        fs::write(&config_path, content).unwrap();
+
+        let result = LinterConfig::from_file(&config_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Config file too large"));
     }
 }
