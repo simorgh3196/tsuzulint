@@ -272,10 +272,7 @@ pub fn lint_content(
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
-    let needs_morphology = host
-        .loaded_rules()
-        .filter_map(|name| host.get_manifest(name))
-        .any(|m| m.needs_morphology());
+    let needs_morphology = any_loaded_rules_need_morphology(host.loaded_rules(), host);
 
     let tokens = if needs_morphology {
         tokenizer
@@ -374,15 +371,23 @@ where
                 IsolationLevel::Global => global_rules.push(name.clone()),
                 IsolationLevel::Block => block_rules.push(name.clone()),
             }
-            if !needs_morphology && manifest.needs_morphology() {
-                needs_morphology = true;
-            }
+            needs_morphology |= manifest.needs_morphology();
         } else {
             warn!("Rule '{}' is enabled but has no manifest; skipping", name);
         }
     }
 
     (global_rules, block_rules, needs_morphology)
+}
+
+fn any_loaded_rules_need_morphology<'a, I, P>(rules: I, host: &P) -> bool
+where
+    I: Iterator<Item = &'a String>,
+    P: ManifestProvider,
+{
+    rules
+        .filter_map(|name| host.get_manifest(name))
+        .any(|m| m.needs_morphology())
 }
 
 fn filter_overridden_diagnostics(
