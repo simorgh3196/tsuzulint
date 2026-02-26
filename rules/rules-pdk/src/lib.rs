@@ -198,7 +198,11 @@ impl LintRequest {
     /// returns a single-element slice containing `self.node`.
     pub fn all_nodes(&self) -> &[AstNode] {
         if self.nodes.is_empty() {
-            std::slice::from_ref(&self.node)
+            if self.node.type_ == "Null" {
+                &[]
+            } else {
+                std::slice::from_ref(&self.node)
+            }
         } else {
             &self.nodes
         }
@@ -1542,9 +1546,8 @@ mod tests {
         assert!(!request.is_batch());
         assert_eq!(request.node.type_, "Null");
         assert_eq!(request.nodes.len(), 0);
-        // Empty batch: all_nodes() returns a slice with the sentinel "Null" node
-        assert_eq!(request.all_nodes().len(), 1);
-        assert_eq!(request.all_nodes()[0].type_, "Null");
+        // Empty batch: all_nodes() returns empty slice (sentinel Null node is filtered)
+        assert_eq!(request.all_nodes().len(), 0);
     }
 
     #[test]
