@@ -51,6 +51,21 @@ struct LintRequest<'a, T: Serialize> {
     file_path: Option<&'a str>,
 }
 
+/// Request with pre-parsed JSON node for proper MsgPack serialization.
+#[derive(Debug, Serialize)]
+struct LintValueRequest<'a> {
+    /// Tokens in the text.
+    tokens: &'a [Token],
+    /// Sentences in the text.
+    sentences: &'a [Sentence],
+    /// The node to lint (as serde_json::Value).
+    node: &'a serde_json::Value,
+    /// Source text.
+    source: &'a str,
+    /// File path (if available).
+    file_path: Option<&'a str>,
+}
+
 /// Response from a rule's lint function.
 #[derive(Debug, Deserialize)]
 struct LintResponse {
@@ -306,8 +321,20 @@ impl PluginHost {
         sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<PreparedLintRequest, PluginError> {
-        let request = LintRequest {
-            node,
+        // Convert node to serde_json::Value for proper MsgPack serialization
+        let node_value = serde_json::to_value(node)
+            .map_err(|e| PluginError::call(format!("Failed to convert node: {}", e)))?;
+
+        // If the node is a string (from RawValue), parse it as JSON
+        let node_value = if let serde_json::Value::String(s) = node_value {
+            serde_json::from_str(&s)
+                .map_err(|e| PluginError::call(format!("Failed to parse node JSON: {}", e)))?
+        } else {
+            node_value
+        };
+
+        let request = LintValueRequest {
+            node: &node_value,
             source,
             tokens,
             sentences,
@@ -387,9 +414,22 @@ impl PluginHost {
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let mut all_diagnostics = Vec::new();
 
+        // Convert node to serde_json::Value for proper MsgPack serialization
+        // This handles the case where node is Box<RawValue> (JSON string) by parsing it first
+        let node_value = serde_json::to_value(node)
+            .map_err(|e| PluginError::call(format!("Failed to convert node: {}", e)))?;
+
+        // If the node is a string (from RawValue), parse it as JSON
+        let node_value = if let serde_json::Value::String(s) = node_value {
+            serde_json::from_str(&s)
+                .map_err(|e| PluginError::call(format!("Failed to parse node JSON: {}", e)))?
+        } else {
+            node_value
+        };
+
         // Serialize LintRequest ONCE
-        let request = LintRequest {
-            node,
+        let request = LintValueRequest {
+            node: &node_value,
             source,
             tokens,
             sentences,
@@ -642,7 +682,10 @@ mod tests {
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Failed to serialize request"));
+        assert!(
+            err_msg.contains("Failed to convert node")
+                || err_msg.contains("Failed to serialize request")
+        );
     }
 
     #[test]
