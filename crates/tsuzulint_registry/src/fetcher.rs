@@ -160,7 +160,7 @@ impl ManifestFetcher {
         }
 
         use tokio::io::AsyncReadExt;
-        let mut file = tokio::fs::File::open(path).await?;
+        let file = tokio::fs::File::open(path).await?;
         let mut content = String::new();
         let read = file
             .take(MAX_MANIFEST_SIZE + 1)
