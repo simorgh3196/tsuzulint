@@ -321,13 +321,7 @@ mod tests {
     fn test_cache_manager_set_get() {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         manager.set(path.clone(), entry);
 
@@ -378,13 +372,7 @@ mod tests {
     fn test_cache_manager_remove() {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         manager.set(path.clone(), entry);
         assert_eq!(manager.len(), 1);
@@ -419,13 +407,7 @@ mod tests {
     fn test_cache_manager_get_when_disabled() {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         manager.set(path.clone(), entry);
         manager.disable();
@@ -460,13 +442,7 @@ mod tests {
         manager.disable();
 
         let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         manager.set(path, entry);
 
@@ -519,22 +495,31 @@ mod tests {
         ];
 
         for (path, hash) in &files {
-            let entry = CacheEntry::new(
-                *hash,
-                dummy_hash(100),
-                HashMap::new(),
-                vec![],
-                vec![],
-            );
+            let entry = CacheEntry::new(*hash, dummy_hash(100), HashMap::new(), vec![], vec![]);
             manager.set(PathBuf::from(path), entry);
         }
 
         assert_eq!(manager.len(), 3);
 
         let versions = HashMap::new();
-        assert!(manager.is_valid(&PathBuf::from("/path/a.md"), &dummy_hash(1), &dummy_hash(100), &versions));
-        assert!(manager.is_valid(&PathBuf::from("/path/b.md"), &dummy_hash(2), &dummy_hash(100), &versions));
-        assert!(manager.is_valid(&PathBuf::from("/path/c.txt"), &dummy_hash(3), &dummy_hash(100), &versions));
+        assert!(manager.is_valid(
+            &PathBuf::from("/path/a.md"),
+            &dummy_hash(1),
+            &dummy_hash(100),
+            &versions
+        ));
+        assert!(manager.is_valid(
+            &PathBuf::from("/path/b.md"),
+            &dummy_hash(2),
+            &dummy_hash(100),
+            &versions
+        ));
+        assert!(manager.is_valid(
+            &PathBuf::from("/path/c.txt"),
+            &dummy_hash(3),
+            &dummy_hash(100),
+            &versions
+        ));
     }
 
     #[test]

@@ -144,13 +144,7 @@ mod tests {
         let mut versions2 = HashMap::new();
         versions2.insert("no-todo".to_string(), "2.0.0".to_string());
 
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            versions1,
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), versions1, vec![], vec![]);
 
         assert!(!entry.is_valid(&dummy_hash(1), &dummy_hash(2), &versions2));
     }
@@ -164,13 +158,7 @@ mod tests {
         versions2.insert("rule1".to_string(), "1.0.0".to_string());
         versions2.insert("rule2".to_string(), "1.0.0".to_string());
 
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            versions1,
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), versions1, vec![], vec![]);
 
         // Different number of rules should invalidate
         assert!(!entry.is_valid(&dummy_hash(1), &dummy_hash(2), &versions2));
@@ -184,13 +172,7 @@ mod tests {
         let mut versions2 = HashMap::new();
         versions2.insert("rule2".to_string(), "1.0.0".to_string());
 
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            versions1,
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), versions1, vec![], vec![]);
 
         // Different rule names should invalidate
         assert!(!entry.is_valid(&dummy_hash(1), &dummy_hash(2), &versions2));
@@ -248,13 +230,7 @@ mod tests {
 
     #[test]
     fn test_cache_entry_created_at() {
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         // created_at should be a reasonable Unix timestamp (after 2020)
         assert!(entry.created_at > 1577836800);
@@ -265,13 +241,7 @@ mod tests {
         let mut versions = HashMap::new();
         versions.insert("rule1".to_string(), "1.0.0".to_string());
 
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            versions,
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), versions, vec![], vec![]);
 
         let json = serde_json::to_string(&entry).unwrap();
         // Since hashes are bytes, they serialize to arrays of numbers in JSON
@@ -286,13 +256,16 @@ mod tests {
         let hash_json = format!("{:?}", dummy_hash(1));
         let config_json = format!("{:?}", dummy_hash(2));
 
-        let json = format!(r#"{{
+        let json = format!(
+            r#"{{
             "content_hash": {},
             "config_hash": {},
             "rule_versions": {{}},
             "diagnostics": [],
             "created_at": 1700000000
-        }}"#, hash_json, config_json);
+        }}"#,
+            hash_json, config_json
+        );
 
         let entry: CacheEntry = serde_json::from_str(&json).unwrap();
 
@@ -324,13 +297,7 @@ mod tests {
 
     #[test]
     fn test_cache_entry_empty_versions_valid() {
-        let entry = CacheEntry::new(
-            dummy_hash(1),
-            dummy_hash(2),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         let empty_versions = HashMap::new();
         assert!(entry.is_valid(&dummy_hash(1), &dummy_hash(2), &empty_versions));
