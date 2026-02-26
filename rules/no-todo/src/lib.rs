@@ -134,9 +134,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tsuzulint_rule_pdk::AstNode;
 
-    fn create_request(text: &str, config: serde_json::Value) -> Vec<u8> {
-        tsuzulint_rule_pdk::set_mock_config(config);
-
+    fn create_request(text: &str) -> Vec<u8> {
         let request = LintRequest::single(
             AstNode::new("Str", Some([0, text.len() as u32])),
             text.to_string(),
@@ -180,7 +178,7 @@ mod tests {
 
     #[test]
     fn lint_detects_todo() {
-        let input = create_request("This is a TODO: check", serde_json::json!({}));
+        let input = create_request("This is a TODO: check");
         let output = lint_impl(input).unwrap();
         let response = parse_response(&output);
         assert_eq!(response.diagnostics.len(), 1);
@@ -193,12 +191,10 @@ mod tests {
     #[test]
     fn lint_ignores_pattern() {
         // "TODO: fix later" matches "TODO:", but ignore pattern "TODO:" filters it out.
-        let input = create_request(
-            "This is a TODO: fix later",
-            serde_json::json!({
-                "ignore_patterns": ["TODO:"]
-            }),
-        );
+        tsuzulint_rule_pdk::set_mock_config(serde_json::json!({
+            "ignore_patterns": ["TODO:"]
+        }));
+        let input = create_request("This is a TODO: fix later");
         let output = lint_impl(input).unwrap();
         let response = parse_response(&output);
 
