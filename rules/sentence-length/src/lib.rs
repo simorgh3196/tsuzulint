@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn test_lint_simple() {
         let text = "Short sentence. Very long sentence that exceeds the limit definitely.";
-        tsuzulint_rule_pdk::set_mock_config(serde_json::json!({ "max": 20 }));
+        tsuzulint_rule_pdk::set_mock_config(&serde_json::json!({ "max": 20 }));
 
         let request = LintRequest::single(
             AstNode::new("Str", Some([0, text.len() as u32])),

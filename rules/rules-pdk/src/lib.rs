@@ -17,23 +17,20 @@ use std::cell::RefCell;
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
-    static MOCK_CONFIG: RefCell<String> = RefCell::new("{}".to_string());
+    // Empty MsgPack map: fixmap with 0 entries (0x80)
+    static MOCK_CONFIG: RefCell<Vec<u8>> = RefCell::new(vec![0x80]);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn set_mock_config(config: serde_json::Value) {
-    MOCK_CONFIG.with(|c| *c.borrow_mut() = config.to_string());
+pub fn set_mock_config<T: serde::Serialize>(config: &T) {
+    let bytes = rmp_serde::to_vec_named(config).expect("Failed to serialize mock config");
+    MOCK_CONFIG.with(|c| *c.borrow_mut() = bytes);
 }
 
 /// Helper to get configuration for the current rule.
 pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
     #[cfg(target_arch = "wasm32")]
     {
-        // Try Extism config first (safe operation)
-        if let Ok(Some(s)) = config::get("config") {
-            return Ok(serde_json::from_str(&s)?);
-        }
-
         // Fallback to custom host function (for Wasmi)
         let len = unsafe { tsuzulint_get_config(0, 0) };
 
@@ -43,7 +40,8 @@ pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
         }
 
         if len == 0 {
-            return Ok(serde_json::from_str("{}")?);
+            // Empty MsgPack map: fixmap with 0 entries (0x80)
+            return Ok(rmp_serde::from_slice(&[0x80])?);
         }
 
         // Allocate buffer and get content
@@ -55,16 +53,14 @@ pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
             return Err(Error::msg("Failed to get config: memory write error").into());
         }
 
-        let json = String::from_utf8(buf)
-            .map_err(|e| Error::msg(format!("Invalid UTF-8 config: {}", e)))?;
-        Ok(serde_json::from_str(&json)?)
+        Ok(rmp_serde::from_slice(&buf)?)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
         MOCK_CONFIG.with(|c| {
-            let s = c.borrow();
-            Ok(serde_json::from_str(&s)?)
+            let bytes = c.borrow();
+            Ok(rmp_serde::from_slice(&bytes)?)
         })
     }
 }
@@ -1454,15 +1450,15 @@ mod tests {
 
         #[test]
         fn test_get_config_valid() {
-            set_mock_config(serde_json::json!({"key": "value"}));
+            set_mock_config(&serde_json::json!({"key": "value"}));
             let config: TestConfig = get_config().expect("Failed to get config");
             assert_eq!(config.key, "value");
-            set_mock_config(serde_json::json!({}));
+            set_mock_config(&serde_json::json!({}));
         }
 
         #[test]
         fn test_get_config_empty() {
-            set_mock_config(serde_json::json!({}));
+            set_mock_config(&serde_json::json!({}));
             let config: TestConfig = get_config().expect("Failed to get empty config");
             assert_eq!(config.key, "");
         }
@@ -1474,7 +1470,7 @@ mod tests {
                 required_field: String,
             }
 
-            set_mock_config(serde_json::json!({}));
+            set_mock_config(&serde_json::json!({}));
             let result: Result<StrictConfig, _> = get_config();
             assert!(result.is_err());
         }

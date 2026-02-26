@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn lint_ignores_pattern() {
         // "TODO: fix later" matches "TODO:", but ignore pattern "TODO:" filters it out.
-        tsuzulint_rule_pdk::set_mock_config(serde_json::json!({
+        tsuzulint_rule_pdk::set_mock_config(&serde_json::json!({
             "ignore_patterns": ["TODO:"]
         }));
         let input = create_request("This is a TODO: fix later");
