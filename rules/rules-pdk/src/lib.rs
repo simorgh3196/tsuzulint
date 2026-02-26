@@ -144,14 +144,11 @@ mod ast_node_tests {
 /// Request sent to a rule's lint function.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintRequest {
-    /// The AST node to check (serialized JSON) - first node for backward compatibility.
-    pub node: serde_json::Value,
+    /// The AST node to check - first node for backward compatibility.
+    pub node: AstNode,
     /// All nodes to check in batch mode.
     #[serde(default)]
-    pub nodes: Vec<serde_json::Value>,
-    /// Rule configuration.
-    #[serde(default)]
-    pub config: serde_json::Value,
+    pub nodes: Vec<AstNode>,
     /// Full source text.
     pub source: String,
     /// File path (if available).
@@ -169,11 +166,10 @@ pub struct LintRequest {
 
 impl LintRequest {
     /// Creates a single-node request (backward compatible).
-    pub fn single(node: serde_json::Value, config: serde_json::Value, source: String) -> Self {
+    pub fn single(node: AstNode, source: String) -> Self {
         Self {
             node: node.clone(),
             nodes: vec![node],
-            config,
             source,
             file_path: None,
             helpers: None,
@@ -183,11 +179,11 @@ impl LintRequest {
     }
 
     /// Creates a batch request with multiple nodes.
-    pub fn batch(nodes: Vec<serde_json::Value>, config: serde_json::Value, source: String) -> Self {
+    pub fn batch(nodes: Vec<AstNode>, source: String) -> Self {
+        let first = nodes.first().cloned().unwrap_or(AstNode::new("Null", None));
         Self {
-            node: nodes.first().cloned().unwrap_or(serde_json::Value::Null),
+            node: first,
             nodes,
-            config,
             source,
             file_path: None,
             helpers: None,
@@ -200,14 +196,9 @@ impl LintRequest {
     ///
     /// When deserialized from the host (which doesn't include a `nodes` field),
     /// returns a single-element slice containing `self.node`.
-    /// Returns an empty slice for empty batch requests where `node` is `Null`.
-    pub fn all_nodes(&self) -> &[serde_json::Value] {
+    pub fn all_nodes(&self) -> &[AstNode] {
         if self.nodes.is_empty() {
-            if self.node.is_null() {
-                &[]
-            } else {
-                std::slice::from_ref(&self.node)
-            }
+            std::slice::from_ref(&self.node)
         } else {
             &self.nodes
         }
@@ -781,13 +772,11 @@ impl RuleManifest {
 ///
 /// Returns `(start, end, text)` where `start` and `end` are byte offsets.
 pub fn extract_node_text<'a>(
-    node: &serde_json::Value,
+    node: &AstNode,
     source: &'a str,
 ) -> Option<(usize, usize, &'a str)> {
-    let range = node.get("range")?.as_array()?;
-    let start = range.first()?.as_u64()? as usize;
-    let end = range.get(1)?.as_u64()? as usize;
-
+    let [start, end] = node.range?;
+    let (start, end) = (start as usize, end as usize);
     if end <= source.len() && start <= end {
         Some((start, end, &source[start..end]))
     } else {
@@ -796,15 +785,13 @@ pub fn extract_node_text<'a>(
 }
 
 /// Checks if a node matches the expected type.
-pub fn is_node_type(node: &serde_json::Value, expected: &str) -> bool {
-    node.get("type")
-        .and_then(|t| t.as_str())
-        .is_some_and(|t| t == expected)
+pub fn is_node_type(node: &AstNode, expected: &str) -> bool {
+    node.type_ == expected
 }
 
 /// Gets the node type as a string.
-pub fn get_node_type(node: &serde_json::Value) -> Option<&str> {
-    node.get("type").and_then(|t| t.as_str())
+pub fn get_node_type(node: &AstNode) -> &str {
+    &node.type_
 }
 
 // ============================================================================
@@ -1159,10 +1146,7 @@ mod tests {
     #[test]
     fn extract_node_text_valid() {
         let source = "Hello, World!";
-        let node = serde_json::json!({
-            "type": "Str",
-            "range": [0, 5]
-        });
+        let node = AstNode::new("Str", Some([0, 5]));
 
         let result = extract_node_text(&node, source);
         assert_eq!(result, Some((0, 5, "Hello")));
@@ -1171,10 +1155,7 @@ mod tests {
     #[test]
     fn extract_node_text_invalid_range() {
         let source = "Hello";
-        let node = serde_json::json!({
-            "type": "Str",
-            "range": [0, 100]
-        });
+        let node = AstNode::new("Str", Some([0, 100]));
 
         let result = extract_node_text(&node, source);
         assert_eq!(result, None);
@@ -1183,9 +1164,7 @@ mod tests {
     #[test]
     fn extract_node_text_no_range() {
         let source = "Hello";
-        let node = serde_json::json!({
-            "type": "Str"
-        });
+        let node = AstNode::new("Str", None);
 
         let result = extract_node_text(&node, source);
         assert_eq!(result, None);
@@ -1193,27 +1172,15 @@ mod tests {
 
     #[test]
     fn is_node_type_matches() {
-        let node = serde_json::json!({ "type": "Str" });
+        let node = AstNode::new("Str", None);
         assert!(is_node_type(&node, "Str"));
         assert!(!is_node_type(&node, "Paragraph"));
     }
 
     #[test]
-    fn is_node_type_missing() {
-        let node = serde_json::json!({});
-        assert!(!is_node_type(&node, "Str"));
-    }
-
-    #[test]
     fn get_node_type_present() {
-        let node = serde_json::json!({ "type": "Paragraph" });
-        assert_eq!(get_node_type(&node), Some("Paragraph"));
-    }
-
-    #[test]
-    fn get_node_type_missing() {
-        let node = serde_json::json!({});
-        assert_eq!(get_node_type(&node), None);
+        let node = AstNode::new("Paragraph", None);
+        assert_eq!(get_node_type(&node), "Paragraph");
     }
 
     #[test]
@@ -1511,15 +1478,15 @@ mod tests {
 
     #[test]
     fn lint_request_single() {
-        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
-        let config = serde_json::json!({"option": "value"});
+        let node = AstNode::new("Str", Some([0, 5]));
         let source = "test source".to_string();
 
-        let request = LintRequest::single(node.clone(), config.clone(), source.clone());
+        let request = LintRequest::single(node.clone(), source.clone());
 
-        assert_eq!(request.node, node);
+        assert_eq!(request.node.type_, "Str");
+        assert_eq!(request.node.range, Some([0, 5]));
         assert_eq!(request.nodes.len(), 1);
-        assert_eq!(request.nodes[0], node);
+        assert_eq!(request.nodes[0].type_, "Str");
         assert!(!request.is_batch());
         assert_eq!(request.all_nodes().len(), 1);
     }
@@ -1527,16 +1494,16 @@ mod tests {
     #[test]
     fn lint_request_batch() {
         let nodes = vec![
-            serde_json::json!({"type": "Str", "range": [0, 5]}),
-            serde_json::json!({"type": "Str", "range": [10, 15]}),
-            serde_json::json!({"type": "Str", "range": [20, 25]}),
+            AstNode::new("Str", Some([0, 5])),
+            AstNode::new("Str", Some([10, 15])),
+            AstNode::new("Str", Some([20, 25])),
         ];
-        let config = serde_json::json!({"option": "value"});
         let source = "test source".to_string();
 
-        let request = LintRequest::batch(nodes.clone(), config.clone(), source.clone());
+        let request = LintRequest::batch(nodes.clone(), source.clone());
 
-        assert_eq!(request.node, nodes[0]);
+        assert_eq!(request.node.type_, "Str");
+        assert_eq!(request.node.range, Some([0, 5]));
         assert_eq!(request.nodes.len(), 3);
         assert!(request.is_batch());
         assert_eq!(request.all_nodes().len(), 3);
@@ -1544,8 +1511,8 @@ mod tests {
 
     #[test]
     fn lint_request_with_file_path() {
-        let node = serde_json::json!({"type": "Str"});
-        let request = LintRequest::single(node, serde_json::json!({}), "source".to_string())
+        let node = AstNode::new("Str", None);
+        let request = LintRequest::single(node, "source".to_string())
             .with_file_path(Some("test.md"));
 
         assert_eq!(request.file_path, Some("test.md".to_string()));
@@ -1553,12 +1520,12 @@ mod tests {
 
     #[test]
     fn lint_request_with_helpers() {
-        let node = serde_json::json!({"type": "Str"});
+        let node = AstNode::new("Str", None);
         let helpers = LintHelpers {
             text: Some("sample text".to_string()),
             ..Default::default()
         };
-        let request = LintRequest::single(node, serde_json::json!({}), "source".to_string())
+        let request = LintRequest::single(node, "source".to_string())
             .with_helpers(helpers);
 
         assert!(request.helpers.is_some());
@@ -1570,26 +1537,23 @@ mod tests {
 
     #[test]
     fn lint_request_batch_empty() {
-        let request = LintRequest::batch(vec![], serde_json::json!({}), "source".to_string());
+        let request = LintRequest::batch(vec![], "source".to_string());
 
         assert!(!request.is_batch());
-        assert_eq!(request.node, serde_json::Value::Null);
+        assert_eq!(request.node.type_, "Null");
         assert_eq!(request.nodes.len(), 0);
-        // Empty batch should return empty slice, not [Null]
-        assert_eq!(request.all_nodes().len(), 0);
-        assert!(request.all_nodes().is_empty());
+        // Empty batch: all_nodes() returns a slice with the sentinel "Null" node
+        assert_eq!(request.all_nodes().len(), 1);
+        assert_eq!(request.all_nodes()[0].type_, "Null");
     }
 
     #[test]
     fn lint_request_batch_single_node_is_not_batch() {
-        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
-        let request = LintRequest::batch(
-            vec![node.clone()],
-            serde_json::json!({}),
-            "source".to_string(),
-        );
+        let node = AstNode::new("Str", Some([0, 5]));
+        let request = LintRequest::batch(vec![node.clone()], "source".to_string());
 
-        assert_eq!(request.node, node);
+        assert_eq!(request.node.type_, "Str");
+        assert_eq!(request.node.range, Some([0, 5]));
         assert_eq!(request.nodes.len(), 1);
         // A batch() with exactly one node is not considered a batch (nodes.len() > 1 is false).
         assert!(!request.is_batch());
@@ -1598,17 +1562,14 @@ mod tests {
 
     #[test]
     fn lint_request_msgpack_roundtrip_single() {
-        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
-        let request = LintRequest::single(
-            node.clone(),
-            serde_json::json!({"opt": 42}),
-            "test".to_string(),
-        );
+        let node = AstNode::new("Str", Some([0, 5]));
+        let request = LintRequest::single(node.clone(), "test".to_string());
 
         let bytes = rmp_serde::to_vec_named(&request).unwrap();
         let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
 
-        assert_eq!(decoded.node, node);
+        assert_eq!(decoded.node.type_, "Str");
+        assert_eq!(decoded.node.range, Some([0, 5]));
         assert_eq!(decoded.nodes.len(), 1);
         assert_eq!(decoded.source, "test");
     }
@@ -1616,19 +1577,16 @@ mod tests {
     #[test]
     fn lint_request_msgpack_roundtrip_batch() {
         let nodes = vec![
-            serde_json::json!({"type": "Str", "range": [0, 5]}),
-            serde_json::json!({"type": "Str", "range": [10, 15]}),
+            AstNode::new("Str", Some([0, 5])),
+            AstNode::new("Str", Some([10, 15])),
         ];
-        let request = LintRequest::batch(
-            nodes.clone(),
-            serde_json::json!({"opt": 42}),
-            "test".to_string(),
-        );
+        let request = LintRequest::batch(nodes.clone(), "test".to_string());
 
         let bytes = rmp_serde::to_vec_named(&request).unwrap();
         let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
 
-        assert_eq!(decoded.node, nodes[0]);
+        assert_eq!(decoded.node.type_, "Str");
+        assert_eq!(decoded.node.range, Some([0, 5]));
         assert_eq!(decoded.nodes.len(), 2);
         assert!(decoded.is_batch());
     }
@@ -1640,8 +1598,7 @@ mod tests {
         use serde::ser::SerializeMap;
 
         struct HostLintRequest {
-            node: serde_json::Value,
-            config: serde_json::Value,
+            node: AstNode,
             source: String,
             file_path: Option<String>,
         }
@@ -1651,9 +1608,8 @@ mod tests {
             where
                 S: serde::Serializer,
             {
-                let mut map = serializer.serialize_map(Some(4))?;
+                let mut map = serializer.serialize_map(Some(3))?;
                 map.serialize_entry("node", &self.node)?;
-                map.serialize_entry("config", &self.config)?;
                 map.serialize_entry("source", &self.source)?;
                 map.serialize_entry("file_path", &self.file_path)?;
                 map.end()
@@ -1661,8 +1617,7 @@ mod tests {
         }
 
         let host_request = HostLintRequest {
-            node: serde_json::json!({"type": "Str", "range": [0, 5]}),
-            config: serde_json::json!({"opt": 42}),
+            node: AstNode::new("Str", Some([0, 5])),
             source: "test".to_string(),
             file_path: Some("test.md".to_string()),
         };
@@ -1670,11 +1625,12 @@ mod tests {
         let bytes = rmp_serde::to_vec_named(&host_request).unwrap();
         let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
 
-        assert_eq!(decoded.node, host_request.node);
+        assert_eq!(decoded.node.type_, "Str");
+        assert_eq!(decoded.node.range, Some([0, 5]));
         assert!(decoded.nodes.is_empty());
 
         assert_eq!(decoded.all_nodes().len(), 1);
-        assert_eq!(decoded.all_nodes()[0], host_request.node);
+        assert_eq!(decoded.all_nodes()[0].type_, "Str");
         assert!(!decoded.is_batch());
     }
 
@@ -1682,9 +1638,8 @@ mod tests {
     #[test]
     fn lint_request_all_nodes_empty_nodes_with_valid_node() {
         let request = LintRequest {
-            node: serde_json::json!({"type": "Str", "range": [0, 5]}),
+            node: AstNode::new("Str", Some([0, 5])),
             nodes: vec![],
-            config: serde_json::json!({}),
             source: "test".to_string(),
             file_path: None,
             helpers: None,
@@ -1694,7 +1649,7 @@ mod tests {
 
         assert!(request.nodes.is_empty());
         assert_eq!(request.all_nodes().len(), 1);
-        assert_eq!(request.all_nodes()[0]["type"], "Str");
+        assert_eq!(request.all_nodes()[0].type_, "Str");
         assert!(!request.is_batch());
     }
 
@@ -1703,17 +1658,17 @@ mod tests {
     fn lint_request_all_nodes_json_without_nodes_field() {
         let json = r#"{
             "node": {"type": "Str", "range": [0, 5]},
-            "config": {"opt": 42},
             "source": "test"
         }"#;
 
         let decoded: LintRequest = serde_json::from_str(json).unwrap();
 
-        assert_eq!(decoded.node["type"], "Str");
+        assert_eq!(decoded.node.type_, "Str");
+        assert_eq!(decoded.node.range, Some([0, 5]));
         assert!(decoded.nodes.is_empty());
 
         assert_eq!(decoded.all_nodes().len(), 1);
-        assert_eq!(decoded.all_nodes()[0]["type"], "Str");
+        assert_eq!(decoded.all_nodes()[0].type_, "Str");
         assert!(!decoded.is_batch());
     }
 
@@ -1888,8 +1843,7 @@ mod tests {
             ..Default::default()
         };
         let request = LintRequest::single(
-            serde_json::json!({"type": "Str", "range": [0, 18]}),
-            serde_json::json!({}),
+            AstNode::new("Str", Some([0, 18])),
             "私は学生。".to_string(),
         )
         .with_helpers(helpers);
