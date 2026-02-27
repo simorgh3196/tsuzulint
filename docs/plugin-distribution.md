@@ -44,7 +44,7 @@ flowchart LR
     C -->|Localized Manifest| U3
 ```
 
-- **Registry Manifest Rewriting**: When caching a remote plugin, `tsuzulint_registry` detects if `artifacts.wasm` is a URL. If so, it rewrites it to `"rule.wasm"` (the local filename) in the cached manifest.
+- **Registry Manifest Rewriting**: When caching a remote plugin, `tsuzulint_registry` detects if `wasm[0].url` is a URL. If so, it rewrites it to a `path` field pointing to `"rule.wasm"` (the local filename) in the cached manifest.
 - **Core Pureness**: `tsuzulint_core` remains network-agnostic. It strictly resolves WASM paths relative to the manifest file. The localization handled by the registry ensures core can always find the rule locally.
 
 ---
@@ -294,10 +294,10 @@ To distribute a plugin, place `tsuzulint-rule.json` in your repository. Using JS
     "authors": ["Tomoya Hayakawa <simorgh3196@gmail.com>"],
     "keywords": ["japanese", "grammar", "joshi"]
   },
-  "artifacts": {
-    "wasm": "https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi/releases/download/v{version}/no_doubled_joshi.wasm",
-    "sha256": "a1b2c3d4e5f6789..."
-  },
+  "wasm": [{
+    "url": "https://github.com/simorgh3196/tsuzulint-rule-no-doubled-joshi/releases/download/v{version}/no_doubled_joshi.wasm",
+    "hash": "a1b2c3d4e5f6789..."
+  }],
   "tsuzulint": {
     "min_version": "0.2.0"
   }
@@ -333,12 +333,12 @@ To distribute a plugin, place `tsuzulint-rule.json` in your repository. Using JS
 
 > **Note**: Runtime configuration (`fixable`, `node_types`, `cache_scope`, `exclude_contexts`) is defined in WASM via `get_manifest()`. See [WASM Interface Specification](./wasm-interface.md#rulemanifest).
 
-**[artifacts] section**
+**[wasm] section**
 
 | Field | Required | Description |
 | :--- | :--- | :--- |
-| `wasm` | ✓ | WASM file download URL |
-| `sha256` | ✓ | SHA256 hash of WASM file (for tampering/corruption detection) |
+| `path` or `url` | ✓ | WASM file location or download URL |
+| `hash` | ✓ | SHA256 hash of WASM file (for tampering/corruption detection) |
 | `permissions` | | Filesystem/network permissions (future) |
 
 **permissions** (Future Extension)
@@ -441,7 +441,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           jq --arg ver "$VERSION" --arg hash "${{ steps.hash.outputs.sha256 }}" \
-            '.rule.version = $ver | .artifacts.sha256 = $hash' \
+            '.rule.version = $ver | .wasm[0].hash = $hash' \
             tsuzulint-rule.json > tmp.json && mv tmp.json tsuzulint-rule.json
 
       - name: Create Release
@@ -667,7 +667,7 @@ Arguments:
 
 Description:
   Calculates SHA256 hash of a WASM file.
-  Use this to set the sha256 field in the [artifacts].
+  Use this to set the hash field in the [wasm] array.
 ```
 
 ---

@@ -126,7 +126,7 @@ Cache Check
 ### Features
 
 - Path traversal attack prevention
-- Replace cached manifest's `artifacts.wasm` with local path
+- Replace cached manifest's `wasm[0].url` with local path
 - URL sources use SHA256 hash of URL as key
 
 ## Security Features
@@ -168,7 +168,7 @@ initially resolves to a public IP but later resolves to a private IP.
 
 - Uses `tsuzulint_manifest::HashVerifier` for SHA256 hash verification
 - Automatic SHA256 calculation of downloaded WASM
-- Comparison with manifest's `artifacts.sha256`
+- Comparison with manifest's `wasm[0].hash`
 - Returns `IntegrityError::HashMismatch` on mismatch
 
 ### Path Traversal Protection
@@ -246,15 +246,15 @@ use serde_json::json;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create resolver
     let resolver = PluginResolver::new()?;
-    
+
     // Resolve plugin from GitHub
     let spec = PluginSpec::parse(&json!("simorgh3196/tsuzulint-rule-no-todo@v1.0.0"))?;
     let resolved = resolver.resolve(&spec).await?;
-    
+
     println!("WASM path: {:?}", resolved.wasm_path);
     println!("Manifest path: {:?}", resolved.manifest_path);
     println!("Alias: {}", resolved.alias);
-    
+
     Ok(())
 }
 ```

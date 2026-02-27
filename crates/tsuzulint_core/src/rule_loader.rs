@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, warn};
 use tsuzulint_plugin::PluginHost;
+use tsuzulint_plugin::PluginOptions;
 
 use crate::config::{LinterConfig, RuleDefinition};
 use crate::manifest_resolver::resolve_manifest_path;
@@ -24,7 +25,7 @@ pub fn create_plugin_host(
         })?;
         for path in dynamic.iter() {
             debug!("Loading dynamic plugin from {}", path.display());
-            if let Err(e) = host.load_rule(path) {
+            if let Err(e) = host.load_rule(path, PluginOptions::default()) {
                 warn!("Failed to load dynamic plugin '{}': {}", path.display(), e);
             }
         }
@@ -40,7 +41,7 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
     ) {
         Some(path) => {
             debug!("Loading plugin '{}' from {}", name, path.display());
-            if let Err(e) = host.load_rule(&path) {
+            if let Err(e) = host.load_rule(&path, PluginOptions::default()) {
                 warn!("Failed to load plugin '{}': {}", name, e);
             }
         }
@@ -73,7 +74,23 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                                     rule_name,
                                     manifest_path.display()
                                 );
-                                match host.load_rule_bytes(&result.wasm_bytes) {
+                                let options = PluginOptions {
+                                    allowed_hosts: result.manifest.allowed_hosts.clone(),
+                                    allowed_paths: result.manifest.allowed_paths.clone(),
+                                    config: result.manifest.config.clone(),
+                                    memory_max_pages: result
+                                        .manifest
+                                        .memory
+                                        .as_ref()
+                                        .and_then(|m| m.max_pages),
+                                    memory_max_http_response_bytes: result
+                                        .manifest
+                                        .memory
+                                        .as_ref()
+                                        .and_then(|m| m.max_http_response_bytes),
+                                    timeout_ms: result.manifest.timeout_ms,
+                                };
+                                match host.load_rule_bytes(&result.wasm_bytes, options) {
                                     Ok(loaded_manifest) => {
                                         let internal_name = loaded_manifest.name.clone();
                                         let plugin_manifest = convert_manifest(&result.manifest);

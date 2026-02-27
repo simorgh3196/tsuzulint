@@ -6,17 +6,30 @@
     "description": "Detect repeated Japanese particles (助詞)",
     "repository": "https://github.com/simorgh3196/tsuzulint",
     "license": "MIT",
-    "keywords": ["japanese", "grammar", "joshi", "particle"],
+    "keywords": [
+      "japanese",
+      "grammar",
+      "joshi",
+      "particle"
+    ],
     "fixable": true,
-    "node_types": ["Str"],
+    "node_types": [
+      "Str"
+    ],
     "isolation_level": "block",
-    "languages": ["ja"],
-    "capabilities": ["morphology"]
+    "languages": [
+      "ja"
+    ],
+    "capabilities": [
+      "morphology"
+    ]
   },
-  "artifacts": {
-    "wasm": "../target/wasm32-wasip1/release/tsuzulint_rule_no_doubled_joshi.wasm",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-  },
+  "wasm": [
+    {
+      "path": "../target/wasm32-wasip1/release/tsuzulint_rule_no_doubled_joshi.wasm",
+      "hash": "5d79dfdbe06168e24b28084c945c913b20cbf5c5ce4b2b57d4a5cf3b2cbd5370"
+    }
+  ],
   "options": {
     "type": "object",
     "properties": {
@@ -32,20 +45,37 @@
       },
       "allow": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "default": [],
         "description": "Particles to allow even if doubled (e.g., ['も', 'や'])"
       },
       "separator_characters": {
         "type": "array",
-        "items": { "type": "string" },
-        "default": [".", "．", "。", "?", "!", "？", "！"],
+        "items": {
+          "type": "string"
+        },
+        "default": [
+          ".",
+          "．",
+          "。",
+          "?",
+          "!",
+          "？",
+          "！"
+        ],
         "description": "Sentence separator characters"
       },
       "comma_characters": {
         "type": "array",
-        "items": { "type": "string" },
-        "default": ["、", "，"],
+        "items": {
+          "type": "string"
+        },
+        "default": [
+          "、",
+          "，"
+        ],
         "description": "Comma characters that increase particle interval"
       },
       "suggest_fix": {

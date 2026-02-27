@@ -15,6 +15,7 @@ path = "src/main.rs"
 tsuzulint_core = { workspace = true, features = ["native"] }
 clap = { workspace = true }
 miette = { workspace = true }
+extism-manifest = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
