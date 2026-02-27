@@ -6,7 +6,7 @@
   "type": "object",
   "required": [
     "rule",
-    "artifacts"
+    "wasm"
   ],
   "properties": {
     "$schema": {
@@ -143,7 +143,12 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["ja", "en", "zh", "ko"]
+            "enum": [
+              "ja",
+              "en",
+              "zh",
+              "ko"
+            ]
           },
           "default": [],
           "description": "Supported languages for this rule"
@@ -152,7 +157,10 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["morphology", "sentences"]
+            "enum": [
+              "morphology",
+              "sentences"
+            ]
           },
           "default": [],
           "description": "Required analysis capabilities: 'morphology' for tokenization, 'sentences' for sentence splitting"
@@ -160,88 +168,119 @@
       },
       "additionalProperties": false
     },
-    "artifacts": {
-      "type": "object",
-      "description": "Downloadable artifacts and integrity verification",
-      "required": [
-        "wasm",
-        "sha256"
-      ],
-      "properties": {
-        "wasm": {
-          "type": "string",
-          "format": "uri-reference",
-          "description": "WASM file download URL. Use {version} placeholder for version interpolation.",
-          "examples": [
-            "https://github.com/owner/repo/releases/download/v{version}/rule.wasm"
-          ]
-        },
-        "sha256": {
-          "type": "string",
-          "pattern": "^[a-fA-F0-9]{64}$",
-          "description": "SHA256 hash of the WASM file for integrity verification"
-        }
-      },
-      "additionalProperties": false
-    },
-    "permissions": {
-      "type": "object",
-      "description": "Additional permissions required by the rule (future extension)",
-      "properties": {
-        "filesystem": {
-          "type": "array",
-          "items": {
-            "type": "object",
+    "wasm": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "oneOf": [
+          {
+            "required": [
+              "url",
+              "hash"
+            ]
+          },
+          {
             "required": [
               "path",
-              "access"
-            ],
-            "properties": {
-              "path": {
-                "type": "string",
-                "description": "File or directory path (supports ~ for home directory)"
-              },
-              "access": {
-                "type": "string",
-                "enum": [
-                  "read",
-                  "write"
-                ],
-                "description": "Access type: 'read' or 'write'"
-              }
-            },
-            "additionalProperties": false
+              "hash"
+            ]
           },
-          "description": "Filesystem access permissions"
-        },
-        "network": {
-          "type": "array",
-          "items": {
-            "type": "object",
+          {
             "required": [
-              "host",
-              "access"
-            ],
-            "properties": {
-              "host": {
-                "type": "string",
-                "description": "Hostname to access"
-              },
-              "access": {
-                "type": "string",
-                "enum": [
-                  "http",
-                  "https"
-                ],
-                "description": "Protocol to use"
-              }
-            },
-            "additionalProperties": false
+              "data",
+              "hash"
+            ]
+          }
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "WASM file download URL. Use {version} placeholder for version interpolation."
           },
-          "description": "Network access permissions (future, low priority)"
+          "path": {
+            "type": "string",
+            "description": "Local path to WASM file."
+          },
+          "data": {
+            "type": "string",
+            "description": "Base64 encoded WASM binary data."
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$",
+            "description": "SHA256 hash of the WASM file for integrity verification"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "HEAD",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "OPTIONS"
+            ],
+            "description": "HTTP method to use for the request. Must be uppercase."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          }
         }
       },
-      "additionalProperties": false
+      "minItems": 1,
+      "description": "WASM module sources"
+    },
+    "allowed_hosts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Specifies which hosts may be accessed via HTTP"
+    },
+    "allowed_paths": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Specifies which paths should be made available on disk when using WASI. Mapping from path on disk to path inside plugin."
+    },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "max_pages": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_http_response_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_var_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Config values made accessible using extism_config_get"
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The plugin timeout in milliseconds"
     },
     "tsuzulint": {
       "type": "object",
