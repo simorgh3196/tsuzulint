@@ -72,7 +72,7 @@ impl FileFinder {
         // 1. Handle explicit file paths (canonicalize and check ignore)
         // 2. Collect glob patterns for the walker
         for pattern in patterns {
-            let path = Path::new(pattern);
+            let path = base_dir.join(pattern);
             if path
                 .symlink_metadata()
                 .is_ok_and(|m| m.file_type().is_file())
@@ -124,7 +124,11 @@ impl FileFinder {
 
         WalkBuilder::new(base_dir)
             .follow_links(false)
+            .hidden(false)
+            .ignore(false)
             .git_ignore(true)
+            .git_global(false)
+            .git_exclude(false)
             .build_parallel()
             .run(move || {
                 let found_files = found_files_clone.clone();
