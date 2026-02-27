@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use extism_manifest::{Wasm, WasmMetadata};
 use miette::{IntoDiagnostic, Result};
 use tracing::{info, warn};
 use tsuzulint_registry::resolver::PluginSpec;
@@ -185,10 +186,11 @@ fn generate_minimal_manifest(
     wasm_path: &Path,
     alias: &str,
 ) -> Result<tsuzulint_manifest::ExternalRuleManifest, AddRuleError> {
-    use tsuzulint_manifest::{Artifacts, IsolationLevel, RuleMetadata};
+    use tsuzulint_manifest::{IsolationLevel, RuleMetadata};
+    use tsuzulint_registry::HashVerifier;
 
     let wasm_content = std::fs::read(wasm_path).map_err(AddRuleError::WasmReadError)?;
-    let sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
+    let sha256 = HashVerifier::compute(&wasm_content);
 
     Ok(tsuzulint_manifest::ExternalRuleManifest {
         rule: RuleMetadata {
@@ -205,11 +207,18 @@ fn generate_minimal_manifest(
             languages: vec![],
             capabilities: vec![],
         },
-        artifacts: Artifacts {
-            wasm: "rule.wasm".to_string(),
-            sha256,
-        },
-        permissions: None,
+        wasm: vec![Wasm::File {
+            path: PathBuf::from("rule.wasm"),
+            meta: WasmMetadata {
+                name: None,
+                hash: Some(sha256),
+            },
+        }],
+        allowed_hosts: None,
+        allowed_paths: None,
+        config: std::collections::BTreeMap::new(),
+        memory: None,
+        timeout_ms: None,
         tsuzulint: None,
         options: None,
     })
@@ -227,9 +236,16 @@ fn copy_plugin_files(
 
     std::fs::copy(wasm_path, &target_wasm).map_err(AddRuleError::CopyError)?;
 
-    manifest.artifacts.wasm = "rule.wasm".to_string();
     let wasm_content = std::fs::read(&target_wasm).map_err(AddRuleError::WasmReadError)?;
-    manifest.artifacts.sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
+    let sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
+
+    manifest.wasm = vec![Wasm::File {
+        path: PathBuf::from("rule.wasm"),
+        meta: WasmMetadata {
+            name: None,
+            hash: Some(sha256),
+        },
+    }];
 
     let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| {
         AddRuleError::ManifestParseError(tsuzulint_manifest::ManifestError::ValidationError(
@@ -440,10 +456,10 @@ mod manifest_tests {
                 "name": "test-rule",
                 "version": "1.0.0"
             },
-            "artifacts": {
-                "wasm": "rule.wasm",
-                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-            }
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }]
         }"#;
         std::fs::write(&manifest_path, valid_manifest).unwrap();
 
@@ -477,8 +493,14 @@ mod manifest_tests {
 
         assert_eq!(manifest.rule.name, "my-alias");
         assert_eq!(manifest.rule.version, "0.1.0");
-        assert_eq!(manifest.artifacts.wasm, "rule.wasm");
-        assert!(!manifest.artifacts.sha256.is_empty());
+        let wasm = &manifest.wasm[0];
+        match wasm {
+            extism_manifest::Wasm::File { path, meta } => {
+                assert_eq!(path, "rule.wasm");
+                assert!(meta.hash.is_some());
+            }
+            _ => panic!("Expected Wasm::File"),
+        }
     }
 
     #[test]
@@ -507,7 +529,9 @@ mod manifest_tests {
             &std::fs::read_to_string(target_dir.join("tsuzulint-rule.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(saved_manifest["artifacts"]["wasm"], "rule.wasm");
+
+        let wasms = saved_manifest["wasm"].as_array().unwrap();
+        assert_eq!(wasms[0]["path"], "rule.wasm");
     }
 
     #[test]
@@ -518,7 +542,7 @@ mod manifest_tests {
         std::fs::write(&wasm_path, wasm_content).unwrap();
 
         let manifest_with_wrong_hash = {
-            use tsuzulint_manifest::{Artifacts, IsolationLevel, RuleMetadata};
+            use tsuzulint_manifest::{IsolationLevel, RuleMetadata};
             tsuzulint_manifest::ExternalRuleManifest {
                 rule: RuleMetadata {
                     name: "test-rule".to_string(),
@@ -534,11 +558,21 @@ mod manifest_tests {
                     languages: vec![],
                     capabilities: vec![],
                 },
-                artifacts: Artifacts {
-                    wasm: "old-name.wasm".to_string(),
-                    sha256: "wrong_hash_that_should_be_replaced".to_string(),
-                },
-                permissions: None,
+                wasm: vec![extism_manifest::Wasm::File {
+                    path: PathBuf::from("old-name.wasm"),
+                    meta: extism_manifest::WasmMetadata {
+                        name: None,
+                        hash: Some(
+                            "1111111111111111111111111111111111111111111111111111111111111111"
+                                .to_string(),
+                        ),
+                    },
+                }],
+                allowed_hosts: None,
+                allowed_paths: None,
+                config: std::collections::BTreeMap::new(),
+                memory: None,
+                timeout_ms: None,
                 tsuzulint: None,
                 options: None,
             }
@@ -553,17 +587,15 @@ mod manifest_tests {
         )
         .unwrap();
 
-        assert_eq!(saved_manifest["artifacts"]["wasm"], "rule.wasm");
+        let wasms = saved_manifest["wasm"].as_array().unwrap();
+        assert_eq!(wasms[0]["path"], "rule.wasm");
 
         let expected_hash = tsuzulint_registry::HashVerifier::compute(wasm_content);
-        assert_eq!(
-            saved_manifest["artifacts"]["sha256"].as_str().unwrap(),
-            expected_hash
-        );
+        assert_eq!(wasms[0]["hash"].as_str().unwrap(), expected_hash);
 
         assert_ne!(
-            saved_manifest["artifacts"]["sha256"].as_str().unwrap(),
-            "wrong_hash_that_should_be_replaced"
+            wasms[0]["hash"].as_str().unwrap(),
+            "1111111111111111111111111111111111111111111111111111111111111111"
         );
     }
 

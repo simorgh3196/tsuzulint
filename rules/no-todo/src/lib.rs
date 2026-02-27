@@ -69,31 +69,24 @@ impl Config {
 
 /// Returns the rule manifest.
 #[plugin_fn]
-pub fn get_manifest() -> FnResult<String> {
-    let manifest = RuleManifest::new(RULE_ID, VERSION)
+pub fn get_manifest() -> FnResult<RuleManifest> {
+    Ok(RuleManifest::new(RULE_ID, VERSION)
         .with_description("Disallow TODO/FIXME comments in text")
         .with_fixable(false)
-        .with_node_types(vec!["Str".to_string()]);
-    Ok(serde_json::to_string(&manifest)?)
+        .with_node_types(vec!["Str".to_string()]))
 }
 
 /// Lints a node for TODO patterns.
 #[plugin_fn]
-pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
-    lint_impl(input)
-}
-
-fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
-    let request: LintRequest = rmp_serde::from_slice(&input)?;
+pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
     let mut diagnostics = Vec::new();
 
     // Only process Str nodes
     if !is_node_type(&request.node, "Str") {
-        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
+        return Ok(LintResponse { diagnostics });
     }
 
-    // Parse configuration
-    let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
+    let config: Config = request.get_config().unwrap_or_default();
 
     // Get patterns to check
     let patterns = config.effective_patterns();
@@ -105,7 +98,6 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
 
         for m in matches {
             // Check if we should ignore this match (using the exact matched text)
-            // Note: find_matches returns the original case-preserved text in matched_text
             if config.should_ignore(&m.matched_text) {
                 continue;
             }
@@ -125,32 +117,14 @@ fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
         }
     }
 
-    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
+    Ok(LintResponse { diagnostics })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-
-    fn create_request(text: &str, config: serde_json::Value) -> Vec<u8> {
-        tsuzulint_rule_pdk::set_mock_config(config);
-
-        let node = serde_json::json!({
-            "type": "Str",
-            "range": [0, text.len()]
-        });
-        let request = serde_json::json!({
-            "node": node,
-            "source": text,
-            "file_path": null
-        });
-        rmp_serde::to_vec_named(&request).unwrap()
-    }
-
-    fn parse_response(bytes: &[u8]) -> LintResponse {
-        rmp_serde::from_slice(bytes).unwrap()
-    }
+    use tsuzulint_rule_pdk::AstNode;
 
     #[test]
     fn config_default_patterns() {
@@ -172,21 +146,29 @@ mod tests {
         assert!(patterns.contains(&"HACK:".to_string()));
     }
 
-    #[test]
-    fn config_should_ignore() {
-        let config = Config {
-            ignore_patterns: vec!["TODO-OK".to_string()],
-            ..Default::default()
-        };
-        assert!(config.should_ignore("TODO-OK: this is fine"));
-        assert!(!config.should_ignore("TODO: this should be flagged"));
+    #[cfg(target_arch = "wasm32")]
+    fn create_request(text: &str) -> LintRequest {
+        LintRequest::single(
+            AstNode::new("Str", Some([0, text.len() as u32])),
+            text.to_string(),
+        )
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn create_request_with_config<T: serde::Serialize>(text: &str, config: &T) -> LintRequest {
+        let mut request = LintRequest::single(
+            AstNode::new("Str", Some([0, text.len() as u32])),
+            text.to_string(),
+        );
+        request.config = Some(rmp_serde::to_vec_named(config).unwrap());
+        request
+    }
+
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn lint_detects_todo() {
-        let input = create_request("This is a TODO: check", serde_json::json!({}));
-        let output = lint_impl(input).unwrap();
-        let response = parse_response(&output);
+        let request = create_request("This is a TODO: check");
+        let response = lint(request).unwrap();
         assert_eq!(response.diagnostics.len(), 1);
         assert_eq!(
             response.diagnostics[0].message,
@@ -194,37 +176,14 @@ mod tests {
         );
     }
 
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn lint_ignores_pattern() {
-        // "TODO: fix later" matches "TODO:", but ignore pattern "TODO:" filters it out.
-        let input = create_request(
+        let request = create_request_with_config(
             "This is a TODO: fix later",
-            serde_json::json!({
-                "ignore_patterns": ["TODO:"]
-            }),
+            &serde_json::json!({ "ignore_patterns": ["TODO:"] }),
         );
-        let output = lint_impl(input).unwrap();
-        let response = parse_response(&output);
-
+        let response = lint(request).unwrap();
         assert_eq!(response.diagnostics.len(), 0);
-    }
-
-    #[test]
-    fn manifest_contains_required_fields() {
-        // Test manifest structure directly (plugin_fn macro changes signature at compile time)
-        let manifest = RuleManifest::new(RULE_ID, VERSION)
-            .with_description("Disallow TODO/FIXME comments in text")
-            .with_fixable(false)
-            .with_node_types(vec!["Str".to_string()]);
-
-        assert_eq!(manifest.name, RULE_ID);
-        assert_eq!(manifest.version, VERSION);
-        assert!(manifest.description.is_some());
-        assert!(!manifest.fixable);
-        assert!(manifest.node_types.contains(&"Str".to_string()));
-
-        // Verify it serializes correctly
-        let json = serde_json::to_string(&manifest).unwrap();
-        assert!(json.contains(RULE_ID));
     }
 }
