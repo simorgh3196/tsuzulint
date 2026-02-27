@@ -28,7 +28,6 @@ miette = { workspace = true, features = ["fancy"] }
 tracing = { workspace = true }
 walkdir = { workspace = true }
 globset = { workspace = true }
-extism-manifest = { workspace = true }
 ignore = { workspace = true }
 crossbeam-channel = "0.5"
 jsonschema.workspace = true

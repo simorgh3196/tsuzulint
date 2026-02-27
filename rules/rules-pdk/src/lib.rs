@@ -6,86 +6,80 @@ use extism_pdk::*;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-/// A minimal AST node representation for lint rules.
-///
-/// Rules only need the node type and byte range to perform linting.
-/// Unknown fields from the host (children, position, etc.) are
-/// ignored during deserialization.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AstNode {
-    /// Node type identifier (e.g., "Str", "Paragraph", "Heading").
-    #[serde(rename = "type")]
-    pub type_: String,
-    /// Byte range [start, end] in source text.
-    #[serde(default)]
-    pub range: Option<[u32; 2]>,
+#[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "extism:host/user")]
+unsafe extern "C" {
+    fn tsuzulint_get_config(ptr: u64, len: u64) -> u64;
 }
 
-impl AstNode {
-    /// Creates a new node (used in tests).
-    pub fn new(type_: impl Into<String>, range: Option<[u32; 2]>) -> Self {
-        Self {
-            type_: type_.into(),
-            range,
-        }
-    }
+#[cfg(not(target_arch = "wasm32"))]
+use std::cell::RefCell;
+
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static MOCK_CONFIG: RefCell<String> = RefCell::new("{}".to_string());
 }
 
-#[cfg(test)]
-mod ast_node_tests {
-    use super::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_mock_config(config: serde_json::Value) {
+    MOCK_CONFIG.with(|c| *c.borrow_mut() = config.to_string());
+}
 
-    #[test]
-    fn ast_node_deserialize_from_msgpack_with_unknown_fields() {
-        // ホストは多くのフィールドを持つノードを送るが、AstNodeは必要なフィールドのみ取得する
-        #[derive(Serialize)]
-        struct FullNode {
-            #[serde(rename = "type")]
-            type_: &'static str,
-            range: [u32; 2],
-            children: Vec<String>, // 無視されるべきフィールド
-            value: &'static str,   // 無視されるべきフィールド
+/// Helper to get configuration for the current rule.
+pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Try Extism config first (safe operation)
+        if let Ok(Some(s)) = config::get("config") {
+            return Ok(serde_json::from_str(&s)?);
         }
 
-        let full = FullNode {
-            type_: "Str",
-            range: [10, 20],
-            children: vec![],
-            value: "hello",
-        };
+        // Fallback to custom host function (for Wasmi)
+        let len = unsafe { tsuzulint_get_config(0, 0) };
 
-        let bytes = rmp_serde::to_vec_named(&full).unwrap();
-        let node: AstNode = rmp_serde::from_slice(&bytes).unwrap();
+        // Check for error sentinel (u64::MAX from -1 i64)
+        if len == u64::MAX {
+            return Err(Error::msg("Failed to get config: memory write error").into());
+        }
 
-        assert_eq!(node.type_, "Str");
-        assert_eq!(node.range, Some([10, 20]));
+        if len == 0 {
+            return Ok(serde_json::from_str("{}")?);
+        }
+
+        // Allocate buffer and get content
+        let mut buf = vec![0u8; len as usize];
+        let result = unsafe { tsuzulint_get_config(buf.as_mut_ptr() as u64, len) };
+
+        // Check for error sentinel on second call
+        if result == u64::MAX {
+            return Err(Error::msg("Failed to get config: memory write error").into());
+        }
+
+        let json = String::from_utf8(buf)
+            .map_err(|e| Error::msg(format!("Invalid UTF-8 config: {}", e)))?;
+        Ok(serde_json::from_str(&json)?)
     }
 
-    #[test]
-    fn ast_node_deserialize_without_range() {
-        #[derive(Serialize)]
-        struct NodeWithoutRange {
-            #[serde(rename = "type")]
-            type_: &'static str,
-        }
-
-        let node_data = NodeWithoutRange { type_: "Root" };
-        let bytes = rmp_serde::to_vec_named(&node_data).unwrap();
-        let node: AstNode = rmp_serde::from_slice(&bytes).unwrap();
-
-        assert_eq!(node.type_, "Root");
-        assert_eq!(node.range, None);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        MOCK_CONFIG.with(|c| {
+            let s = c.borrow();
+            Ok(serde_json::from_str(&s)?)
+        })
     }
 }
 
 /// Request sent to a rule's lint function.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintRequest {
-    /// The AST node to check - first node for backward compatibility.
-    pub node: AstNode,
+    /// The AST node to check (serialized JSON) - first node for backward compatibility.
+    pub node: serde_json::Value,
     /// All nodes to check in batch mode.
     #[serde(default)]
-    pub nodes: Vec<AstNode>,
+    pub nodes: Vec<serde_json::Value>,
+    /// Rule configuration.
+    #[serde(default)]
+    pub config: serde_json::Value,
     /// Full source text.
     pub source: String,
     /// File path (if available).
@@ -99,48 +93,34 @@ pub struct LintRequest {
     /// Sentences (from host).
     #[serde(default)]
     pub sentences: Vec<TextSentence>,
-    /// Rule configuration (MsgPack bytes).
-    #[serde(default)]
-    pub config: Option<Vec<u8>>,
 }
 
 impl LintRequest {
     /// Creates a single-node request (backward compatible).
-    pub fn single(node: AstNode, source: String) -> Self {
+    pub fn single(node: serde_json::Value, config: serde_json::Value, source: String) -> Self {
         Self {
             node: node.clone(),
             nodes: vec![node],
+            config,
             source,
             file_path: None,
             helpers: None,
             tokens: Vec::new(),
             sentences: Vec::new(),
-            config: None,
         }
     }
 
     /// Creates a batch request with multiple nodes.
-    pub fn batch(nodes: Vec<AstNode>, source: String) -> Self {
-        let first = nodes.first().cloned().unwrap_or(AstNode::new("Null", None));
+    pub fn batch(nodes: Vec<serde_json::Value>, config: serde_json::Value, source: String) -> Self {
         Self {
-            node: first,
+            node: nodes.first().cloned().unwrap_or(serde_json::Value::Null),
             nodes,
+            config,
             source,
             file_path: None,
             helpers: None,
             tokens: Vec::new(),
             sentences: Vec::new(),
-            config: None,
-        }
-    }
-
-    /// Gets the rule configuration, deserializing from MsgPack bytes.
-    pub fn get_config<T: DeserializeOwned>(&self) -> FnResult<T> {
-        match &self.config {
-            Some(bytes) if !bytes.is_empty() => {
-                rmp_serde::from_slice(bytes).map_err(|e| Error::msg(e.to_string()).into())
-            }
-            _ => rmp_serde::from_slice(&[0x80]).map_err(|e| Error::msg(e.to_string()).into()),
         }
     }
 
@@ -148,9 +128,10 @@ impl LintRequest {
     ///
     /// When deserialized from the host (which doesn't include a `nodes` field),
     /// returns a single-element slice containing `self.node`.
-    pub fn all_nodes(&self) -> &[AstNode] {
+    /// Returns an empty slice for empty batch requests where `node` is `Null`.
+    pub fn all_nodes(&self) -> &[serde_json::Value] {
         if self.nodes.is_empty() {
-            if self.node.type_ == "Null" {
+            if self.node.is_null() {
                 &[]
             } else {
                 std::slice::from_ref(&self.node)
@@ -206,12 +187,6 @@ impl LintRequest {
             }
         }
         &self.sentences
-    }
-}
-
-impl FromBytesOwned for LintRequest {
-    fn from_bytes_owned(data: &[u8]) -> Result<Self, Error> {
-        rmp_serde::from_slice(data).map_err(|e| Error::msg(e.to_string()))
     }
 }
 
@@ -511,19 +486,6 @@ pub struct LintResponse {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-impl FromBytesOwned for LintResponse {
-    fn from_bytes_owned(data: &[u8]) -> Result<Self, Error> {
-        rmp_serde::from_slice(data).map_err(|e| Error::msg(e.to_string()))
-    }
-}
-
-impl ToBytes<'_> for LintResponse {
-    type Bytes = Vec<u8>;
-    fn to_bytes(&self) -> Result<Self::Bytes, Error> {
-        rmp_serde::to_vec_named(self).map_err(|e| Error::msg(e.to_string()))
-    }
-}
-
 /// A diagnostic message from a lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostic {
@@ -743,25 +705,17 @@ impl RuleManifest {
     }
 }
 
-impl FromBytesOwned for RuleManifest {
-    fn from_bytes_owned(data: &[u8]) -> Result<Self, Error> {
-        rmp_serde::from_slice(data).map_err(|e| Error::msg(e.to_string()))
-    }
-}
-
-impl ToBytes<'_> for RuleManifest {
-    type Bytes = Vec<u8>;
-    fn to_bytes(&self) -> Result<Self::Bytes, Error> {
-        rmp_serde::to_vec_named(self).map_err(|e| Error::msg(e.to_string()))
-    }
-}
-
 /// Helper to extract text range from a node.
 ///
 /// Returns `(start, end, text)` where `start` and `end` are byte offsets.
-pub fn extract_node_text<'a>(node: &AstNode, source: &'a str) -> Option<(usize, usize, &'a str)> {
-    let [start, end] = node.range?;
-    let (start, end) = (start as usize, end as usize);
+pub fn extract_node_text<'a>(
+    node: &serde_json::Value,
+    source: &'a str,
+) -> Option<(usize, usize, &'a str)> {
+    let range = node.get("range")?.as_array()?;
+    let start = range.first()?.as_u64()? as usize;
+    let end = range.get(1)?.as_u64()? as usize;
+
     if end <= source.len() && start <= end {
         Some((start, end, &source[start..end]))
     } else {
@@ -770,13 +724,15 @@ pub fn extract_node_text<'a>(node: &AstNode, source: &'a str) -> Option<(usize, 
 }
 
 /// Checks if a node matches the expected type.
-pub fn is_node_type(node: &AstNode, expected: &str) -> bool {
-    node.type_ == expected
+pub fn is_node_type(node: &serde_json::Value, expected: &str) -> bool {
+    node.get("type")
+        .and_then(|t| t.as_str())
+        .is_some_and(|t| t == expected)
 }
 
 /// Gets the node type as a string.
-pub fn get_node_type(node: &AstNode) -> &str {
-    &node.type_
+pub fn get_node_type(node: &serde_json::Value) -> Option<&str> {
+    node.get("type").and_then(|t| t.as_str())
 }
 
 // ============================================================================
@@ -1131,7 +1087,10 @@ mod tests {
     #[test]
     fn extract_node_text_valid() {
         let source = "Hello, World!";
-        let node = AstNode::new("Str", Some([0, 5]));
+        let node = serde_json::json!({
+            "type": "Str",
+            "range": [0, 5]
+        });
 
         let result = extract_node_text(&node, source);
         assert_eq!(result, Some((0, 5, "Hello")));
@@ -1140,7 +1099,10 @@ mod tests {
     #[test]
     fn extract_node_text_invalid_range() {
         let source = "Hello";
-        let node = AstNode::new("Str", Some([0, 100]));
+        let node = serde_json::json!({
+            "type": "Str",
+            "range": [0, 100]
+        });
 
         let result = extract_node_text(&node, source);
         assert_eq!(result, None);
@@ -1149,7 +1111,9 @@ mod tests {
     #[test]
     fn extract_node_text_no_range() {
         let source = "Hello";
-        let node = AstNode::new("Str", None);
+        let node = serde_json::json!({
+            "type": "Str"
+        });
 
         let result = extract_node_text(&node, source);
         assert_eq!(result, None);
@@ -1157,15 +1121,27 @@ mod tests {
 
     #[test]
     fn is_node_type_matches() {
-        let node = AstNode::new("Str", None);
+        let node = serde_json::json!({ "type": "Str" });
         assert!(is_node_type(&node, "Str"));
         assert!(!is_node_type(&node, "Paragraph"));
     }
 
     #[test]
+    fn is_node_type_missing() {
+        let node = serde_json::json!({});
+        assert!(!is_node_type(&node, "Str"));
+    }
+
+    #[test]
     fn get_node_type_present() {
-        let node = AstNode::new("Paragraph", None);
-        assert_eq!(get_node_type(&node), "Paragraph");
+        let node = serde_json::json!({ "type": "Paragraph" });
+        assert_eq!(get_node_type(&node), Some("Paragraph"));
+    }
+
+    #[test]
+    fn get_node_type_missing() {
+        let node = serde_json::json!({});
+        assert_eq!(get_node_type(&node), None);
     }
 
     #[test]
@@ -1422,11 +1398,10 @@ mod tests {
         assert_eq!(decoded.diagnostics[0].rule_id, "test");
     }
 
-    #[test]
-    fn lint_request_get_config_valid() {
-        let mut request = LintRequest::single(AstNode::new("Str", None), "test".to_string());
-        request.config =
-            Some(rmp_serde::to_vec_named(&serde_json::json!({"key": "value"})).unwrap());
+    #[cfg(not(target_arch = "wasm32"))]
+    mod mock_config_tests {
+        use super::{Deserialize, Diagnostic, LintResponse, Span, get_config, set_mock_config};
+        use rmp_serde;
 
         #[derive(Debug, Deserialize)]
         struct TestConfig {
@@ -1434,44 +1409,45 @@ mod tests {
             key: String,
         }
 
-        let config: TestConfig = request.get_config().expect("Failed to get config");
-        assert_eq!(config.key, "value");
-    }
-
-    #[test]
-    fn lint_request_get_config_empty() {
-        let request = LintRequest::single(AstNode::new("Str", None), "test".to_string());
-
-        #[derive(Debug, Deserialize)]
-        struct TestConfig {
-            #[serde(default)]
-            key: String,
+        #[test]
+        fn test_get_config_valid() {
+            set_mock_config(serde_json::json!({"key": "value"}));
+            let config: TestConfig = get_config().expect("Failed to get config");
+            assert_eq!(config.key, "value");
+            set_mock_config(serde_json::json!({}));
         }
 
-        let config: TestConfig = request.get_config().expect("Failed to get empty config");
-        assert_eq!(config.key, "");
-    }
+        #[test]
+        fn test_get_config_empty() {
+            set_mock_config(serde_json::json!({}));
+            let config: TestConfig = get_config().expect("Failed to get empty config");
+            assert_eq!(config.key, "");
+        }
 
-    #[test]
-    fn lint_request_get_config_invalid() {
-        let mut request = LintRequest::single(AstNode::new("Str", None), "test".to_string());
-        request.config = Some(vec![0xFF, 0xFF]);
+        #[test]
+        fn test_get_config_invalid_json() {
+            #[derive(Debug, Deserialize)]
+            struct StrictConfig {
+                required_field: String,
+            }
 
-        let result: Result<String, _> = request.get_config();
-        assert!(result.is_err());
+            set_mock_config(serde_json::json!({}));
+            let result: Result<StrictConfig, _> = get_config();
+            assert!(result.is_err());
+        }
     }
 
     #[test]
     fn lint_request_single() {
-        let node = AstNode::new("Str", Some([0, 5]));
+        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
+        let config = serde_json::json!({"option": "value"});
         let source = "test source".to_string();
 
-        let request = LintRequest::single(node.clone(), source.clone());
+        let request = LintRequest::single(node.clone(), config.clone(), source.clone());
 
-        assert_eq!(request.node.type_, "Str");
-        assert_eq!(request.node.range, Some([0, 5]));
+        assert_eq!(request.node, node);
         assert_eq!(request.nodes.len(), 1);
-        assert_eq!(request.nodes[0].type_, "Str");
+        assert_eq!(request.nodes[0], node);
         assert!(!request.is_batch());
         assert_eq!(request.all_nodes().len(), 1);
     }
@@ -1479,16 +1455,16 @@ mod tests {
     #[test]
     fn lint_request_batch() {
         let nodes = vec![
-            AstNode::new("Str", Some([0, 5])),
-            AstNode::new("Str", Some([10, 15])),
-            AstNode::new("Str", Some([20, 25])),
+            serde_json::json!({"type": "Str", "range": [0, 5]}),
+            serde_json::json!({"type": "Str", "range": [10, 15]}),
+            serde_json::json!({"type": "Str", "range": [20, 25]}),
         ];
+        let config = serde_json::json!({"option": "value"});
         let source = "test source".to_string();
 
-        let request = LintRequest::batch(nodes.clone(), source.clone());
+        let request = LintRequest::batch(nodes.clone(), config.clone(), source.clone());
 
-        assert_eq!(request.node.type_, "Str");
-        assert_eq!(request.node.range, Some([0, 5]));
+        assert_eq!(request.node, nodes[0]);
         assert_eq!(request.nodes.len(), 3);
         assert!(request.is_batch());
         assert_eq!(request.all_nodes().len(), 3);
@@ -1496,21 +1472,22 @@ mod tests {
 
     #[test]
     fn lint_request_with_file_path() {
-        let node = AstNode::new("Str", None);
-        let request =
-            LintRequest::single(node, "source".to_string()).with_file_path(Some("test.md"));
+        let node = serde_json::json!({"type": "Str"});
+        let request = LintRequest::single(node, serde_json::json!({}), "source".to_string())
+            .with_file_path(Some("test.md"));
 
         assert_eq!(request.file_path, Some("test.md".to_string()));
     }
 
     #[test]
     fn lint_request_with_helpers() {
-        let node = AstNode::new("Str", None);
+        let node = serde_json::json!({"type": "Str"});
         let helpers = LintHelpers {
             text: Some("sample text".to_string()),
             ..Default::default()
         };
-        let request = LintRequest::single(node, "source".to_string()).with_helpers(helpers);
+        let request = LintRequest::single(node, serde_json::json!({}), "source".to_string())
+            .with_helpers(helpers);
 
         assert!(request.helpers.is_some());
         assert_eq!(
@@ -1521,22 +1498,26 @@ mod tests {
 
     #[test]
     fn lint_request_batch_empty() {
-        let request = LintRequest::batch(vec![], "source".to_string());
+        let request = LintRequest::batch(vec![], serde_json::json!({}), "source".to_string());
 
         assert!(!request.is_batch());
-        assert_eq!(request.node.type_, "Null");
+        assert_eq!(request.node, serde_json::Value::Null);
         assert_eq!(request.nodes.len(), 0);
-        // Empty batch: all_nodes() returns empty slice (sentinel Null node is filtered)
+        // Empty batch should return empty slice, not [Null]
         assert_eq!(request.all_nodes().len(), 0);
+        assert!(request.all_nodes().is_empty());
     }
 
     #[test]
     fn lint_request_batch_single_node_is_not_batch() {
-        let node = AstNode::new("Str", Some([0, 5]));
-        let request = LintRequest::batch(vec![node.clone()], "source".to_string());
+        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
+        let request = LintRequest::batch(
+            vec![node.clone()],
+            serde_json::json!({}),
+            "source".to_string(),
+        );
 
-        assert_eq!(request.node.type_, "Str");
-        assert_eq!(request.node.range, Some([0, 5]));
+        assert_eq!(request.node, node);
         assert_eq!(request.nodes.len(), 1);
         // A batch() with exactly one node is not considered a batch (nodes.len() > 1 is false).
         assert!(!request.is_batch());
@@ -1545,14 +1526,17 @@ mod tests {
 
     #[test]
     fn lint_request_msgpack_roundtrip_single() {
-        let node = AstNode::new("Str", Some([0, 5]));
-        let request = LintRequest::single(node.clone(), "test".to_string());
+        let node = serde_json::json!({"type": "Str", "range": [0, 5]});
+        let request = LintRequest::single(
+            node.clone(),
+            serde_json::json!({"opt": 42}),
+            "test".to_string(),
+        );
 
         let bytes = rmp_serde::to_vec_named(&request).unwrap();
         let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
 
-        assert_eq!(decoded.node.type_, "Str");
-        assert_eq!(decoded.node.range, Some([0, 5]));
+        assert_eq!(decoded.node, node);
         assert_eq!(decoded.nodes.len(), 1);
         assert_eq!(decoded.source, "test");
     }
@@ -1560,16 +1544,19 @@ mod tests {
     #[test]
     fn lint_request_msgpack_roundtrip_batch() {
         let nodes = vec![
-            AstNode::new("Str", Some([0, 5])),
-            AstNode::new("Str", Some([10, 15])),
+            serde_json::json!({"type": "Str", "range": [0, 5]}),
+            serde_json::json!({"type": "Str", "range": [10, 15]}),
         ];
-        let request = LintRequest::batch(nodes.clone(), "test".to_string());
+        let request = LintRequest::batch(
+            nodes.clone(),
+            serde_json::json!({"opt": 42}),
+            "test".to_string(),
+        );
 
         let bytes = rmp_serde::to_vec_named(&request).unwrap();
         let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
 
-        assert_eq!(decoded.node.type_, "Str");
-        assert_eq!(decoded.node.range, Some([0, 5]));
+        assert_eq!(decoded.node, nodes[0]);
         assert_eq!(decoded.nodes.len(), 2);
         assert!(decoded.is_batch());
     }
@@ -1581,7 +1568,8 @@ mod tests {
         use serde::ser::SerializeMap;
 
         struct HostLintRequest {
-            node: AstNode,
+            node: serde_json::Value,
+            config: serde_json::Value,
             source: String,
             file_path: Option<String>,
         }
@@ -1591,8 +1579,9 @@ mod tests {
             where
                 S: serde::Serializer,
             {
-                let mut map = serializer.serialize_map(Some(3))?;
+                let mut map = serializer.serialize_map(Some(4))?;
                 map.serialize_entry("node", &self.node)?;
+                map.serialize_entry("config", &self.config)?;
                 map.serialize_entry("source", &self.source)?;
                 map.serialize_entry("file_path", &self.file_path)?;
                 map.end()
@@ -1600,7 +1589,8 @@ mod tests {
         }
 
         let host_request = HostLintRequest {
-            node: AstNode::new("Str", Some([0, 5])),
+            node: serde_json::json!({"type": "Str", "range": [0, 5]}),
+            config: serde_json::json!({"opt": 42}),
             source: "test".to_string(),
             file_path: Some("test.md".to_string()),
         };
@@ -1608,12 +1598,11 @@ mod tests {
         let bytes = rmp_serde::to_vec_named(&host_request).unwrap();
         let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();
 
-        assert_eq!(decoded.node.type_, "Str");
-        assert_eq!(decoded.node.range, Some([0, 5]));
+        assert_eq!(decoded.node, host_request.node);
         assert!(decoded.nodes.is_empty());
 
         assert_eq!(decoded.all_nodes().len(), 1);
-        assert_eq!(decoded.all_nodes()[0].type_, "Str");
+        assert_eq!(decoded.all_nodes()[0], host_request.node);
         assert!(!decoded.is_batch());
     }
 
@@ -1621,19 +1610,19 @@ mod tests {
     #[test]
     fn lint_request_all_nodes_empty_nodes_with_valid_node() {
         let request = LintRequest {
-            node: AstNode::new("Str", Some([0, 5])),
+            node: serde_json::json!({"type": "Str", "range": [0, 5]}),
             nodes: vec![],
+            config: serde_json::json!({}),
             source: "test".to_string(),
             file_path: None,
             helpers: None,
             tokens: Vec::new(),
             sentences: Vec::new(),
-            config: None,
         };
 
         assert!(request.nodes.is_empty());
         assert_eq!(request.all_nodes().len(), 1);
-        assert_eq!(request.all_nodes()[0].type_, "Str");
+        assert_eq!(request.all_nodes()[0]["type"], "Str");
         assert!(!request.is_batch());
     }
 
@@ -1642,17 +1631,17 @@ mod tests {
     fn lint_request_all_nodes_json_without_nodes_field() {
         let json = r#"{
             "node": {"type": "Str", "range": [0, 5]},
+            "config": {"opt": 42},
             "source": "test"
         }"#;
 
         let decoded: LintRequest = serde_json::from_str(json).unwrap();
 
-        assert_eq!(decoded.node.type_, "Str");
-        assert_eq!(decoded.node.range, Some([0, 5]));
+        assert_eq!(decoded.node["type"], "Str");
         assert!(decoded.nodes.is_empty());
 
         assert_eq!(decoded.all_nodes().len(), 1);
-        assert_eq!(decoded.all_nodes()[0].type_, "Str");
+        assert_eq!(decoded.all_nodes()[0]["type"], "Str");
         assert!(!decoded.is_batch());
     }
 
@@ -1826,9 +1815,12 @@ mod tests {
             text_context: Some(text_ctx),
             ..Default::default()
         };
-        let request =
-            LintRequest::single(AstNode::new("Str", Some([0, 18])), "私は学生。".to_string())
-                .with_helpers(helpers);
+        let request = LintRequest::single(
+            serde_json::json!({"type": "Str", "range": [0, 18]}),
+            serde_json::json!({}),
+            "私は学生。".to_string(),
+        )
+        .with_helpers(helpers);
 
         let bytes = rmp_serde::to_vec_named(&request).unwrap();
         let decoded: LintRequest = rmp_serde::from_slice(&bytes).unwrap();

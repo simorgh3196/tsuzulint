@@ -12,7 +12,7 @@ use wasmi::{
     TypedFunc,
 };
 
-use crate::executor::{LoadResult, PluginOptions, RuleExecutor};
+use crate::executor::{LoadResult, RuleExecutor};
 use crate::{PluginError, RuleManifest};
 
 /// Default memory limit for WASM instances (128 MB).
@@ -25,10 +25,16 @@ const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
 
 /// Host state for wasmi store.
 struct HostState {
+    /// Input buffer for passing data to WASM.
     input_buffer: Vec<u8>,
+    /// Output buffer for receiving data from WASM.
     output_buffer: Vec<u8>,
+    /// Memory instance (set after instantiation).
     memory: Option<Memory>,
+    /// Resource limits for the store.
     limits: StoreLimits,
+    /// Current rule configuration (JSON string).
+    config: String,
 }
 
 impl HostState {
@@ -40,6 +46,7 @@ impl HostState {
             limits: StoreLimitsBuilder::new()
                 .memory_size(DEFAULT_MEMORY_LIMIT_BYTES)
                 .build(),
+            config: "{}".to_string(),
         }
     }
 }
@@ -136,11 +143,7 @@ impl Default for WasmiExecutor {
 }
 
 impl RuleExecutor for WasmiExecutor {
-    fn load(
-        &mut self,
-        wasm_bytes: &[u8],
-        _options: PluginOptions,
-    ) -> Result<LoadResult, PluginError> {
+    fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
         info!("Loading WASM rule ({} bytes) with wasmi", wasm_bytes.len());
 
         // Compile the module
@@ -213,6 +216,44 @@ impl RuleExecutor for WasmiExecutor {
             )
             .map_err(|e| PluginError::load(format!("Failed to add output_set: {}", e)))?;
 
+        // extism:host/env.config_get (stub)
+        linker
+            .func_wrap(
+                "extism:host/env",
+                "config_get",
+                |_caller: Caller<'_, HostState>, _offset: i64| -> i64 { 0 },
+            )
+            .map_err(|e| PluginError::load(format!("Failed to add config_get: {}", e)))?;
+
+        // extism:host/user.tsuzulint_get_config
+        linker
+            .func_wrap("extism:host/user", "tsuzulint_get_config", {
+                |mut caller: Caller<'_, HostState>, ptr: i64, len: i64| -> i64 {
+                    let config = caller.data().config.clone();
+                    let bytes = config.as_bytes();
+                    let total_len = bytes.len() as i64;
+
+                    if len == 0 {
+                        return total_len;
+                    }
+
+                    if let Some(memory) = caller.data().memory {
+                        if memory
+                            .write(
+                                &mut caller,
+                                ptr as usize,
+                                &bytes[..std::cmp::min(len as usize, bytes.len())],
+                            )
+                            .is_ok()
+                        {
+                            return total_len;
+                        }
+                    }
+                    -1
+                }
+            })
+            .map_err(|e| PluginError::load(format!("Failed to add tsuzulint_get_config: {}", e)))?;
+
         // Instantiate the module
         let instance = linker
             .instantiate_and_start(&mut store, &module)
@@ -251,7 +292,10 @@ impl RuleExecutor for WasmiExecutor {
             .map_err(|e| PluginError::call(format!("Failed to get manifest: {}", e)))?;
 
         let manifest_bytes = Self::read_bytes(&store, manifest_ptr, manifest_len)?;
-        let rule_manifest: RuleManifest = rmp_serde::from_slice(&manifest_bytes)
+        let manifest_json = String::from_utf8(manifest_bytes).map_err(|e| {
+            PluginError::invalid_manifest(format!("Invalid UTF-8 in manifest: {}", e))
+        })?;
+        let rule_manifest: RuleManifest = serde_json::from_str(&manifest_json)
             .map_err(|e| PluginError::invalid_manifest(e.to_string()))?;
 
         debug!(
@@ -280,11 +324,17 @@ impl RuleExecutor for WasmiExecutor {
     fn configure(
         &mut self,
         rule_name: &str,
-        _config: &serde_json::Value,
+        config: &serde_json::Value,
     ) -> Result<(), PluginError> {
-        self.rules
-            .get(rule_name)
+        let rule = self
+            .rules
+            .get_mut(rule_name)
             .ok_or_else(|| PluginError::not_found(rule_name))?;
+
+        let config_json = serde_json::to_string(config)
+            .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
+
+        rule.store.data_mut().config = config_json;
         Ok(())
     }
 
@@ -331,7 +381,7 @@ impl RuleExecutor for WasmiExecutor {
 #[cfg(test)]
 #[cfg(feature = "test-utils")]
 mod tests {
-    use crate::test_utils::{bytes_to_wat_data, manifest_to_msgpack, valid_rule_wat, wat_to_wasm};
+    use crate::test_utils::{valid_rule_wat, wat_to_wasm};
 
     use super::*;
 
@@ -346,7 +396,7 @@ mod tests {
         let mut executor = WasmiExecutor::new();
         let wasm = wat_to_wasm(&valid_rule_wat());
 
-        let result = executor.load(&wasm, PluginOptions::default());
+        let result = executor.load(&wasm);
         assert!(result.is_ok());
 
         let loaded = result.unwrap();
@@ -360,9 +410,7 @@ mod tests {
     fn test_executor_lint_valid() {
         let mut executor = WasmiExecutor::new();
         let wasm = wat_to_wasm(&valid_rule_wat());
-        executor
-            .load(&wasm, PluginOptions::default())
-            .expect("Failed to load rule");
+        executor.load(&wasm).expect("Failed to load rule");
 
         let result = executor.call_lint("test-rule", b"{\"text\":\"hello\"}");
         assert!(result.is_ok());
@@ -390,7 +438,7 @@ mod tests {
         "#,
         );
 
-        let result = executor.load(&wasm, PluginOptions::default());
+        let result = executor.load(&wasm);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("lint not found"));
     }
@@ -415,7 +463,7 @@ mod tests {
         "#,
         );
 
-        let result = executor.load(&wasm, PluginOptions::default());
+        let result = executor.load(&wasm);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid manifest"));
     }
@@ -424,32 +472,29 @@ mod tests {
     fn test_executor_lint_error() {
         let mut executor = WasmiExecutor::new();
         // Lint function traps (unreachable)
-        let manifest =
-            RuleManifest::new("error-rule", "1.0.0").with_description("Error rule".to_string());
-        let msgpack_bytes = manifest_to_msgpack(&manifest);
-        let len = msgpack_bytes.len();
-        let data = bytes_to_wat_data(&msgpack_bytes);
+        let json = r#"{"name":"error-rule","version":"1.0.0","description":"Error rule"}"#;
+        let len = json.len();
         let wasm = wat_to_wasm(&format!(
             r#"
             (module
                 (memory (export "memory") 1)
                 (func (export "get_manifest") (result i32 i32)
                     (i32.const 0)
-                    (i32.const {len})
+                    (i32.const {})
                 )
                 (func (export "lint") (param i32 i32) (result i32 i32)
                     unreachable
                 )
                 (func (export "alloc") (param i32) (result i32) (i32.const 128))
 
-                (data (i32.const 0) "{data}")
+                (data (i32.const 0) "{}")
             )
             "#,
+            len,
+            json.replace("\"", "\\\"")
         ));
 
-        executor
-            .load(&wasm, PluginOptions::default())
-            .expect("Failed to load rule");
+        executor.load(&wasm).expect("Failed to load rule");
 
         let result = executor.call_lint("error-rule", b"{}");
         assert!(result.is_err());
@@ -467,9 +512,7 @@ mod tests {
         // Note: implementing full echo in WAT is tedious, so we'll just accept the input
         // and return a static success to prove it didn't crash on allocation/write.
         let wasm = wat_to_wasm(&valid_rule_wat());
-        executor
-            .load(&wasm, PluginOptions::default())
-            .expect("Failed to load rule");
+        executor.load(&wasm).expect("Failed to load rule");
 
         let large_input = "a".repeat(1024 * 10); // 10KB
         let input_json = format!("{{\"text\":\"{}\"}}", large_input);
@@ -494,9 +537,7 @@ mod tests {
     fn test_executor_unload_returns_true_after_load() {
         let mut executor = WasmiExecutor::new();
         let wasm = wat_to_wasm(&valid_rule_wat());
-        executor
-            .load(&wasm, PluginOptions::default())
-            .expect("Failed to load rule");
+        executor.load(&wasm).expect("Failed to load rule");
 
         assert!(executor.unload("test-rule"));
         assert!(executor.loaded_rules().is_empty());
@@ -506,9 +547,7 @@ mod tests {
     fn test_executor_unload_all() {
         let mut executor = WasmiExecutor::new();
         let wasm = wat_to_wasm(&valid_rule_wat());
-        executor
-            .load(&wasm, PluginOptions::default())
-            .expect("Failed to load rule");
+        executor.load(&wasm).expect("Failed to load rule");
 
         assert_eq!(executor.loaded_rules().len(), 1);
         executor.unload_all();
@@ -518,7 +557,7 @@ mod tests {
     #[test]
     fn test_executor_empty_wasm() {
         let mut executor = WasmiExecutor::new();
-        let result = executor.load(&[], PluginOptions::default());
+        let result = executor.load(&[]);
         assert!(result.is_err());
     }
 
@@ -526,7 +565,7 @@ mod tests {
     fn test_executor_invalid_wasm_bytes() {
         let mut executor = WasmiExecutor::new();
         let invalid_wasm = b"not wasm at all";
-        let result = executor.load(invalid_wasm, PluginOptions::default());
+        let result = executor.load(invalid_wasm);
         assert!(result.is_err());
     }
 
@@ -536,39 +575,34 @@ mod tests {
 
         // Load first rule
         let wasm1 = wat_to_wasm(&valid_rule_wat());
-        executor
-            .load(&wasm1, PluginOptions::default())
-            .expect("Failed to load rule 1");
+        executor.load(&wasm1).expect("Failed to load rule 1");
 
         // Load second rule (different name)
-        let manifest2 =
-            RuleManifest::new("test-rule-2", "1.0.0").with_description("Test rule 2".to_string());
-        let msgpack_bytes2 = manifest_to_msgpack(&manifest2);
-        let len2 = msgpack_bytes2.len();
-        let data2 = bytes_to_wat_data(&msgpack_bytes2);
+        let json2 = r#"{"name":"test-rule-2","version":"1.0.0","description":"Test rule 2"}"#;
+        let len2 = json2.len();
         let wasm2 = wat_to_wasm(&format!(
             r#"
             (module
                 (memory (export "memory") 1)
                 (func (export "get_manifest") (result i32 i32)
                     (i32.const 0)
-                    (i32.const {len2})
+                    (i32.const {})
                 )
                 (func (export "lint") (param i32 i32) (result i32 i32)
-                    (i32.const 512)
+                    (i32.const 100)
                     (i32.const 2)
                 )
                 (func (export "alloc") (param i32) (result i32)
                     (i32.const 128)
                 )
-                (data (i32.const 0) "{data2}")
-                (data (i32.const 512) "[]")
+                (data (i32.const 0) "{}")
+                (data (i32.const 100) "[]")
             )
             "#,
+            len2,
+            json2.replace("\"", "\\\"")
         ));
-        executor
-            .load(&wasm2, PluginOptions::default())
-            .expect("Failed to load rule 2");
+        executor.load(&wasm2).expect("Failed to load rule 2");
 
         assert_eq!(executor.loaded_rules().len(), 2);
         assert!(executor.loaded_rules().contains(&"test-rule"));
@@ -582,36 +616,33 @@ mod tests {
         let mut executor = WasmiExecutor::new();
 
         // Create a rule that returns invalid UTF-8 bytes
-        let manifest =
-            RuleManifest::new("invalid-utf8", "1.0.0").with_description("Invalid".to_string());
-        let msgpack_bytes = manifest_to_msgpack(&manifest);
-        let len = msgpack_bytes.len();
-        let data = bytes_to_wat_data(&msgpack_bytes);
+        let json = r#"{"name":"invalid-utf8","version":"1.0.0","description":"Invalid"}"#;
+        let len = json.len();
         let wasm = wat_to_wasm(&format!(
             r#"
             (module
                 (memory (export "memory") 1)
                 (func (export "get_manifest") (result i32 i32)
                     (i32.const 0)
-                    (i32.const {len})
+                    (i32.const {})
                 )
                 (func (export "lint") (param i32 i32) (result i32 i32)
-                    (i32.const 512)
+                    (i32.const 100)
                     (i32.const 2)
                 )
                 (func (export "alloc") (param i32) (result i32)
                     (i32.const 128)
                 )
-                (data (i32.const 0) "{data}")
-                ;; Invalid UTF-8 sequence at offset 512
-                (data (i32.const 512) "\ff\fe")
+                (data (i32.const 0) "{}")
+                ;; Invalid UTF-8 sequence at offset 100
+                (data (i32.const 100) "\ff\fe")
             )
             "#,
+            len,
+            json.replace("\"", "\\\"")
         ));
 
-        executor
-            .load(&wasm, PluginOptions::default())
-            .expect("Failed to load rule");
+        executor.load(&wasm).expect("Failed to load rule");
         let result = executor.call_lint("invalid-utf8", b"{}");
         // Should handle the UTF-8 error (may succeed with replacement chars or fail gracefully)
         // The exact behavior depends on String::from_utf8_lossy vs from_utf8
@@ -637,7 +668,7 @@ mod tests {
         );
 
         // Loading should fail because the initial memory exceeds the limit
-        let result = executor.load(&wasm, PluginOptions::default());
+        let result = executor.load(&wasm);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
@@ -653,18 +684,16 @@ mod tests {
         let mut executor = WasmiExecutor::new();
 
         // Infinite loop rule
-        let manifest = RuleManifest::new("infinite-loop", "1.0.0")
-            .with_description("Infinite loop rule".to_string());
-        let msgpack_bytes = manifest_to_msgpack(&manifest);
-        let len = msgpack_bytes.len();
-        let data = bytes_to_wat_data(&msgpack_bytes);
+        let json =
+            r#"{"name":"infinite-loop","version":"1.0.0","description":"Infinite loop rule"}"#;
+        let len = json.len();
         let wasm = wat_to_wasm(&format!(
             r#"
             (module
                 (memory (export "memory") 1)
                 (func (export "get_manifest") (result i32 i32)
                     (i32.const 0) ;; ptr
-                    (i32.const {len}) ;; len
+                    (i32.const {}) ;; len
                 )
                 (func (export "lint") (param i32 i32) (result i32 i32)
                     (loop
@@ -675,15 +704,15 @@ mod tests {
                 (func (export "alloc") (param i32) (result i32)
                     (i32.const 128)
                 )
-                ;; Write MsgPack manifest to memory at offset 0
-                (data (i32.const 0) "{data}")
+                ;; Write manifest to memory at offset 0
+                (data (i32.const 0) "{}")
             )
             "#,
+            len,
+            json.replace("\"", "\\\"")
         ));
 
-        executor
-            .load(&wasm, PluginOptions::default())
-            .expect("Failed to load rule");
+        executor.load(&wasm).expect("Failed to load rule");
 
         // Should return an error (trap) due to fuel exhaustion
         let result = executor.call_lint("infinite-loop", b"{}");
@@ -695,6 +724,124 @@ mod tests {
             err_lower.contains("fuel"),
             "Expected fuel exhaustion error, got: {err_msg}"
         );
+    }
+
+    #[test]
+    fn test_config_lifecycle() {
+        let mut executor = WasmiExecutor::new();
+
+        let json = r#"{"name":"config-rule","version":"1.0.0"}"#;
+        let len = json.len();
+
+        let wat = format!(
+            r#"
+            (module
+                (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
+                (memory (export "memory") 1)
+
+                (func $get_manifest (export "get_manifest") (result i32 i32)
+                    (i32.const 0) (i32.const {})
+                )
+
+                (func $alloc (export "alloc") (param i32) (result i32)
+                    (i32.const 100)
+                )
+
+                (func $lint (export "lint") (param i32 i32) (result i32 i32)
+                    (local $len i64)
+                    (local $ptr i32)
+
+                    ;; 1. Get config length
+                    (call $get_config (i64.const 0) (i64.const 0))
+                    local.set $len
+
+                    ;; 2. Set ptr to 100
+                    i32.const 100
+                    local.set $ptr
+
+                    ;; 3. Read config
+                    (call $get_config (i64.extend_i32_u (local.get $ptr)) (local.get $len))
+                    drop
+
+                    ;; 4. Return ptr/len
+                    (local.get $ptr)
+                    (i32.wrap_i64 (local.get $len))
+                )
+
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        );
+
+        let wasm = wat_to_wasm(&wat);
+        executor.load(&wasm).expect("Failed to load rule");
+
+        // Default config is empty object "{}"
+        let res = executor.call_lint("config-rule", b"").unwrap();
+        assert_eq!(res, b"{}");
+
+        // Update config
+        let config = serde_json::json!({"foo": "bar"});
+        executor
+            .configure("config-rule", &config)
+            .expect("Failed to configure");
+
+        // Check new config
+        let res = executor.call_lint("config-rule", b"").unwrap();
+        assert_eq!(res, b"{\"foo\":\"bar\"}");
+    }
+
+    #[test]
+    fn test_config_edge_cases() {
+        let mut executor = WasmiExecutor::new();
+
+        let json = r#"{"name":"edge-case-rule","version":"1.0.0"}"#;
+        let len = json.len();
+
+        let wat = format!(
+            r#"
+            (module
+                (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
+                (memory (export "memory") 1)
+
+                (func $get_manifest (export "get_manifest") (result i32 i32)
+                    (i32.const 0) (i32.const {})
+                )
+
+                (func $alloc (export "alloc") (param i32) (result i32)
+                    (i32.const 100)
+                )
+
+                (func $lint (export "lint") (param i32 i32) (result i32 i32)
+                    (local $len i64)
+
+                    ;; 1. Test len=0 (should return actual length)
+                    (call $get_config (i64.const 0) (i64.const 0))
+                    local.set $len
+
+                    ;; 2. Test invalid pointer (out of bounds)
+                    ;; This relies on memory.write returning Err, which tsuzulint_get_config catches and returns 0
+                    (call $get_config (i64.const 100000) (i64.const 10))
+
+                    ;; Return 0 0 (empty)
+                    (i32.const 0) (i32.const 0)
+                )
+
+                (data (i32.const 0) "{}")
+            )
+            "#,
+            len,
+            json.replace("\"", "\\\"")
+        );
+
+        let wasm = wat_to_wasm(&wat);
+        executor.load(&wasm).expect("Failed to load rule");
+
+        // Just ensure it doesn't crash
+        let res = executor.call_lint("edge-case-rule", b"");
+        assert!(res.is_ok());
     }
 
     #[test]

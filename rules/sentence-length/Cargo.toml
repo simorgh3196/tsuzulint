@@ -14,9 +14,9 @@ crate-type = ["cdylib"]
 tsuzulint-rule-pdk = { workspace = true }
 extism-pdk = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 rmp-serde = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }

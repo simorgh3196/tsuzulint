@@ -350,31 +350,37 @@ fn check_doubled_particles(
 }
 
 #[plugin_fn]
-pub fn get_manifest() -> FnResult<RuleManifest> {
-    Ok(RuleManifest::new(RULE_ID, VERSION)
+pub fn get_manifest() -> FnResult<String> {
+    let manifest = RuleManifest::new(RULE_ID, VERSION)
         .with_description("Detect repeated Japanese particles (助詞)")
         .with_fixable(true)
         .with_node_types(vec!["Str".to_string()])
         .with_languages(vec![KnownLanguage::Ja])
-        .with_capabilities(vec![Capability::Morphology]))
+        .with_capabilities(vec![Capability::Morphology]);
+    Ok(serde_json::to_string(&manifest)?)
 }
 
 #[plugin_fn]
-pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
+pub fn lint(input: Vec<u8>) -> FnResult<Vec<u8>> {
+    lint_impl(input)
+}
+
+fn lint_impl(input: Vec<u8>) -> FnResult<Vec<u8>> {
+    let request: LintRequest = rmp_serde::from_slice(&input)?;
     let mut diagnostics = Vec::new();
 
     if !is_node_type(&request.node, "Str") {
-        return Ok(LintResponse { diagnostics });
+        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
     }
 
-    let config: Config = request.get_config().unwrap_or_default();
+    let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
     let tokens = request.get_tokens();
 
     let (node_start, node_end, _text) =
         if let Some((s, e, t)) = extract_node_text(&request.node, &request.source) {
             (s, e, t)
         } else {
-            return Ok(LintResponse { diagnostics });
+            return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
         };
 
     let node_tokens: Vec<Token> = if !tokens.is_empty() {
@@ -388,7 +394,7 @@ pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
     };
 
     if node_tokens.is_empty() {
-        return Ok(LintResponse { diagnostics });
+        return Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?);
     }
 
     let mut particles = extract_particles_from_tokens(&node_tokens, &config);
@@ -396,7 +402,7 @@ pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
 
     diagnostics = check_doubled_particles(&particles, &node_tokens, &request.source, &config);
 
-    Ok(LintResponse { diagnostics })
+    Ok(rmp_serde::to_vec_named(&LintResponse { diagnostics })?)
 }
 
 #[cfg(test)]
@@ -559,11 +565,10 @@ mod tests {
         assert!(manifest.languages.contains(&KnownLanguage::Ja));
         assert!(manifest.capabilities.contains(&Capability::Morphology));
 
-        let bytes = rmp_serde::to_vec_named(&manifest).unwrap();
-        let decoded: RuleManifest = rmp_serde::from_slice(&bytes).unwrap();
-        assert_eq!(decoded.name, RULE_ID);
-        assert!(decoded.languages.contains(&KnownLanguage::Ja));
-        assert!(decoded.capabilities.contains(&Capability::Morphology));
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(json.contains(RULE_ID));
+        assert!(json.contains("\"ja\""));
+        assert!(json.contains("\"morphology\""));
     }
 
     #[test]

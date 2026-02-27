@@ -2,12 +2,9 @@ pub mod integrity;
 
 pub use integrity::{HashVerifier, IntegrityError};
 
-use extism_manifest::{MemoryOptions, Wasm};
 use jsonschema::Validator;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::OnceLock;
 use thiserror::Error;
 
@@ -28,21 +25,9 @@ pub enum ManifestError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExternalRuleManifest {
     pub rule: RuleMetadata,
-
-    // Extism Manifest fields
-    pub wasm: Vec<Wasm>,
+    pub artifacts: Artifacts,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed_hosts: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed_paths: Option<BTreeMap<String, PathBuf>>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub config: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory: Option<MemoryOptions>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_ms: Option<u64>,
-
-    // Tsuzulint specifics
+    pub permissions: Option<Permissions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tsuzulint: Option<TsuzuLintCompatibility>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -85,6 +70,46 @@ pub enum IsolationLevel {
 
 fn default_isolation_level() -> IsolationLevel {
     IsolationLevel::Global
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Artifacts {
+    pub wasm: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Permissions {
+    #[serde(default)]
+    pub filesystem: Vec<FilesystemPermission>,
+    #[serde(default)]
+    pub network: Vec<NetworkPermission>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FilesystemPermission {
+    pub path: String,
+    pub access: FilesystemAccess,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilesystemAccess {
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NetworkPermission {
+    pub host: String,
+    pub access: NetworkAccess,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkAccess {
+    Http,
+    Https,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -149,7 +174,6 @@ pub fn validate_manifest(json_str: &str) -> Result<ExternalRuleManifest, Manifes
 #[cfg(test)]
 mod tests {
     use super::*;
-    use extism_manifest::{HttpRequest, WasmMetadata};
 
     #[test]
     fn test_valid_manifest() {
@@ -160,10 +184,10 @@ mod tests {
                 "description": "Disallow TODO",
                 "fixable": false
             },
-            "wasm": [{
-                "url": "https://example.com/rule.wasm",
-                "hash": "a3b6408225010668045610815132640108602685710662650426543168015505"
-            }]
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }
         }"#;
 
         let manifest = validate_manifest(json).expect("Validation should pass");
@@ -178,10 +202,10 @@ mod tests {
                 "version": "1.0.0",
                 "description": "Check keigo usage"
             },
-            "wasm": [{
-                "url": "https://example.com/rule.wasm",
-                "hash": "a3b6408225010668045610815132640108602685710662650426543168015505"
-            }]
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }
         }"#;
 
         let manifest =
@@ -200,7 +224,7 @@ mod tests {
         let err = validate_manifest(json).expect_err("Validation should fail");
         match err {
             ManifestError::ValidationError(msg) => {
-                assert!(msg.contains("required") || msg.contains("wasm"));
+                assert!(msg.contains("required") || msg.contains("artifacts"));
             }
             _ => panic!("Unexpected error type"),
         }
@@ -213,10 +237,10 @@ mod tests {
                 "name": "Invalid Name",
                 "version": "1.0.0"
             },
-            "wasm": [{
-                "url": "https://example.com/rule.wasm",
-                "hash": "a3b6408225010668045610815132640108602685710662650426543168015505"
-            }]
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }
         }"#;
 
         let err = validate_manifest(json).expect_err("Validation should fail");
@@ -235,10 +259,10 @@ mod tests {
                 "name": "../../etc/malicious",
                 "version": "1.0.0"
             },
-            "wasm": [{
-                "url": "https://example.com/rule.wasm",
-                "hash": "a3b6408225010668045610815132640108602685710662650426543168015505"
-            }]
+            "artifacts": {
+                "wasm": "https://example.com/rule.wasm",
+                "sha256": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }
         }"#;
 
         let err = validate_manifest(json).expect_err("Validation should fail for path traversal");
@@ -341,31 +365,22 @@ mod tests {
                 languages: vec![],
                 capabilities: vec![],
             },
-            wasm: vec![Wasm::Url {
-                req: HttpRequest {
-                    url: "rule.wasm".to_string(),
-                    headers: BTreeMap::new(),
-                    method: None,
-                },
-                meta: WasmMetadata {
-                    name: None,
-                    hash: Some(
-                        "abc1234567890123456789012345678901234567890123456789012345678901"
-                            .to_string(),
-                    ),
-                },
-            }],
-            allowed_hosts: None,
-            allowed_paths: None,
-            config: BTreeMap::new(),
-            memory: None,
-            timeout_ms: None,
+            artifacts: Artifacts {
+                wasm: "rule.wasm".to_string(),
+                sha256: "abc123".to_string(),
+            },
+            permissions: None,
             tsuzulint: None,
             options: None,
         };
 
         let json = serde_json::to_string(&manifest).unwrap();
 
+        assert!(
+            !json.contains("null"),
+            "Serialized JSON should not contain null values: {}",
+            json
+        );
         assert!(
             !json.contains("description"),
             "None description should be skipped"
@@ -406,25 +421,11 @@ mod tests {
                 languages: vec![],
                 capabilities: vec![],
             },
-            wasm: vec![Wasm::Url {
-                req: HttpRequest {
-                    url: "rule.wasm".to_string(),
-                    headers: BTreeMap::new(),
-                    method: None,
-                },
-                meta: WasmMetadata {
-                    name: None,
-                    hash: Some(
-                        "abc1234567890123456789012345678901234567890123456789012345678901"
-                            .to_string(),
-                    ),
-                },
-            }],
-            allowed_hosts: None,
-            allowed_paths: None,
-            config: BTreeMap::new(),
-            memory: None,
-            timeout_ms: None,
+            artifacts: Artifacts {
+                wasm: "rule.wasm".to_string(),
+                sha256: "abc123".to_string(),
+            },
+            permissions: None,
             tsuzulint: Some(TsuzuLintCompatibility {
                 min_version: Some("0.1.0".to_string()),
             }),
@@ -445,6 +446,10 @@ mod tests {
         assert!(
             json.contains("min_version"),
             "Some min_version should be included"
+        );
+        assert!(
+            !json.contains("null"),
+            "Serialized JSON should not contain null values"
         );
 
         let roundtrip: ExternalRuleManifest = serde_json::from_str(&json).unwrap();

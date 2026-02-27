@@ -5,25 +5,6 @@
 //! for native (Extism) and browser (wasmi) environments.
 
 use crate::{PluginError, RuleManifest};
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-
-/// Options for configuring a WASM plugin payload at load time.
-#[derive(Debug, Clone, Default)]
-pub struct PluginOptions {
-    /// Allowed hosts for network requests. If `None`, all are denied.
-    pub allowed_hosts: Option<Vec<String>>,
-    /// Allowed local filesystem paths. Map of alias to actual path.
-    pub allowed_paths: Option<BTreeMap<String, PathBuf>>,
-    /// Initial configuration variables for the plugin.
-    pub config: BTreeMap<String, String>,
-    /// Limit on memory pages (each page is 64KB).
-    pub memory_max_pages: Option<u32>,
-    /// Limit on HTTP response bytes.
-    pub memory_max_http_response_bytes: Option<u64>,
-    /// Execution timeout in milliseconds.
-    pub timeout_ms: Option<u64>,
-}
 
 /// Result from loading a WASM rule.
 #[derive(Debug)]
@@ -47,34 +28,24 @@ pub trait RuleExecutor {
     /// # Arguments
     ///
     /// * `wasm_bytes` - The WASM binary content
-    /// * `options` - Plugin execution options
     ///
     /// # Returns
     ///
     /// The rule name and manifest on success.
-    fn load(
-        &mut self,
-        wasm_bytes: &[u8],
-        options: PluginOptions,
-    ) -> Result<LoadResult, PluginError>;
+    fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError>;
 
     /// Loads a WASM rule from a file path.
     ///
     /// # Arguments
     ///
     /// * `path` - Path to the WASM file
-    /// * `options` - Plugin execution options
     ///
     /// # Returns
     ///
     /// The rule name and manifest on success.
-    fn load_file(
-        &mut self,
-        path: &std::path::Path,
-        options: PluginOptions,
-    ) -> Result<LoadResult, PluginError> {
+    fn load_file(&mut self, path: &std::path::Path) -> Result<LoadResult, PluginError> {
         let wasm_bytes = std::fs::read(path)?;
-        self.load(&wasm_bytes, options)
+        self.load(&wasm_bytes)
     }
 
     /// Configures a loaded rule.

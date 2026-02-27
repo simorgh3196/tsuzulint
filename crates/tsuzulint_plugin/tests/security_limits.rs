@@ -35,7 +35,7 @@ mod native_tests {
         );
 
         // If this succeeds, it confirms we don't have strict memory limits
-        let result = host.load_rule_bytes(&wasm, tsuzulint_plugin::PluginOptions::default());
+        let result = host.load_rule_bytes(&wasm);
 
         // Assert that it FAILS with OOM or resource limit error
         match result {

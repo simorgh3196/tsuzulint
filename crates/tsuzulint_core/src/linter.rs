@@ -87,7 +87,7 @@ impl Linter {
                 .plugin_host
                 .lock()
                 .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
-            host.load_rule(&path_buf, tsuzulint_plugin::PluginOptions::default())?;
+            host.load_rule(&path_buf)?;
         }
 
         {

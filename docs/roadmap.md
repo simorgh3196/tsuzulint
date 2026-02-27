@@ -293,10 +293,10 @@ Error: Rule name "sentence-length" is ambiguous:
     "license": "MIT",
     "authors": ["Author Name <email@example.com>"]
   },
-  "wasm": [{
-    "url": "https://github.com/.../releases/download/v{version}/rule.wasm",
-    "hash": "a1b2c3d4e5f6..."
-  }],
+  "artifacts": {
+    "wasm": "https://github.com/.../releases/download/v{version}/rule.wasm",
+    "sha256": "a1b2c3d4e5f6..."
+  },
   "tsuzulint": {
     "min_version": "0.2.0"
   }

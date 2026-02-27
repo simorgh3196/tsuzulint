@@ -39,10 +39,7 @@ impl TextLinter {
     /// Loads a rule from WASM bytes.
     #[wasm_bindgen(js_name = loadRule)]
     pub fn load_rule(&mut self, wasm_bytes: &[u8]) -> Result<String, JsError> {
-        let manifest = self
-            .host
-            .load_rule_bytes(wasm_bytes, tsuzulint_plugin::PluginOptions::default())
-            .map_err(to_js_error)?;
+        let manifest = self.host.load_rule_bytes(wasm_bytes).map_err(to_js_error)?;
         Ok(manifest.name)
     }
 

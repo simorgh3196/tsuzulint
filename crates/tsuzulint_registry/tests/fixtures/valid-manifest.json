@@ -6,10 +6,8 @@
         "description": "Test rule for fetcher tests",
         "fixable": false
     },
-    "wasm": [
-        {
-            "url": "https://example.com/test-rule.wasm",
-            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
-        }
-    ]
+    "artifacts": {
+        "wasm": "https://example.com/test-rule.wasm",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
 }

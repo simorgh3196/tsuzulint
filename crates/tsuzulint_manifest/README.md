@@ -22,7 +22,7 @@ This crate is used during rule distribution and installation, centrally managing
 | Field | Type | Required | Description |
 | ---------- | -- | ---- | ---- |
 | `rule` | `RuleMetadata` | Yes | Rule metadata |
-| `wasm` | `Vec<Wasm>` | Yes | Downloadable WASM artifact information |
+| `artifacts` | `Artifacts` | Yes | Downloadable artifact information |
 | `permissions` | `Option<Permissions>` | No | Required permissions |
 | `tsuzulint` | `Option<TsuzuLintCompatibility>` | No | TsuzuLint compatibility information |
 | `options` | `Option<Value>` | No | JSON Schema for rule configuration options |
@@ -51,12 +51,12 @@ pub enum IsolationLevel {
 }
 ```
 
-### Wasm
+### Artifacts
 
 | Field | Type | Required | Description |
 | ---------- | - | ---- | ---- |
-| `url` or `path` | `String` | Yes | Download URL or path for WASM file |
-| `hash` | `String` | Yes | SHA256 hash of WASM file (64-character hex string) |
+| `wasm` | `String` | Yes | Download URL for WASM file. `{version}` placeholder can be used |
+| `sha256` | `String` | Yes | SHA256 hash of WASM file (64-character hex string) |
 
 ### Permissions
 
@@ -81,10 +81,10 @@ pub enum IsolationLevel {
     "node_types": ["Str"],
     "isolation_level": "Block"
   },
-  "wasm": [{
-    "url": "https://github.com/owner/tsuzulint-rule-no-todo/releases/download/v{version}/rule.wasm",
-    "hash": "abc123def456...64chars"
-  }],
+  "artifacts": {
+    "wasm": "https://github.com/owner/tsuzulint-rule-no-todo/releases/download/v{version}/rule.wasm",
+    "sha256": "abc123def456...64chars"
+  },
   "permissions": {
     "filesystem": [],
     "network": []
@@ -162,10 +162,10 @@ let json = r#"{
         "version": "1.0.0",
         "description": "Disallow TODO comments"
     },
-    "wasm": [{
-        "url": "https://example.com/rule.wasm",
-        "hash": "abc123...64chars"
-    }]
+    "artifacts": {
+        "wasm": "https://example.com/rule.wasm",
+        "sha256": "abc123...64chars"
+    }
 }"#;
 
 match validate_manifest(json) {
@@ -190,16 +190,10 @@ let manifest = ExternalRuleManifest {
         description: Some("Disallow TODO comments".to_string()),
         ..Default::default()
     },
-    wasm: vec![extism_manifest::Wasm::Url {
-        req: extism_manifest::HttpRequest {
-            url: "https://example.com/rule.wasm".to_string(),
-            ..Default::default()
-        },
-        meta: extism_manifest::WasmMetadata {
-            hash: Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string()),
-            ..Default::default()
-        },
-    }],
+    artifacts: Artifacts {
+        wasm: "https://example.com/rule.wasm".to_string(),
+        sha256: "abc123...".to_string(),
+    },
     ..Default::default()
 };
 

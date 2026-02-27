@@ -126,7 +126,7 @@ Cache Check
 ### Features
 
 - Path traversal attack prevention
-- Replace cached manifest's `wasm[0].url` with local path
+- Replace cached manifest's `artifacts.wasm` with local path
 - URL sources use SHA256 hash of URL as key
 
 ## Security Features
@@ -168,7 +168,7 @@ initially resolves to a public IP but later resolves to a private IP.
 
 - Uses `tsuzulint_manifest::HashVerifier` for SHA256 hash verification
 - Automatic SHA256 calculation of downloaded WASM
-- Comparison with manifest's `wasm[0].hash`
+- Comparison with manifest's `artifacts.sha256`
 - Returns `IntegrityError::HashMismatch` on mismatch
 
 ### Path Traversal Protection

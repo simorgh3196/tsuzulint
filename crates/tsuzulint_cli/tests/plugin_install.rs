@@ -32,10 +32,10 @@ fn test_plugin_install_local_path() {
             "name": "local-rule",
             "version": "0.1.0"
         }},
-        "wasm": [{{
-            "path": "rule.wasm",
-            "hash": "{}"
-        }}]
+        "artifacts": {{
+            "wasm": "rule.wasm",
+            "sha256": "{}"
+        }}
     }}
     "#,
         sha256

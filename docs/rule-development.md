@@ -466,10 +466,10 @@ cat > tsuzulint-rule.json << EOF
     "fixable": false,
     "node_types": ["Str"]
   },
-  "wasm": [{
-    "url": "https://github.com/yourname/tsuzulint-rule-my-rule/releases/download/v{version}/tsuzulint_rule_my_rule.wasm",
-    "hash": "$HASH"
-  }]
+  "artifacts": {
+    "wasm": "https://github.com/yourname/tsuzulint-rule-my-rule/releases/download/v{version}/tsuzulint_rule_my_rule.wasm",
+    "sha256": "$HASH"
+  }
 }
 EOF
 

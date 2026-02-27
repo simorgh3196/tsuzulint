@@ -6,23 +6,15 @@
     "description": "Check sentence length",
     "repository": "https://github.com/simorgh3196/tsuzulint",
     "license": "MIT",
-    "keywords": [
-      "sentence",
-      "length",
-      "style"
-    ],
+    "keywords": ["sentence", "length", "style"],
     "fixable": false,
-    "node_types": [
-      "Str"
-    ],
+    "node_types": ["Str"],
     "isolation_level": "block"
   },
-  "wasm": [
-    {
-      "path": "../target/wasm32-wasip1/release/tsuzulint_rule_sentence_length.wasm",
-      "hash": "ad52d416f7486fb7a80aae76061426d4b5e898d54ac80d71b43c9aacb3a2b29c"
-    }
-  ],
+  "artifacts": {
+    "wasm": "../target/wasm32-wasip1/release/tsuzulint_rule_sentence_length.wasm",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
   "options": {
     "type": "object",
     "properties": {

@@ -27,10 +27,3 @@ tsuzulint-rule-pdk = { path = "rules-pdk" }
 # Testing
 pretty_assertions = "1.4"
 rstest = "0.26.1"
-
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
