@@ -143,6 +143,12 @@ impl SecureHttpClient {
         }
     }
 
+    /// Return a new client with the modified allow_local setting, preserving other configurations.
+    pub fn with_allow_local(mut self, allow: bool) -> Self {
+        self.allow_local = allow;
+        self
+    }
+
     /// Fetch content from URL with SSRF/DNS Rebinding protection.
     pub async fn fetch(&self, url: &str) -> Result<Vec<u8>, SecureFetchError> {
         self.fetch_internal(url, None).await

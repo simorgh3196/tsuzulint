@@ -19,7 +19,7 @@
   },
   "wasm": [
     {
-      "url": "../target/wasm32-wasip1/release/tsuzulint_rule_sentence_length.wasm",
+      "path": "../target/wasm32-wasip1/release/tsuzulint_rule_sentence_length.wasm",
       "hash": "ad52d416f7486fb7a80aae76061426d4b5e898d54ac80d71b43c9aacb3a2b29c"
     }
   ],

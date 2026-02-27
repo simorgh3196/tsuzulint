@@ -40,11 +40,9 @@ pub struct DownloadResult {
     pub computed_hash: String,
 }
 
-/// Downloader for WASM artifacts from plugin manifests.
 pub struct WasmDownloader {
     http_client: SecureHttpClient,
     max_size: u64,
-    timeout: Duration,
 }
 
 impl WasmDownloader {
@@ -72,7 +70,6 @@ impl WasmDownloader {
         Ok(Self {
             http_client,
             max_size,
-            timeout,
         })
     }
 
@@ -80,15 +77,9 @@ impl WasmDownloader {
     ///
     /// By default, downloads from loopback, link-local, and private IP ranges are blocked
     /// to prevent SSRF attacks. Set this to `true` to allow them (e.g. for testing).
-    pub fn allow_local(self, allow: bool) -> Self {
-        Self {
-            http_client: SecureHttpClient::builder()
-                .timeout(self.timeout)
-                .allow_local(allow)
-                .build(),
-            max_size: self.max_size,
-            timeout: self.timeout,
-        }
+    pub fn allow_local(mut self, allow: bool) -> Self {
+        self.http_client = self.http_client.with_allow_local(allow);
+        self
     }
 
     /// Download WASM from a resolved URL.

@@ -257,7 +257,7 @@
       "properties": {
         "max_pages": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1
         },
         "max_http_response_bytes": {
           "type": "integer",

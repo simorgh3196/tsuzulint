@@ -26,7 +26,7 @@
   },
   "wasm": [
     {
-      "url": "../target/wasm32-wasip1/release/tsuzulint_rule_no_doubled_joshi.wasm",
+      "path": "../target/wasm32-wasip1/release/tsuzulint_rule_no_doubled_joshi.wasm",
       "hash": "5d79dfdbe06168e24b28084c945c913b20cbf5c5ce4b2b57d4a5cf3b2cbd5370"
     }
   ],

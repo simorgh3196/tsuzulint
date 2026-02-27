@@ -19,7 +19,7 @@
   },
   "wasm": [
     {
-      "url": "../target/wasm32-wasip1/release/tsuzulint_rule_no_todo.wasm",
+      "path": "../target/wasm32-wasip1/release/tsuzulint_rule_no_todo.wasm",
       "hash": "55310fd5c9efa3ee339750079fb3e9443aa3c54fdb3382200ee6e00713dbef55"
     }
   ],
