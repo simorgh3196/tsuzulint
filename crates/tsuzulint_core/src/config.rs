@@ -266,10 +266,10 @@ impl LinterConfig {
     }
 
     /// Computes a hash of the configuration for cache invalidation.
-    pub fn hash(&self) -> Result<String, LinterError> {
+    pub fn hash(&self) -> Result<[u8; 32], LinterError> {
         let json = serde_json::to_string(self)
             .map_err(|e| LinterError::Internal(format!("Failed to serialize config: {}", e)))?;
-        Ok(blake3::hash(json.as_bytes()).to_hex().to_string())
+        Ok(blake3::hash(json.as_bytes()).into())
     }
 }
 

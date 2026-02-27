@@ -53,12 +53,7 @@ impl CacheManager {
     }
 
     /// Computes the BLAKE3 hash of content.
-    pub fn hash_content(content: &str) -> String {
-        blake3::hash(content.as_bytes()).to_hex().to_string()
-    }
-
-    /// Computes the BLAKE3 hash of content as bytes.
-    pub fn hash_content_bytes(content: &str) -> BlockHash {
+    pub fn hash_content(content: &str) -> BlockHash {
         blake3::hash(content.as_bytes()).into()
     }
 
@@ -82,8 +77,8 @@ impl CacheManager {
     pub fn is_valid(
         &self,
         path: &Path,
-        content_hash: &str,
-        config_hash: &str,
+        content_hash: &BlockHash,
+        config_hash: &BlockHash,
         rule_versions: &HashMap<String, String>,
     ) -> bool {
         if !self.enabled {
@@ -118,7 +113,7 @@ impl CacheManager {
         &self,
         path: &Path,
         current_blocks: &[BlockCacheEntry],
-        config_hash: &str,
+        config_hash: &BlockHash,
         rule_versions: &HashMap<String, String>,
     ) -> (Vec<Diagnostic>, Vec<bool>) {
         let mut reused_diagnostics = Vec::new();
@@ -135,7 +130,7 @@ impl CacheManager {
         };
 
         // Check if config/rules are compatible
-        if cached_entry.config_hash != config_hash
+        if cached_entry.config_hash != *config_hash
             || cached_entry.rule_versions.len() != rule_versions.len()
         {
             return (reused_diagnostics, matched_mask);
@@ -304,6 +299,10 @@ impl Default for CacheManager {
 mod tests {
     use super::*;
 
+    fn dummy_hash(val: u8) -> BlockHash {
+        [val; 32]
+    }
+
     #[test]
     fn test_cache_manager_new() {
         let manager = CacheManager::new("/tmp/test-cache");
@@ -322,13 +321,7 @@ mod tests {
     fn test_cache_manager_set_get() {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(
-            "hash123".to_string(),
-            "config456".to_string(),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         manager.set(path.clone(), entry);
 
@@ -342,8 +335,8 @@ mod tests {
         let path = PathBuf::from("/test/file.md");
         let versions = HashMap::new();
         let entry = CacheEntry::new(
-            "hash123".to_string(),
-            "config456".to_string(),
+            dummy_hash(1),
+            dummy_hash(2),
             versions.clone(),
             vec![],
             vec![],
@@ -351,8 +344,8 @@ mod tests {
 
         manager.set(path.clone(), entry);
 
-        assert!(manager.is_valid(&path, "hash123", "config456", &versions));
-        assert!(!manager.is_valid(&path, "different", "config456", &versions));
+        assert!(manager.is_valid(&path, &dummy_hash(1), &dummy_hash(2), &versions));
+        assert!(!manager.is_valid(&path, &dummy_hash(3), &dummy_hash(2), &versions));
     }
 
     #[test]
@@ -379,13 +372,7 @@ mod tests {
     fn test_cache_manager_remove() {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(
-            "hash".to_string(),
-            "config".to_string(),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         manager.set(path.clone(), entry);
         assert_eq!(manager.len(), 1);
@@ -401,8 +388,8 @@ mod tests {
         for i in 0..5 {
             let path = PathBuf::from(format!("/test/file{}.md", i));
             let entry = CacheEntry::new(
-                format!("hash{}", i),
-                "config".to_string(),
+                dummy_hash(i as u8),
+                dummy_hash(100),
                 HashMap::new(),
                 vec![],
                 vec![],
@@ -420,13 +407,7 @@ mod tests {
     fn test_cache_manager_get_when_disabled() {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(
-            "hash".to_string(),
-            "config".to_string(),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         manager.set(path.clone(), entry);
         manager.disable();
@@ -441,8 +422,8 @@ mod tests {
         let path = PathBuf::from("/test/file.md");
         let versions = HashMap::new();
         let entry = CacheEntry::new(
-            "hash".to_string(),
-            "config".to_string(),
+            dummy_hash(1),
+            dummy_hash(2),
             versions.clone(),
             vec![],
             vec![],
@@ -452,7 +433,7 @@ mod tests {
         manager.disable();
 
         // is_valid should return false when disabled
-        assert!(!manager.is_valid(&path, "hash", "config", &versions));
+        assert!(!manager.is_valid(&path, &dummy_hash(1), &dummy_hash(2), &versions));
     }
 
     #[test]
@@ -461,13 +442,7 @@ mod tests {
         manager.disable();
 
         let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(
-            "hash".to_string(),
-            "config".to_string(),
-            HashMap::new(),
-            vec![],
-            vec![],
-        );
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
 
         manager.set(path, entry);
 
@@ -481,7 +456,7 @@ mod tests {
         let path = PathBuf::from("/nonexistent/file.md");
         let versions = HashMap::new();
 
-        assert!(!manager.is_valid(&path, "hash", "config", &versions));
+        assert!(!manager.is_valid(&path, &dummy_hash(1), &dummy_hash(2), &versions));
     }
 
     #[test]
@@ -495,8 +470,8 @@ mod tests {
     fn test_hash_content_empty() {
         let hash = CacheManager::hash_content("");
         // Empty string should still produce a valid hash
-        assert!(!hash.is_empty());
-        assert_eq!(hash.len(), 64); // BLAKE3 produces 256-bit (64 hex chars) hash
+        assert_eq!(hash.len(), 32);
+        assert_ne!(hash, [0; 32]);
     }
 
     #[test]
@@ -510,60 +485,41 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_content_bytes_empty() {
-        let hash = CacheManager::hash_content_bytes("");
-        // Empty string should still produce a valid hash
-        assert_eq!(hash.len(), 32);
-        assert_ne!(hash, [0; 32]);
-    }
-
-    #[test]
-    fn test_hash_content_bytes() {
-        let hash1 = CacheManager::hash_content_bytes("hello");
-        let hash2 = CacheManager::hash_content_bytes("hello");
-        let hash3 = CacheManager::hash_content_bytes("world");
-
-        assert_eq!(hash1, hash2);
-        assert_ne!(hash1, hash3);
-    }
-
-    #[test]
-    fn test_hash_content_bytes_unicode() {
-        let hash1 = CacheManager::hash_content_bytes("日本語");
-        let hash2 = CacheManager::hash_content_bytes("日本語");
-        let hash3 = CacheManager::hash_content_bytes("中文");
-
-        assert_eq!(hash1, hash2);
-        assert_ne!(hash1, hash3);
-    }
-
-    #[test]
     fn test_cache_manager_multiple_files() {
         let mut manager = CacheManager::new("/tmp/test-cache");
 
         let files = vec![
-            ("/path/a.md", "hash_a"),
-            ("/path/b.md", "hash_b"),
-            ("/path/c.txt", "hash_c"),
+            ("/path/a.md", dummy_hash(1)),
+            ("/path/b.md", dummy_hash(2)),
+            ("/path/c.txt", dummy_hash(3)),
         ];
 
         for (path, hash) in &files {
-            let entry = CacheEntry::new(
-                hash.to_string(),
-                "config".to_string(),
-                HashMap::new(),
-                vec![],
-                vec![],
-            );
+            let entry = CacheEntry::new(*hash, dummy_hash(100), HashMap::new(), vec![], vec![]);
             manager.set(PathBuf::from(path), entry);
         }
 
         assert_eq!(manager.len(), 3);
 
         let versions = HashMap::new();
-        assert!(manager.is_valid(&PathBuf::from("/path/a.md"), "hash_a", "config", &versions));
-        assert!(manager.is_valid(&PathBuf::from("/path/b.md"), "hash_b", "config", &versions));
-        assert!(manager.is_valid(&PathBuf::from("/path/c.txt"), "hash_c", "config", &versions));
+        assert!(manager.is_valid(
+            &PathBuf::from("/path/a.md"),
+            &dummy_hash(1),
+            &dummy_hash(100),
+            &versions
+        ));
+        assert!(manager.is_valid(
+            &PathBuf::from("/path/b.md"),
+            &dummy_hash(2),
+            &dummy_hash(100),
+            &versions
+        ));
+        assert!(manager.is_valid(
+            &PathBuf::from("/path/c.txt"),
+            &dummy_hash(3),
+            &dummy_hash(100),
+            &versions
+        ));
     }
 
     #[test]
@@ -595,8 +551,8 @@ mod tests {
         let cached_blocks = vec![block1, block2, block3];
         let versions = HashMap::new();
         let entry = CacheEntry::new(
-            "hash".to_string(),
-            "config".to_string(),
+            dummy_hash(1),
+            dummy_hash(2),
             versions.clone(),
             vec![],
             cached_blocks,
@@ -630,7 +586,7 @@ mod tests {
         ];
 
         let (diagnostics, matched) =
-            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+            manager.reconcile_blocks(&path, &current_blocks, &dummy_hash(2), &versions);
 
         // All 3 should match
         assert!(matched.iter().all(|&m| m));
@@ -661,8 +617,8 @@ mod tests {
 
         let versions = HashMap::new();
         let entry = CacheEntry::new(
-            "hash".to_string(),
-            "config".to_string(),
+            dummy_hash(1),
+            dummy_hash(2),
             versions.clone(),
             vec![],
             vec![block],
@@ -677,7 +633,7 @@ mod tests {
         }];
 
         let (diagnostics, matched) =
-            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+            manager.reconcile_blocks(&path, &current_blocks, &dummy_hash(2), &versions);
 
         // Assert matched
         assert_eq!(matched, vec![true]);
@@ -712,8 +668,8 @@ mod tests {
 
         let versions = HashMap::new();
         let entry = CacheEntry::new(
-            "hash".to_string(),
-            "config".to_string(),
+            dummy_hash(1),
+            dummy_hash(2),
             versions.clone(),
             vec![],
             vec![block1, block2],
@@ -732,7 +688,7 @@ mod tests {
         }];
 
         let (diagnostics, matched) =
-            manager.reconcile_blocks(&path, &current_blocks, "config", &versions);
+            manager.reconcile_blocks(&path, &current_blocks, &dummy_hash(2), &versions);
 
         // Exactly one should match
         assert_eq!(matched, vec![true]);
