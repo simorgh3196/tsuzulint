@@ -177,9 +177,9 @@ impl FileFinder {
             });
 
         let mut files = {
-            let mut lock = found_files
-                .lock()
-                .map_err(|_| LinterError::Internal("Failed to lock found files mutex".to_string()))?;
+            let mut lock = found_files.lock().map_err(|_| {
+                LinterError::Internal("Failed to lock found files mutex".to_string())
+            })?;
             std::mem::take(&mut *lock)
         };
 
@@ -456,6 +456,9 @@ mod tests {
         let files = finder.discover_files(&["*.md".to_string()], root).unwrap();
 
         assert!(files.iter().any(|f| f.ends_with("included.md")));
-        assert!(!files.iter().any(|f| f.ends_with("ignored.md")), "Should respect .gitignore");
+        assert!(
+            !files.iter().any(|f| f.ends_with("ignored.md")),
+            "Should respect .gitignore"
+        );
     }
 }
