@@ -175,17 +175,20 @@
         "anyOf": [
           {
             "required": [
-              "url"
+              "url",
+              "hash"
             ]
           },
           {
             "required": [
-              "path"
+              "path",
+              "hash"
             ]
           },
           {
             "required": [
-              "data"
+              "data",
+              "hash"
             ]
           }
         ],
