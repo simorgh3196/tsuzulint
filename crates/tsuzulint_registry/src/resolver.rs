@@ -781,6 +781,7 @@ mod tests {
         let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
 
         std::fs::remove_file(&resolved1.wasm_path).unwrap();
+        assert!(!resolved1.wasm_path.exists(), "File should be removed");
 
         let resolved2 = resolver
             .resolve(&spec)
