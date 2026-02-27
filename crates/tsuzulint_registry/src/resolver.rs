@@ -102,7 +102,9 @@ impl PluginResolver {
                     .await
             }
             PluginSource::Path(_) => {
-                let manifest_path = manifest_path_buf.expect("Path source must have manifest path");
+                let manifest_path = manifest_path_buf.ok_or_else(|| {
+                    ResolveError::SerializationError("Path source must have manifest path".into())
+                })?;
                 self.resolve_local(&manifest_path, &manifest, alias)
             }
         }
