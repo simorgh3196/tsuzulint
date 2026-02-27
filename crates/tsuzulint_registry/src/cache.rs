@@ -340,7 +340,7 @@ mod tests {
         let manifest_content = r#"{
             "rule": { "name": "url-rule", "version": "1.0.0" },
             "wasm": [{
-                "path": "https://example.com/rule.wasm",
+                "url": "https://example.com/rule.wasm",
                 "hash": "hash"
             }]
         }"#;
