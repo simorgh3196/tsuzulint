@@ -47,14 +47,6 @@ pub struct PluginResolver {
     downloader: WasmDownloader,
 }
 
-fn extract_hash(wasm: &[Wasm]) -> Option<String> {
-    wasm.iter().find_map(|w| match w {
-        Wasm::Url { meta, .. } | Wasm::File { meta, .. } | Wasm::Data { meta, .. } => {
-            meta.hash.clone()
-        }
-    })
-}
-
 impl PluginResolver {
     pub fn new() -> Result<Self, ResolveError> {
         Ok(Self {
@@ -149,9 +141,18 @@ impl PluginResolver {
         manifest: ExternalRuleManifest,
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
-        let expected_hash = extract_hash(&manifest.wasm).ok_or_else(|| {
-            ResolveError::SerializationError("Missing hash in external manifest".into())
-        })?;
+        let expected_hash = manifest
+            .wasm
+            .iter()
+            .find_map(|w| match w {
+                Wasm::Url { meta, .. } => meta.hash.clone(),
+                Wasm::File { .. } | Wasm::Data { .. } => None,
+            })
+            .ok_or_else(|| {
+                ResolveError::SerializationError(
+                    "Missing hash in external manifest for URL source".into(),
+                )
+            })?;
 
         if let Some(cached) = self.cache.get(source, version) {
             match std::fs::read(&cached.wasm_path) {
@@ -205,11 +206,11 @@ impl PluginResolver {
         manifest: &ExternalRuleManifest,
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
-        let wasm_file = manifest
+        let (wasm_file, expected_hash) = manifest
             .wasm
             .iter()
             .find_map(|w| match w {
-                Wasm::File { path, .. } => Some(path.clone()),
+                Wasm::File { path, meta } => Some((path.clone(), meta.hash.clone())),
                 Wasm::Url { .. } | Wasm::Data { .. } => None,
             })
             .ok_or_else(|| {
@@ -225,8 +226,10 @@ impl PluginResolver {
 
         let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
 
-        let expected_hash = extract_hash(&manifest.wasm).ok_or_else(|| {
-            ResolveError::SerializationError("Missing hash in external manifest".into())
+        let expected_hash = expected_hash.ok_or_else(|| {
+            ResolveError::SerializationError(
+                "Missing hash in external manifest for local file".into(),
+            )
         })?;
 
         HashVerifier::verify(&bytes, &expected_hash)?;
