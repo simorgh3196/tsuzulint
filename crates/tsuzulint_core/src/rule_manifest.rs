@@ -1,5 +1,6 @@
+use extism_manifest::Wasm;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tsuzulint_manifest::{ExternalRuleManifest, HashVerifier, validate_manifest};
 
 use crate::error::LinterError;
@@ -34,12 +35,47 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
 
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
 
-    let wasm_relative = Path::new(&manifest.artifacts.wasm);
+    let mut resolved_wasm = None;
+    for w in &manifest.wasm {
+        match w {
+            Wasm::File { path, meta } => {
+                resolved_wasm = Some((path.clone(), meta.hash.clone()));
+                break;
+            }
+            Wasm::Url { .. } => {
+                return Err(LinterError::Config(format!(
+                    "URL WASM source is not supported directly in core; please resolve it via registry first (manifest '{}')",
+                    manifest_path.display()
+                )));
+            }
+            Wasm::Data { .. } => {
+                // Ignore Data sources and continue searching for File sources.
+                continue;
+            }
+        }
+    }
+
+    let (wasm_path_buf, expected_hash): (PathBuf, Option<String>) =
+        resolved_wasm.ok_or_else(|| {
+            LinterError::Config(format!(
+                "No valid WASM source found in manifest '{}'",
+                manifest_path.display()
+            ))
+        })?;
+
+    let expected_hash = expected_hash.ok_or_else(|| {
+        LinterError::Config(format!(
+            "Missing hash for WASM source in manifest '{}'",
+            manifest_path.display()
+        ))
+    })?;
+
+    let wasm_relative = wasm_path_buf.as_path();
 
     if wasm_relative.is_absolute() || wasm_relative.has_root() {
         return Err(LinterError::Config(format!(
             "Absolute WASM path '{}' is not allowed in manifest '{}'",
-            manifest.artifacts.wasm,
+            wasm_relative.display(),
             manifest_path.display()
         )));
     }
@@ -50,7 +86,7 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
     {
         return Err(LinterError::Config(format!(
             "WASM path '{}' containing '..' is not allowed in manifest '{}'",
-            manifest.artifacts.wasm,
+            wasm_relative.display(),
             manifest_path.display()
         )));
     }
@@ -96,7 +132,7 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
         ))
     })?;
 
-    HashVerifier::verify(&wasm_bytes, &manifest.artifacts.sha256).map_err(|e| {
+    HashVerifier::verify(&wasm_bytes, &expected_hash).map_err(|e| {
         LinterError::Config(format!(
             "Integrity check failed for WASM file '{}': {}",
             canonical_wasm_path.display(),
@@ -138,10 +174,10 @@ mod tests {
                 "description": "Test rule",
                 "fixable": false
             }},
-            "artifacts": {{
-                "wasm": "rule.wasm",
-                "sha256": "{}"
-            }}
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "{}"
+            }}]
         }}"#,
             wasm_hash
         );
@@ -168,10 +204,10 @@ mod tests {
         let json = format!(
             r#"{{
             "rule": {{ "name": "test", "version": "1.0.0" }},
-            "artifacts": {{
-                "wasm": "rule.wasm",
-                "sha256": "{}"
-            }}
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "{}"
+            }}]
         }}"#,
             wrong_hash
         );
@@ -194,10 +230,10 @@ mod tests {
 
         let json = r#"{
             "rule": { "name": "test", "version": "1.0.0" },
-            "artifacts": {
-                "wasm": "/absolute/path/rule.wasm",
-                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
+            "wasm": [{
+                "path": "/absolute/path/rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
         }"#;
         fs::write(&manifest_path, json).unwrap();
 
@@ -218,10 +254,10 @@ mod tests {
 
         let json = r#"{
             "rule": { "name": "test", "version": "1.0.0" },
-            "artifacts": {
-                "wasm": "../rule.wasm",
-                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
+            "wasm": [{
+                "path": "../rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
         }"#;
         fs::write(&manifest_path, json).unwrap();
 
@@ -267,10 +303,10 @@ mod tests {
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let json = r#"{
             "rule": { "name": "test", "version": "1.0.0" },
-            "artifacts": {
-                "wasm": "missing.wasm",
-                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
+            "wasm": [{
+                "path": "missing.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
         }"#;
         fs::write(&manifest_path, json).unwrap();
         let result = load_rule_manifest(&manifest_path);

@@ -49,6 +49,6 @@ pub mod test_utils;
 
 pub use diagnostic::{Diagnostic, Fix, Severity};
 pub use error::PluginError;
-pub use executor::{LoadResult, RuleExecutor};
+pub use executor::{LoadResult, PluginOptions, RuleExecutor};
 pub use host::{PluginHost, PreparedLintRequest};
 pub use manifest::{Capability, IsolationLevel, KnownLanguage, RuleManifest};

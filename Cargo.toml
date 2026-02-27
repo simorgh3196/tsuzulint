@@ -101,7 +101,7 @@ js-sys = "0.3"
 pretty_assertions = "1.4"
 rstest = "0.26"
 insta = { version = "1.46", features = ["json", "redactions"] }
-tempfile = "3.25"
+tempfile = "3.26"
 assert_fs = "1.1"
 assert_cmd = "2.0"
 predicates = "3.1"

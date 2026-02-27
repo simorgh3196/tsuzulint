@@ -42,12 +42,10 @@ Add `$schema` to your `tsuzulint-rule.json` for IDE auto-completion and validati
     "name": "my-rule",
     "version": "1.0.0"
   },
-  "artifacts": {
-    "wasm": "https://github.com/.../releases/download/v{version}/rule.wasm"
-  },
-  "security": {
-    "sha256": "..."
-  }
+  "wasm": [{
+    "url": "https://github.com/.../releases/download/v{version}/rule.wasm",
+    "hash": "..."
+  }]
 }
 ```
 
@@ -117,8 +115,7 @@ Use any JSON Schema code generator for your target language:
 | Section | Required | Description |
 | :--- | :--- | :--- |
 | `rule` | Yes | Rule metadata (name, version, description, fixable, node_types, etc.) |
-| `artifacts` | Yes | Download URLs (wasm) |
-| `security` | Yes | SHA256 hash for verification |
+| `wasm` | Yes | Download URLs and hashes |
 | `permissions` | No | Filesystem/network permissions (future) |
 | `tsuzulint` | No | TsuzuLint version requirements |
 | `options` | No | JSON Schema for rule configuration options |

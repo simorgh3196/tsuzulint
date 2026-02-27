@@ -106,6 +106,8 @@ pub fn lint_file_internal(
         cache_guard.reconcile_blocks(path, &current_blocks, config_hash, &rule_versions)
     };
 
+    let (global_rule_names, block_rule_names) = get_classified_rules(host, enabled_rules);
+
     let mut global_diagnostics = Vec::new();
     let mut block_diagnostics = Vec::new();
     let mut timings = HashMap::new();
@@ -355,25 +357,21 @@ fn get_classified_rules<'a, I, P>(
     enabled_rules: &HashSet<&str>,
 ) -> (Vec<String>, Vec<String>, bool)
 where
-    I: Iterator<Item = &'a String>,
     P: ManifestProvider,
 {
     let mut global_rules = Vec::new();
     let mut block_rules = Vec::new();
     let mut needs_morphology = false;
 
-    for name in rules {
-        if !enabled_rules.contains(name.as_str()) {
-            continue;
-        }
+    for name in enabled_rules {
         if let Some(manifest) = host.get_manifest(name) {
             match manifest.isolation_level {
-                IsolationLevel::Global => global_rules.push(name.clone()),
-                IsolationLevel::Block => block_rules.push(name.clone()),
+                IsolationLevel::Global => global_rules.push(name.to_string()),
+                IsolationLevel::Block => block_rules.push(name.to_string()),
             }
             needs_morphology |= manifest.needs_morphology();
         } else {
-            warn!("Rule '{}' is enabled but has no manifest; skipping", name);
+            warn!("Missing manifest for enabled rule: {}", name);
         }
     }
 
@@ -452,13 +450,6 @@ mod tests {
 
         let provider = MockManifestProvider { manifests };
 
-        let loaded_rules = [
-            global_name.to_string(),
-            block_name.to_string(),
-            disabled_name.to_string(),
-            missing_manifest_name.to_string(),
-        ];
-
         let mut enabled_rules = HashSet::new();
         enabled_rules.insert(global_name);
         enabled_rules.insert(block_name);
@@ -474,8 +465,43 @@ mod tests {
 
         assert!(block_rules.contains(&block_name.to_string()));
 
-        assert_eq!(global_rules.len(), 1);
-        assert_eq!(block_rules.len(), 1);
+        assert_eq!(global_rules, vec!["global-rule".to_string()]);
+        assert_eq!(block_rules, vec!["block-rule".to_string()]);
+    }
+
+    #[test]
+    fn test_get_classified_rules_returns_sorted_output() {
+        let mut manifests = HashMap::new();
+        manifests.insert(
+            "z-global".to_string(),
+            create_manifest(IsolationLevel::Global),
+        );
+        manifests.insert(
+            "a-global".to_string(),
+            create_manifest(IsolationLevel::Global),
+        );
+        manifests.insert(
+            "z-block".to_string(),
+            create_manifest(IsolationLevel::Block),
+        );
+        manifests.insert(
+            "a-block".to_string(),
+            create_manifest(IsolationLevel::Block),
+        );
+
+        let provider = MockManifestProvider { manifests };
+        let enabled_rules = HashSet::from(["z-global", "a-global", "z-block", "a-block"]);
+
+        let (global_rules, block_rules) = get_classified_rules(&provider, &enabled_rules);
+
+        assert_eq!(
+            global_rules,
+            vec!["a-global".to_string(), "z-global".to_string()]
+        );
+        assert_eq!(
+            block_rules,
+            vec!["a-block".to_string(), "z-block".to_string()]
+        );
     }
 
     #[test]

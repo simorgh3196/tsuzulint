@@ -1,6 +1,5 @@
 use std::time::Instant;
 use tsuzulint_registry::downloader::WasmDownloader;
-use tsuzulint_registry::manifest::{Artifacts, ExternalRuleManifest, IsolationLevel, RuleMetadata};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -15,34 +14,12 @@ async fn main() {
     let body = vec![b'x'; file_size_bytes];
 
     Mock::given(method("GET"))
-        .and(path("/large.wasm"))
+        .and(path("/rule.wasm"))
         .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
         .mount(&mock_server)
         .await;
 
-    let manifest = ExternalRuleManifest {
-        rule: RuleMetadata {
-            name: "benchmark-rule".to_string(),
-            version: "1.0.0".to_string(),
-            description: None,
-            repository: None,
-            license: None,
-            authors: vec![],
-            keywords: vec![],
-            fixable: false,
-            node_types: vec![],
-            isolation_level: IsolationLevel::Global,
-            languages: vec![],
-            capabilities: vec![],
-        },
-        artifacts: Artifacts {
-            wasm: format!("{}/large.wasm", mock_server.uri()),
-            sha256: "ignored".to_string(),
-        },
-        permissions: None,
-        tsuzulint: None,
-        options: None,
-    };
+    let url = format!("{}/rule.wasm", mock_server.uri());
 
     // Use a large max size to allow download
     let downloader = WasmDownloader::with_max_size((file_size_mb + 10) as u64 * 1024 * 1024)
@@ -53,10 +30,7 @@ async fn main() {
 
     // Warm-up run
     print!("Warm-up... ");
-    let _ = downloader
-        .download(&manifest)
-        .await
-        .expect("Download failed");
+    let _ = downloader.download(&url).await.expect("Download failed");
     println!("Done.");
 
     let iterations = 10;
@@ -64,10 +38,7 @@ async fn main() {
 
     for i in 1..=iterations {
         let start = Instant::now();
-        let _ = downloader
-            .download(&manifest)
-            .await
-            .expect("Download failed");
+        let _ = downloader.download(&url).await.expect("Download failed");
         let duration = start.elapsed();
         durations.push(duration);
         println!("Iteration {}: {:.2?}", i, duration);
