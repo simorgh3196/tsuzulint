@@ -25,7 +25,6 @@ blake3 = { workspace = true }
 rayon = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-walkdir = { workspace = true }
 globset = { workspace = true }
 extism-manifest = { workspace = true }
 ignore = { workspace = true }

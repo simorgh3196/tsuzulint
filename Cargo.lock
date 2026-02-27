@@ -4542,7 +4542,6 @@ dependencies = [
  "tsuzulint_parser",
  "tsuzulint_plugin",
  "tsuzulint_text",
- "walkdir",
 ]
 
 [[package]]

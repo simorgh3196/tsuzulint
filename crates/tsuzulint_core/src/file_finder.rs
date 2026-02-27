@@ -1,8 +1,9 @@
 use crate::error::LinterError;
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
-use walkdir::WalkDir;
 
 pub struct FileFinder {
     include_globs: Option<GlobSet>,
@@ -66,12 +67,12 @@ impl FileFinder {
         base_dir: &Path,
     ) -> Result<Vec<PathBuf>, LinterError> {
         let mut files = Vec::new();
+        let mut glob_patterns = Vec::new();
 
-        let mut glob_builder = GlobSetBuilder::new();
-        let mut has_globs = false;
-
+        // 1. Handle explicit file paths (canonicalize and check ignore)
+        // 2. Collect glob patterns for the walker
         for pattern in patterns {
-            let path = Path::new(pattern);
+            let path = base_dir.join(pattern);
             if path
                 .symlink_metadata()
                 .is_ok_and(|m| m.file_type().is_file())
@@ -89,43 +90,102 @@ impl FileFinder {
                     }
                 }
             } else {
-                let glob = Glob::new(pattern).map_err(|e| {
-                    LinterError::config(format!("Invalid pattern '{}': {}", pattern, e))
-                })?;
-                glob_builder.add(glob);
-                has_globs = true;
+                glob_patterns.push(pattern);
             }
         }
 
-        if has_globs {
-            let glob_set = glob_builder
-                .build()
-                .map_err(|e| LinterError::config(format!("Failed to build globset: {}", e)))?;
+        if glob_patterns.is_empty() {
+            files.sort();
+            files.dedup();
+            return Ok(files);
+        }
 
-            for entry_res in WalkDir::new(base_dir).follow_links(false).into_iter() {
-                match entry_res {
-                    Ok(entry) => {
-                        let path = entry.path();
-                        if entry.file_type().is_file() && glob_set.is_match(path) {
-                            match path.canonicalize() {
-                                Ok(abs_path) => {
-                                    if self.should_ignore(&abs_path) {
-                                        continue;
+        // Build GlobSet for CLI patterns (to filter results)
+        // We do NOT use overrides because whitelist overrides bypass .gitignore
+        let mut builder = GlobSetBuilder::new();
+        for pattern in glob_patterns {
+            let glob = Glob::new(pattern).map_err(|e| {
+                LinterError::config(format!("Invalid glob pattern '{}': {}", pattern, e))
+            })?;
+            builder.add(glob);
+        }
+        let cli_glob_set = builder
+            .build()
+            .map_err(|e| LinterError::config(format!("Failed to build globset: {}", e)))?;
+
+        // Shared results vector protected by Mutex
+        let found_files = Arc::new(Mutex::new(files));
+        let found_files_clone = found_files.clone();
+
+        // GlobSets are cheap to clone (Arc internally)
+        let include_globs = self.include_globs.clone();
+        let exclude_globs = self.exclude_globs.clone();
+        let cli_glob_set = cli_glob_set.clone();
+
+        WalkBuilder::new(base_dir)
+            .follow_links(false)
+            .hidden(false)
+            .ignore(false)
+            .git_ignore(true)
+            .git_global(false)
+            .git_exclude(false)
+            .build_parallel()
+            .run(move || {
+                let found_files = found_files_clone.clone();
+                let include_globs = include_globs.clone();
+                let exclude_globs = exclude_globs.clone();
+                let cli_glob_set = cli_glob_set.clone();
+
+                Box::new(move |entry| {
+                    match entry {
+                        Ok(entry) => {
+                            if entry.file_type().is_some_and(|ft| ft.is_file()) {
+                                let path = entry.path();
+
+                                // Check CLI pattern match first (fastest)
+                                if cli_glob_set.is_match(path) {
+                                    match path.canonicalize() {
+                                        Ok(abs_path) => {
+                                            // Re-implement should_ignore logic here
+                                        if exclude_globs
+                                                .as_ref()
+                                                .is_some_and(|excludes| excludes.is_match(&abs_path))
+                                            {
+                                            return ignore::WalkState::Continue;
+                                        }
+
+                                        if include_globs
+                                                .as_ref()
+                                                .is_some_and(|includes| !includes.is_match(&abs_path))
+                                            {
+                                            return ignore::WalkState::Continue;
+                                        }
+
+                                        if let Ok(mut lock) = found_files.lock() {
+                                            lock.push(abs_path);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            debug!(path = ?path, error = %e, "Failed to canonicalize discovered file path");
+                                        }
                                     }
-                                    files.push(abs_path);
-                                }
-                                Err(e) => {
-                                    debug!(path = ?path, error = %e, "Failed to canonicalize discovered file path");
                                 }
                             }
                         }
+                        Err(err) => {
+                            debug!(error = ?err, "Walk error scanning base_dir");
+                        }
                     }
-                    Err(err) => {
-                        debug!(error = ?err, "WalkDir error scanning base_dir");
-                    }
-                }
-            }
-        }
+                    ignore::WalkState::Continue
+                })
+            });
+
+        let mut files = {
+            let mut lock = found_files.lock().map_err(|_| {
+                LinterError::Internal("Failed to lock found files mutex".to_string())
+            })?;
+            std::mem::take(&mut *lock)
+        };
 
         files.sort();
         files.dedup();
@@ -337,7 +397,7 @@ mod tests {
     #[test]
     fn test_discover_files_invalid_glob() {
         let finder = FileFinder::new(&[], &[]).unwrap();
-
+        // The previous test expected error. With ignore::overrides::OverrideBuilder, it might also error.
         let result = finder.discover_files(&["[invalid-glob".to_string()], Path::new("."));
         assert!(result.is_err());
     }
@@ -361,16 +421,48 @@ mod tests {
             .unwrap();
 
         // Should only contain target.md, NOT link.md
+        // WalkBuilder follows links: false by default
         assert_eq!(
             files.len(),
             1,
             "Should ignore symlinks, but found: {:?}",
             files
         );
-        // Canonicalize target_file because discover_files might return absolute paths or relative
-        // Actually discover_files returns paths as yielded by WalkDir (absolute if base_dir is absolute)
-        // temp_dir.path() is absolute.
         assert!(files.iter().any(|f| f.ends_with("target.md")));
         assert!(!files.iter().any(|f| f.ends_with("link.md")));
+    }
+
+    #[test]
+    fn test_discover_files_respects_gitignore() {
+        use std::io::Write;
+
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // Initialize git repo so .gitignore works (ignore crate requires it usually, or at least a .gitignore file)
+        // Actually ignore crate works without .git directory if .gitignore is present, but let's be safe.
+        // Wait, WalkBuilder defaults to respecting .gitignore.
+        use std::process::Command;
+        let _ = Command::new("git").arg("init").current_dir(root).output();
+
+        let ignored_file = root.join("ignored.md");
+        let included_file = root.join("included.md");
+        let gitignore = root.join(".gitignore");
+
+        fs::write(&ignored_file, "ignored").unwrap();
+        fs::write(&included_file, "included").unwrap();
+
+        let mut f = fs::File::create(&gitignore).unwrap();
+        writeln!(f, "ignored.md").unwrap();
+
+        let finder = FileFinder::new(&[], &[]).unwrap();
+
+        let files = finder.discover_files(&["*.md".to_string()], root).unwrap();
+
+        assert!(files.iter().any(|f| f.ends_with("included.md")));
+        assert!(
+            !files.iter().any(|f| f.ends_with("ignored.md")),
+            "Should respect .gitignore"
+        );
     }
 }
