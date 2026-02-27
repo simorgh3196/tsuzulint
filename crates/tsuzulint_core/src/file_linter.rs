@@ -128,9 +128,7 @@ pub fn lint_file_internal(
                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                 }
                 if timings_enabled {
-                    *timings
-                        .entry(rule.to_string())
-                        .or_insert(Duration::ZERO) += start.elapsed();
+                    *timings.entry(rule.to_string()).or_insert(Duration::ZERO) += start.elapsed();
                 }
             } else {
                 let ast_raw = to_raw_value(&ast, "AST")?;
@@ -147,9 +145,8 @@ pub fn lint_file_internal(
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
                     if timings_enabled {
-                        *timings
-                            .entry(rule.to_string())
-                            .or_insert(Duration::ZERO) += start.elapsed();
+                        *timings.entry(rule.to_string()).or_insert(Duration::ZERO) +=
+                            start.elapsed();
                     }
                 }
             }
@@ -176,9 +173,8 @@ pub fn lint_file_internal(
                                 Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                             }
                             if timings_enabled {
-                                *timings
-                                    .entry(rule.to_string())
-                                    .or_insert(Duration::ZERO) += start.elapsed();
+                                *timings.entry(rule.to_string()).or_insert(Duration::ZERO) +=
+                                    start.elapsed();
                             }
                         } else if let Ok(node_raw) = to_raw_value(node, "block node") {
                             // Serialize request once for all rules running on this block
