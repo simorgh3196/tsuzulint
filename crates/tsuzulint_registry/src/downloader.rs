@@ -1,8 +1,7 @@
 //! WASM downloader for plugin artifacts.
 
 use crate::http_client::{SecureFetchError, SecureHttpClient};
-use crate::manifest::{ExternalRuleManifest, HashVerifier};
-use extism_manifest::Wasm;
+use crate::manifest::HashVerifier;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -92,45 +91,11 @@ impl WasmDownloader {
         }
     }
 
-    /// Download WASM from the manifest's artifact URL.
-    ///
-    /// This method:
-    /// 1. Replaces `{version}` placeholder in the URL with the manifest version
-    /// 2. Downloads the WASM binary with size limit check
-    /// 3. Computes the SHA256 hash after download
-    ///
-    /// Note: Hash verification against `manifest.wasm[..].hash` is the caller's responsibility.
-    pub async fn download(
-        &self,
-        manifest: &ExternalRuleManifest,
-    ) -> Result<DownloadResult, DownloadError> {
-        let url = self.resolve_url(manifest)?;
-        self.download_from_url(&url).await
-    }
-
-    /// Resolve the download URL by replacing `{version}` placeholder.
-    fn resolve_url(&self, manifest: &ExternalRuleManifest) -> Result<String, DownloadError> {
-        for w in &manifest.wasm {
-            match w {
-                Wasm::Url { req, .. } => {
-                    return Ok(req.url.replace("{version}", &manifest.rule.version));
-                }
-                Wasm::File { .. } | Wasm::Data { .. } => {}
-            }
-        }
-        Err(DownloadError::NotFound(
-            "No HTTP URL found in manifest wasm array".to_string(),
-        ))
-    }
-
     /// Download WASM from a resolved URL.
-    async fn download_from_url(
-        &self,
-        initial_url_str: &str,
-    ) -> Result<DownloadResult, DownloadError> {
+    pub async fn download(&self, url: &str) -> Result<DownloadResult, DownloadError> {
         let bytes = self
             .http_client
-            .fetch_with_size_limit(initial_url_str, self.max_size)
+            .fetch_with_size_limit(url, self.max_size)
             .await
             .map_err(|e| match e {
                 SecureFetchError::ResponseTooLarge { size, max } => {
@@ -151,91 +116,9 @@ impl WasmDownloader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use extism_manifest::{HttpRequest, WasmMetadata};
     use reqwest::StatusCode;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    fn create_dummy_manifest(wasm_url: String) -> ExternalRuleManifest {
-        ExternalRuleManifest {
-            rule: crate::manifest::RuleMetadata {
-                name: "test-rule".to_string(),
-                version: "1.0.0".to_string(),
-                description: None,
-                repository: None,
-                license: None,
-                authors: vec![],
-                keywords: vec![],
-                fixable: false,
-                node_types: vec![],
-                isolation_level: crate::manifest::IsolationLevel::Global,
-                languages: vec![],
-                capabilities: vec![],
-            },
-            wasm: vec![Wasm::Url {
-                req: HttpRequest {
-                    url: wasm_url,
-                    headers: std::collections::BTreeMap::new(),
-                    method: None,
-                },
-                meta: WasmMetadata {
-                    name: None,
-                    hash: Some("0".repeat(64)),
-                },
-            }],
-            allowed_hosts: None,
-            allowed_paths: None,
-            config: std::collections::BTreeMap::new(),
-            memory: None,
-            timeout_ms: None,
-            tsuzulint: None,
-            options: None,
-        }
-    }
-
-    #[test]
-    fn test_version_placeholder_replacement() -> Result<(), DownloadError> {
-        let manifest = ExternalRuleManifest {
-            rule: crate::manifest::RuleMetadata {
-                name: "test-rule".to_string(),
-                version: "1.2.3".to_string(),
-                description: None,
-                repository: None,
-                license: None,
-                authors: vec![],
-                keywords: vec![],
-                fixable: false,
-                node_types: vec![],
-                isolation_level: crate::manifest::IsolationLevel::Global,
-                languages: vec![],
-                capabilities: vec![],
-            },
-            wasm: vec![Wasm::Url {
-                req: HttpRequest {
-                    url: "https://example.com/releases/v{version}/rule.wasm".to_string(),
-                    headers: std::collections::BTreeMap::new(),
-                    method: None,
-                },
-                meta: WasmMetadata {
-                    name: None,
-                    hash: Some("0".repeat(64)),
-                },
-            }],
-            allowed_hosts: None,
-            allowed_paths: None,
-            config: std::collections::BTreeMap::new(),
-            memory: None,
-            timeout_ms: None,
-            tsuzulint: None,
-            options: None,
-        };
-
-        let downloader = WasmDownloader::new()?;
-        let url = downloader.resolve_url(&manifest)?;
-
-        assert_eq!(url, "https://example.com/releases/v1.2.3/rule.wasm");
-        Ok(())
-    }
 
     #[test]
     fn test_default_max_size_is_50mb() -> Result<(), DownloadError> {
@@ -264,10 +147,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+        let url = format!("{}/rule.wasm", mock_server.uri());
 
         let downloader = WasmDownloader::new()?.allow_local(true);
-        let result = downloader.download(&manifest).await?;
+        let result = downloader.download(&url).await?;
 
         assert_eq!(result.bytes, wasm_content);
         assert_eq!(result.computed_hash, expected_hash);
@@ -284,10 +167,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+        let url = format!("{}/rule.wasm", mock_server.uri());
 
         let downloader = WasmDownloader::new()?.allow_local(true);
-        let result = downloader.download(&manifest).await;
+        let result = downloader.download(&url).await;
 
         match result {
             Err(DownloadError::SecureHttp(SecureFetchError::NotFound(_))) => Ok(()),
@@ -305,10 +188,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+        let url = format!("{}/rule.wasm", mock_server.uri());
 
         let downloader = WasmDownloader::new()?.allow_local(true);
-        let result = downloader.download(&manifest).await;
+        let result = downloader.download(&url).await;
 
         match result {
             Err(DownloadError::SecureHttp(SecureFetchError::HttpError(status))) => {
@@ -330,10 +213,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = create_dummy_manifest(format!("{}/large.wasm", mock_server.uri()));
+        let url = format!("{}/large.wasm", mock_server.uri());
 
         let downloader = WasmDownloader::with_max_size(max_size)?.allow_local(true);
-        let result = downloader.download(&manifest).await;
+        let result = downloader.download(&url).await;
 
         match result {
             Err(DownloadError::TooLarge { size, max }) => {
@@ -360,10 +243,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = create_dummy_manifest(format!("{}/stream.wasm", mock_server.uri()));
+        let url = format!("{}/stream.wasm", mock_server.uri());
 
         let downloader = WasmDownloader::with_max_size(max_size)?.allow_local(true);
-        let result = downloader.download(&manifest).await;
+        let result = downloader.download(&url).await;
 
         match result {
             Err(DownloadError::TooLarge { size: _, max }) => {
@@ -390,11 +273,11 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = create_dummy_manifest(format!("{}/chunked.wasm", mock_server.uri()));
+        let url = format!("{}/chunked.wasm", mock_server.uri());
 
         let downloader = WasmDownloader::new()?.allow_local(true);
 
-        let result = downloader.download(&manifest).await?;
+        let result = downloader.download(&url).await?;
 
         assert_eq!(result.bytes, wasm_content);
         assert_eq!(result.computed_hash, expected_hash);
@@ -405,10 +288,10 @@ mod tests {
     async fn test_download_local_denied_by_default() -> Result<(), DownloadError> {
         let mock_server = MockServer::start().await;
 
-        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+        let url = format!("{}/rule.wasm", mock_server.uri());
 
         let downloader = WasmDownloader::new()?;
-        let result = downloader.download(&manifest).await;
+        let result = downloader.download(&url).await;
 
         use crate::security::SecurityError;
         match result {
@@ -442,10 +325,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = create_dummy_manifest(format!("{}/redirect", mock_server.uri()));
+        let url = format!("{}/redirect", mock_server.uri());
 
         let downloader = WasmDownloader::new()?.allow_local(true);
-        let result = downloader.download(&manifest).await?;
+        let result = downloader.download(&url).await?;
 
         assert_eq!(result.bytes, wasm_content);
         Ok(())
@@ -464,10 +347,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let manifest = create_dummy_manifest(format!("{}/loop", mock_server.uri()));
+        let url = format!("{}/loop", mock_server.uri());
 
         let downloader = WasmDownloader::new()?.allow_local(true);
-        let result = downloader.download(&manifest).await;
+        let result = downloader.download(&url).await;
 
         match result {
             Err(DownloadError::SecureHttp(SecureFetchError::RedirectLimitExceeded)) => Ok(()),
@@ -480,10 +363,10 @@ mod tests {
         use crate::security::SecurityError;
 
         let mock_server = MockServer::start().await;
-        let manifest = create_dummy_manifest(format!("{}/rule.wasm", mock_server.uri()));
+        let url = format!("{}/rule.wasm", mock_server.uri());
 
         let downloader = WasmDownloader::new()?;
-        let result = downloader.download(&manifest).await;
+        let result = downloader.download(&url).await;
 
         match result {
             Err(DownloadError::SecureHttp(SecureFetchError::SecurityError(
@@ -501,8 +384,8 @@ mod tests {
         let downloader =
             WasmDownloader::with_options(DEFAULT_MAX_SIZE, Duration::from_millis(100))?;
 
-        let manifest = create_dummy_manifest("http://192.0.2.1/rule.wasm".to_string());
-        let result = downloader.download(&manifest).await;
+        let url = "http://192.0.2.1/rule.wasm".to_string();
+        let result = downloader.download(&url).await;
 
         match result {
             Ok(_) => panic!("Expected failure for unreachable IP"),

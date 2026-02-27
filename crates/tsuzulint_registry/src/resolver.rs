@@ -143,18 +143,23 @@ impl PluginResolver {
         manifest: ExternalRuleManifest,
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
-        let expected_hash = manifest
+        let (expected_hash, mut wasm_url) = manifest
             .wasm
             .iter()
             .find_map(|w| match w {
-                Wasm::Url { meta, .. } => meta.hash.clone(),
+                Wasm::Url { req, meta } => meta
+                    .hash
+                    .as_ref()
+                    .map(|hash| (hash.clone(), req.url.clone())),
                 Wasm::File { .. } | Wasm::Data { .. } => None,
             })
             .ok_or_else(|| {
                 ResolveError::SerializationError(
-                    "Missing hash in external manifest for URL source".into(),
+                    "Missing hash or URL in external manifest for URL source".into(),
                 )
             })?;
+
+        wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
             match std::fs::read(&cached.wasm_path) {
@@ -183,7 +188,7 @@ impl PluginResolver {
             }
         }
 
-        let result = self.downloader.download(&manifest).await?;
+        let result = self.downloader.download(&wasm_url).await?;
 
         HashVerifier::verify(&result.bytes, &expected_hash)?;
 
@@ -700,7 +705,7 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempdir().unwrap();
         let cache = PluginCache::with_dir(temp_dir.path().to_path_buf());
 
         let resolver = PluginResolver::with_fetcher(fetcher)
@@ -763,7 +768,7 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = tempdir().unwrap();
         let cache = PluginCache::with_dir(temp_dir.path().to_path_buf());
 
         let resolver = PluginResolver::with_fetcher(fetcher)

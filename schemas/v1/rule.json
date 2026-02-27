@@ -256,13 +256,16 @@
       "type": "object",
       "properties": {
         "max_pages": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0
         },
         "max_http_response_bytes": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0
         },
         "max_var_bytes": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -275,6 +278,7 @@
     },
     "timeout_ms": {
       "type": "integer",
+      "minimum": 1,
       "description": "The plugin timeout in milliseconds"
     },
     "tsuzulint": {

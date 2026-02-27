@@ -1,7 +1,5 @@
-use extism_manifest::{HttpRequest, Wasm, WasmMetadata};
 use std::time::Instant;
 use tsuzulint_registry::downloader::WasmDownloader;
-use tsuzulint_registry::manifest::{ExternalRuleManifest, IsolationLevel, RuleMetadata};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -21,40 +19,7 @@ async fn main() {
         .mount(&mock_server)
         .await;
 
-    let manifest = ExternalRuleManifest {
-        rule: RuleMetadata {
-            name: "benchmark-rule".to_string(),
-            version: "1.0.0".to_string(),
-            description: None,
-            repository: None,
-            license: None,
-            authors: vec![],
-            keywords: vec![],
-            fixable: false,
-            node_types: vec![],
-            isolation_level: IsolationLevel::Global,
-            languages: vec![],
-            capabilities: vec![],
-        },
-        wasm: vec![Wasm::Url {
-            req: HttpRequest {
-                url: format!("{}/rule.wasm", mock_server.uri()),
-                headers: std::collections::BTreeMap::new(),
-                method: None,
-            },
-            meta: WasmMetadata {
-                name: None,
-                hash: None,
-            },
-        }],
-        allowed_hosts: None,
-        allowed_paths: None,
-        config: std::collections::BTreeMap::new(),
-        memory: None,
-        timeout_ms: None,
-        tsuzulint: None,
-        options: None,
-    };
+    let url = format!("{}/rule.wasm", mock_server.uri());
 
     // Use a large max size to allow download
     let downloader = WasmDownloader::with_max_size((file_size_mb + 10) as u64 * 1024 * 1024)
@@ -65,10 +30,7 @@ async fn main() {
 
     // Warm-up run
     print!("Warm-up... ");
-    let _ = downloader
-        .download(&manifest)
-        .await
-        .expect("Download failed");
+    let _ = downloader.download(&url).await.expect("Download failed");
     println!("Done.");
 
     let iterations = 10;
@@ -76,10 +38,7 @@ async fn main() {
 
     for i in 1..=iterations {
         let start = Instant::now();
-        let _ = downloader
-            .download(&manifest)
-            .await
-            .expect("Download failed");
+        let _ = downloader.download(&url).await.expect("Download failed");
         let duration = start.elapsed();
         durations.push(duration);
         println!("Iteration {}: {:.2?}", i, duration);
