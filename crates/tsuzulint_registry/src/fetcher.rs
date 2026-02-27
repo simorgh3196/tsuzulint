@@ -159,21 +159,21 @@ impl ManifestFetcher {
             )));
         }
 
-        let mut file = tokio::fs::File::open(path).await?;
+        let file = tokio::fs::File::open(path).await?;
         let mut content = String::new();
 
         // Read up to MAX_MANIFEST_SIZE + 1 bytes to detect if it exceeds the limit
         use tokio::io::AsyncReadExt;
-        let bytes_read = file.take(MAX_MANIFEST_SIZE + 1).read_to_string(&mut content).await?;
+        let bytes_read = file
+            .take(MAX_MANIFEST_SIZE + 1)
+            .read_to_string(&mut content)
+            .await?;
 
         if bytes_read as u64 > MAX_MANIFEST_SIZE {
-            return Err(FetchError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "Manifest file too large: exceeds limit of {} bytes",
-                    MAX_MANIFEST_SIZE
-                ),
-            )));
+            return Err(FetchError::IoError(std::io::Error::other(format!(
+                "Manifest file too large: exceeds limit of {} bytes",
+                MAX_MANIFEST_SIZE
+            ))));
         }
 
         let manifest = validate_manifest(&content)?;
@@ -312,11 +312,11 @@ mod tests {
 #[cfg(test)]
 mod tests_size_limit {
     use super::*;
+    use crate::http_client::SecureFetchError;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-    use tempfile::NamedTempFile;
-    use std::io::Write;
-    use crate::http_client::SecureFetchError;
 
     #[tokio::test]
     async fn test_fetch_url_too_large() {
@@ -337,7 +337,10 @@ mod tests_size_limit {
         let result = fetcher.fetch(&PluginSource::Url(url)).await;
 
         match result {
-            Err(FetchError::SecureFetchError(SecureFetchError::ResponseTooLarge { size: s, max: m })) => {
+            Err(FetchError::SecureFetchError(SecureFetchError::ResponseTooLarge {
+                size: s,
+                max: m,
+            })) => {
                 assert!(s > MAX_MANIFEST_SIZE);
                 assert_eq!(m, MAX_MANIFEST_SIZE);
             }
