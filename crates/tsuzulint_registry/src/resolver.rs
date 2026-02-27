@@ -11,6 +11,7 @@ use thiserror::Error;
 
 pub use crate::fetcher::PluginSource;
 pub use crate::spec::{ParseError, PluginSpec};
+use extism_manifest::Wasm;
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -46,6 +47,14 @@ pub struct PluginResolver {
     downloader: WasmDownloader,
 }
 
+fn extract_hash(wasm: &[Wasm]) -> Option<String> {
+    wasm.iter().find_map(|w| match w {
+        Wasm::Url { meta, .. } | Wasm::File { meta, .. } | Wasm::Data { meta, .. } => {
+            meta.hash.clone()
+        }
+    })
+}
+
 impl PluginResolver {
     pub fn new() -> Result<Self, ResolveError> {
         Ok(Self {
@@ -61,6 +70,11 @@ impl PluginResolver {
             cache: PluginCache::new()?,
             downloader: WasmDownloader::new()?,
         })
+    }
+
+    pub fn with_cache(mut self, cache: PluginCache) -> Self {
+        self.cache = cache;
+        self
     }
 
     pub fn with_downloader(mut self, downloader: WasmDownloader) -> Self {
@@ -135,10 +149,14 @@ impl PluginResolver {
         manifest: ExternalRuleManifest,
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
+        let expected_hash = extract_hash(&manifest.wasm).ok_or_else(|| {
+            ResolveError::SerializationError("Missing hash in external manifest".into())
+        })?;
+
         if let Some(cached) = self.cache.get(source, version) {
             match std::fs::read(&cached.wasm_path) {
                 Ok(cached_bytes) => {
-                    if HashVerifier::verify(&cached_bytes, &manifest.artifacts.sha256).is_ok() {
+                    if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
                             wasm_path: cached.wasm_path,
                             manifest_path: cached.manifest_path,
@@ -164,7 +182,7 @@ impl PluginResolver {
 
         let result = self.downloader.download(&manifest).await?;
 
-        HashVerifier::verify(&result.bytes, &manifest.artifacts.sha256)?;
+        HashVerifier::verify(&result.bytes, &expected_hash)?;
 
         let manifest_json = serde_json::to_string(&manifest)
             .map_err(|e| ResolveError::SerializationError(e.to_string()))?;
@@ -187,14 +205,31 @@ impl PluginResolver {
         manifest: &ExternalRuleManifest,
         alias: String,
     ) -> Result<ResolvedPlugin, ResolveError> {
-        let wasm_relative = Path::new(&manifest.artifacts.wasm);
+        let wasm_file = manifest
+            .wasm
+            .iter()
+            .find_map(|w| match w {
+                Wasm::File { path, .. } => Some(path.clone()),
+                Wasm::Url { .. } | Wasm::Data { .. } => None,
+            })
+            .ok_or_else(|| {
+                ResolveError::SerializationError(
+                    "Local resolution requires a file path source (Wasm::File), but none was found in manifest".into()
+                )
+            })?;
+
+        let wasm_relative = Path::new(&wasm_file);
         let parent = manifest_path.parent().unwrap_or(Path::new("."));
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
         let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
 
-        HashVerifier::verify(&bytes, &manifest.artifacts.sha256)?;
+        let expected_hash = extract_hash(&manifest.wasm).ok_or_else(|| {
+            ResolveError::SerializationError("Missing hash in external manifest".into())
+        })?;
+
+        HashVerifier::verify(&bytes, &expected_hash)?;
 
         Ok(ResolvedPlugin {
             wasm_path,
@@ -226,10 +261,10 @@ mod tests {
                 "version": "1.0.0",
                 "isolation_level": "global"
             },
-            "artifacts": {
-                "wasm": format!("{}/rule.wasm", mock_server.uri()),
-                "sha256": wasm_hash
-            }
+            "wasm": [{
+                "url": format!("{}/rule.wasm", mock_server.uri()),
+                "hash": wasm_hash
+            }]
         });
 
         Mock::given(method("GET"))
@@ -254,9 +289,11 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        let dir = tempdir().unwrap();
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(PluginCache::with_dir(dir.path()));
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -278,10 +315,10 @@ mod tests {
                 "name": "test-rule",
                 "version": "1.0.0",
             },
-            "artifacts": {
-                "wasm": format!("{}/rule.wasm", mock_server.uri()),
-                "sha256": wasm_hash
-            }
+            "wasm": [{
+                "url": format!("{}/rule.wasm", mock_server.uri()),
+                "hash": wasm_hash
+            }]
         });
 
         Mock::given(method("GET"))
@@ -301,9 +338,11 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        let dir = tempdir().unwrap();
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(PluginCache::with_dir(dir.path()));
 
         let spec = PluginSpec::parse(&json!({
             "url": format!("{}/manifest.json", mock_server.uri()),
@@ -332,14 +371,17 @@ mod tests {
                 "name": "local-rule",
                 "version": "1.0.0",
             },
-            "artifacts": {
-                "wasm": "rule.wasm",
-                "sha256": HashVerifier::compute(wasm_content)
-            }
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": HashVerifier::compute(wasm_content)
+            }]
         });
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
-        let resolver = PluginResolver::new().unwrap();
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
         let spec = PluginSpec::parse(&json!({
             "path": manifest_path.to_str().unwrap(),
             "as": "local-alias"
@@ -365,14 +407,17 @@ mod tests {
                 "name": "local-rule",
                 "version": "1.0.0",
             },
-            "artifacts": {
-                "wasm": "nonexistent.wasm",
-                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-            }
+            "wasm": [{
+                "path": "nonexistent.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
         });
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
-        let resolver = PluginResolver::new().unwrap();
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
         let spec = PluginSpec::parse(&json!({
             "path": manifest_path.to_str().unwrap(),
             "as": "local-alias"
@@ -403,15 +448,18 @@ mod tests {
                 "name": "local-rule",
                 "version": "1.0.0",
             },
-            "artifacts": {
-                "wasm": "rule.wasm",
-                "sha256": wrong_hash
-            }
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": wrong_hash
+            }]
         });
 
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
-        let resolver = PluginResolver::new().unwrap();
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
         let spec = PluginSpec::parse(&json!({
             "path": manifest_path.to_str().unwrap(),
             "as": "local-alias"
@@ -438,15 +486,18 @@ mod tests {
                 "name": "malicious-rule",
                 "version": "1.0.0",
             },
-            "artifacts": {
-                "wasm": "../secret.wasm",
-                "sha256": HashVerifier::compute(b"secret data")
-            }
+            "wasm": [{
+                "path": "../secret.wasm",
+                "hash": HashVerifier::compute(b"secret data")
+            }]
         });
 
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
-        let resolver = PluginResolver::new().unwrap();
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
         let spec = PluginSpec::parse(&json!({
             "path": manifest_path.to_str().unwrap(),
             "as": "malicious"
@@ -462,7 +513,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_url_fail_fast_missing_alias() {
-        let resolver = PluginResolver::new().unwrap();
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
         let spec = PluginSpec {
             source: PluginSource::Url("https://example.com/manifest.json".to_string()),
             alias: None,
@@ -485,14 +539,17 @@ mod tests {
 
         let manifest = json!({
             "rule": { "name": "auto-alias", "version": "1.0.0" },
-            "artifacts": {
-                "wasm": "rule.wasm",
-                "sha256": HashVerifier::compute(wasm_content)
-            }
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": HashVerifier::compute(wasm_content)
+            }]
         });
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
-        let resolver = PluginResolver::new().unwrap();
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
         let spec = PluginSpec {
             source: PluginSource::Path(manifest_path),
             alias: None,
@@ -515,14 +572,17 @@ mod tests {
 
         let manifest = json!({
             "rule": { "name": "dir-rule", "version": "1.0.0" },
-            "artifacts": {
-                "wasm": "rule.wasm",
-                "sha256": HashVerifier::compute(wasm_content)
-            }
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": HashVerifier::compute(wasm_content)
+            }]
         });
         std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
 
-        let resolver = PluginResolver::new().unwrap();
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
 
         let spec = PluginSpec {
             source: PluginSource::Path(dir.path().to_path_buf()),
@@ -549,10 +609,10 @@ mod tests {
                 "version": "1.0.0",
                 "isolation_level": "global"
             },
-            "artifacts": {
-                "wasm": format!("{}/rule.wasm", mock_server.uri()),
-                "sha256": wasm_hash
-            }
+            "wasm": [{
+                "url": format!("{}/rule.wasm", mock_server.uri()),
+                "hash": wasm_hash
+            }]
         });
 
         Mock::given(method("GET"))
@@ -577,9 +637,11 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        let dir = tempdir().unwrap();
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(PluginCache::with_dir(dir.path()));
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -605,10 +667,10 @@ mod tests {
                 "version": "1.0.0",
                 "isolation_level": "global"
             },
-            "artifacts": {
-                "wasm": format!("{}/rule.wasm", mock_server.uri()),
-                "sha256": wasm_hash
-            }
+            "wasm": [{
+                "url": format!("{}/rule.wasm", mock_server.uri()),
+                "hash": wasm_hash
+            }]
         });
 
         Mock::given(method("GET"))
@@ -633,9 +695,13 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path().to_path_buf());
+
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(cache);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 
@@ -664,10 +730,10 @@ mod tests {
                 "version": "1.0.0",
                 "isolation_level": "global"
             },
-            "artifacts": {
-                "wasm": format!("{}/rule.wasm", mock_server.uri()),
-                "sha256": wasm_hash
-            }
+            "wasm": [{
+                "url": format!("{}/rule.wasm", mock_server.uri()),
+                "hash": wasm_hash
+            }]
         });
 
         Mock::given(method("GET"))
@@ -692,9 +758,13 @@ mod tests {
             .expect("Failed to create downloader")
             .allow_local(true);
 
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path().to_path_buf());
+
         let resolver = PluginResolver::with_fetcher(fetcher)
             .expect("Failed to create resolver")
-            .with_downloader(downloader);
+            .with_downloader(downloader)
+            .with_cache(cache);
 
         let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
 

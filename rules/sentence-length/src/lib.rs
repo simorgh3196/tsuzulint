@@ -64,6 +64,15 @@ pub fn get_manifest() -> FnResult<RuleManifest> {
 /// Lints a node for sentence length.
 #[plugin_fn]
 pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
+    do_lint(request)
+}
+
+/// Core linting logic extracted from `lint`.
+///
+/// This separation allows for native unit testing. The `#[plugin_fn]` macro
+/// rewrites the function signature for Wasm exports, which prevents direct
+/// invocation in `#[cfg(test)]` environments when building natively.
+fn do_lint(request: LintRequest) -> FnResult<LintResponse> {
     let mut diagnostics = Vec::new();
 
     // Only process Str nodes
@@ -104,7 +113,6 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tsuzulint_rule_pdk::AstNode;
 
-    #[cfg(target_arch = "wasm32")]
     fn create_request_with_config<T: serde::Serialize>(text: &str, config: &T) -> LintRequest {
         let mut request = LintRequest::single(
             AstNode::new("Str", Some([0, text.len() as u32])),
@@ -114,13 +122,12 @@ mod tests {
         request
     }
 
-    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_lint_simple() {
         let text = "Short sentence. Very long sentence that exceeds the limit definitely.";
         let request = create_request_with_config(text, &serde_json::json!({ "max": 20 }));
 
-        let response = lint(request).unwrap();
+        let response = do_lint(request).unwrap();
 
         // "Short sentence." is 15 chars (fine)
         // "Very long sentence..." is > 20 chars (warning)
@@ -130,5 +137,11 @@ mod tests {
                 .message
                 .contains("Sentence is too long")
         );
+    }
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+        assert_eq!(config.max, 100);
     }
 }

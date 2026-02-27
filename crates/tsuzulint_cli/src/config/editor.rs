@@ -7,6 +7,7 @@ use jsonc_parser::{CollectOptions, ParseOptions};
 use miette::{IntoDiagnostic, Result};
 use tracing::info;
 use tsuzulint_core::LinterConfig;
+use tsuzulint_registry::manifest::ExternalRuleManifest;
 use tsuzulint_registry::resolver::PluginSpec;
 
 use crate::commands::init::run_init;
@@ -20,7 +21,7 @@ struct ConfigEdit {
 pub fn update_config_with_plugin(
     spec: &PluginSpec,
     alias: &str,
-    manifest: &tsuzulint_registry::manifest::ExternalRuleManifest,
+    manifest: &ExternalRuleManifest,
     config_path: Option<PathBuf>,
 ) -> Result<()> {
     let path_to_use = if let Some(path) = config_path {
@@ -84,7 +85,7 @@ pub fn update_config_with_plugin(
                 let prefix = if is_empty { "\n    " } else { ",\n    " };
                 edits.push(ConfigEdit {
                     pos: end_pos,
-                    text: format!("{}{}", prefix, rule_def_str),
+                    text: format!("{}\n  ", format!("{}{}", prefix, rule_def_str).trim_end()),
                     order: 0,
                 });
             } else {
@@ -116,7 +117,7 @@ pub fn update_config_with_plugin(
                 let prefix = if is_empty { "\n    " } else { ",\n    " };
                 edits.push(ConfigEdit {
                     pos: end_pos,
-                    text: format!("{}{}", prefix, options_str),
+                    text: format!("{}\n  ", format!("{}{}", prefix, options_str).trim_end()),
                     order: 0,
                 });
             } else {
@@ -172,7 +173,7 @@ pub fn update_config_with_plugin(
 fn generate_rule_def(
     spec: &PluginSpec,
     alias: &str,
-    manifest: &tsuzulint_registry::manifest::ExternalRuleManifest,
+    manifest: &ExternalRuleManifest,
 ) -> Result<String> {
     use tsuzulint_registry::resolver::PluginSource;
 
@@ -184,7 +185,7 @@ fn generate_rule_def(
             if let Some(a) = &spec.alias {
                 let alias_json = serde_json::to_string(a).into_diagnostic()?;
                 Ok(format!(
-                    r#"{{ "github": {}, "as": {} }}"#,
+                    "{{\n      \"github\": {},\n      \"as\": {}\n    }}",
                     source_json, alias_json
                 ))
             } else {
@@ -195,7 +196,7 @@ fn generate_rule_def(
             let url_json = serde_json::to_string(url).into_diagnostic()?;
             let alias_json = serde_json::to_string(alias).into_diagnostic()?;
             Ok(format!(
-                r#"{{ "url": {}, "as": {} }}"#,
+                "{{\n      \"url\": {},\n      \"as\": {}\n    }}",
                 url_json, alias_json
             ))
         }
@@ -203,17 +204,14 @@ fn generate_rule_def(
             let path_json = serde_json::to_string(path).into_diagnostic()?;
             let alias_json = serde_json::to_string(alias).into_diagnostic()?;
             Ok(format!(
-                r#"{{ "path": {}, "as": {} }}"#,
+                "{{\n      \"path\": {},\n      \"as\": {}\n    }}",
                 path_json, alias_json
             ))
         }
     }
 }
 
-fn generate_options_def(
-    alias: &str,
-    manifest: &tsuzulint_registry::manifest::ExternalRuleManifest,
-) -> Result<String> {
+fn generate_options_def(alias: &str, manifest: &ExternalRuleManifest) -> Result<String> {
     let default_options = if let Some(opts) = &manifest.options {
         opts.clone()
     } else {
@@ -228,10 +226,9 @@ fn generate_options_def(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use extism_manifest::{Wasm, WasmMetadata};
     use std::io::Write;
-    use tsuzulint_registry::manifest::{
-        Artifacts, ExternalRuleManifest, IsolationLevel, RuleMetadata,
-    };
+    use tsuzulint_registry::manifest::{ExternalRuleManifest, IsolationLevel, RuleMetadata};
     use tsuzulint_registry::resolver::{PluginSource, PluginSpec};
 
     fn create_dummy_manifest() -> ExternalRuleManifest {
@@ -250,11 +247,21 @@ mod tests {
                 languages: vec![],
                 capabilities: vec![],
             },
-            artifacts: Artifacts {
-                wasm: "test.wasm".to_string(),
-                sha256: "hash".to_string(),
-            },
-            permissions: None,
+            wasm: vec![Wasm::File {
+                path: std::path::PathBuf::from("test.wasm"),
+                meta: WasmMetadata {
+                    name: None,
+                    hash: Some(
+                        "1111111111111111111111111111111111111111111111111111111111111111"
+                            .to_string(),
+                    ),
+                },
+            }],
+            allowed_hosts: None,
+            allowed_paths: None,
+            config: std::collections::BTreeMap::new(),
+            memory: None,
+            timeout_ms: None,
             tsuzulint: None,
             options: Some(serde_json::json!({ "foo": "bar" })),
         }

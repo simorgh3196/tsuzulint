@@ -1457,12 +1457,7 @@ mod tests {
         let mut request = LintRequest::single(AstNode::new("Str", None), "test".to_string());
         request.config = Some(vec![0xFF, 0xFF]);
 
-        #[derive(Debug, Deserialize)]
-        struct TestConfig {
-            required_field: String,
-        }
-
-        let result: Result<TestConfig, _> = request.get_config();
+        let result: Result<String, _> = request.get_config();
         assert!(result.is_err());
     }
 

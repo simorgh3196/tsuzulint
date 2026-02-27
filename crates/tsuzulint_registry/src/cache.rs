@@ -118,15 +118,20 @@ impl PluginCache {
 
         std::fs::write(&wasm_path, wasm_bytes)?;
 
-        // Rewrite artifacts.wasm to "rule.wasm" for the cached manifest
+        // Rewrite wasm[0].path to "rule.wasm" for the cached manifest
         // This ensures the cached manifest always references the local file name,
         // regardless of the original source (URL, relative path, etc.)
         let mut manifest_to_write = manifest_content.to_string();
         match serde_json::from_str::<serde_json::Value>(manifest_content) {
             Ok(mut json) => {
-                let wasm_artifact = json.get_mut("artifacts").and_then(|a| a.get_mut("wasm"));
-                if let Some(wasm) = wasm_artifact {
-                    *wasm = serde_json::Value::String("rule.wasm".to_string());
+                if let Some(array) = json.get_mut("wasm").and_then(|w| w.as_array_mut())
+                    && let Some(obj) = array.first_mut().and_then(|w| w.as_object_mut())
+                {
+                    obj.remove("url");
+                    obj.insert(
+                        "path".to_string(),
+                        serde_json::Value::String("rule.wasm".to_string()),
+                    );
                     match serde_json::to_string_pretty(&json) {
                         Ok(rewritten) => {
                             manifest_to_write = rewritten;
@@ -334,10 +339,10 @@ mod tests {
         // Manifest with URL artifact
         let manifest_content = r#"{
             "rule": { "name": "url-rule", "version": "1.0.0" },
-            "artifacts": {
-                "wasm": "https://example.com/rule.wasm",
-                "sha256": "hash"
-            }
+            "wasm": [{
+                "path": "https://example.com/rule.wasm",
+                "hash": "hash"
+            }]
         }"#;
 
         let stored = cache
@@ -348,7 +353,7 @@ mod tests {
         let saved_content = fs::read_to_string(&stored.manifest_path).unwrap();
         let saved_json: serde_json::Value = serde_json::from_str(&saved_content).unwrap();
 
-        let wasm_path = saved_json["artifacts"]["wasm"].as_str().unwrap();
+        let wasm_path = saved_json["wasm"][0]["path"].as_str().unwrap();
         assert_eq!(wasm_path, "rule.wasm");
     }
 
@@ -377,10 +382,10 @@ mod tests {
         // Manifest with relative path (not URL)
         let manifest_content = r#"{
             "rule": { "name": "local-artifact", "version": "1.0.0" },
-            "artifacts": {
-                "wasm": "local/rule.wasm",
-                "sha256": "hash"
-            }
+            "wasm": [{
+                "path": "local/rule.wasm",
+                "hash": "hash"
+            }]
         }"#;
 
         let stored = cache
@@ -391,7 +396,7 @@ mod tests {
         let saved_content = fs::read_to_string(&stored.manifest_path).unwrap();
         let saved_json: serde_json::Value = serde_json::from_str(&saved_content).unwrap();
 
-        let wasm_path = saved_json["artifacts"]["wasm"].as_str().unwrap();
+        let wasm_path = saved_json["wasm"][0]["path"].as_str().unwrap();
         assert_eq!(wasm_path, "rule.wasm");
     }
 

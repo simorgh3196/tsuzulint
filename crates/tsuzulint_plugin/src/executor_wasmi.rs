@@ -12,7 +12,7 @@ use wasmi::{
     TypedFunc,
 };
 
-use crate::executor::{LoadResult, RuleExecutor};
+use crate::executor::{LoadResult, PluginOptions, RuleExecutor};
 use crate::{PluginError, RuleManifest};
 
 /// Default memory limit for WASM instances (128 MB).
@@ -136,7 +136,11 @@ impl Default for WasmiExecutor {
 }
 
 impl RuleExecutor for WasmiExecutor {
-    fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
+    fn load(
+        &mut self,
+        wasm_bytes: &[u8],
+        _options: PluginOptions,
+    ) -> Result<LoadResult, PluginError> {
         info!("Loading WASM rule ({} bytes) with wasmi", wasm_bytes.len());
 
         // Compile the module
@@ -342,7 +346,7 @@ mod tests {
         let mut executor = WasmiExecutor::new();
         let wasm = wat_to_wasm(&valid_rule_wat());
 
-        let result = executor.load(&wasm);
+        let result = executor.load(&wasm, PluginOptions::default());
         assert!(result.is_ok());
 
         let loaded = result.unwrap();
@@ -356,7 +360,9 @@ mod tests {
     fn test_executor_lint_valid() {
         let mut executor = WasmiExecutor::new();
         let wasm = wat_to_wasm(&valid_rule_wat());
-        executor.load(&wasm).expect("Failed to load rule");
+        executor
+            .load(&wasm, PluginOptions::default())
+            .expect("Failed to load rule");
 
         let result = executor.call_lint("test-rule", b"{\"text\":\"hello\"}");
         assert!(result.is_ok());
@@ -384,7 +390,7 @@ mod tests {
         "#,
         );
 
-        let result = executor.load(&wasm);
+        let result = executor.load(&wasm, PluginOptions::default());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("lint not found"));
     }
@@ -409,7 +415,7 @@ mod tests {
         "#,
         );
 
-        let result = executor.load(&wasm);
+        let result = executor.load(&wasm, PluginOptions::default());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid manifest"));
     }
@@ -441,7 +447,9 @@ mod tests {
             "#,
         ));
 
-        executor.load(&wasm).expect("Failed to load rule");
+        executor
+            .load(&wasm, PluginOptions::default())
+            .expect("Failed to load rule");
 
         let result = executor.call_lint("error-rule", b"{}");
         assert!(result.is_err());
@@ -459,7 +467,9 @@ mod tests {
         // Note: implementing full echo in WAT is tedious, so we'll just accept the input
         // and return a static success to prove it didn't crash on allocation/write.
         let wasm = wat_to_wasm(&valid_rule_wat());
-        executor.load(&wasm).expect("Failed to load rule");
+        executor
+            .load(&wasm, PluginOptions::default())
+            .expect("Failed to load rule");
 
         let large_input = "a".repeat(1024 * 10); // 10KB
         let input_json = format!("{{\"text\":\"{}\"}}", large_input);
@@ -484,7 +494,9 @@ mod tests {
     fn test_executor_unload_returns_true_after_load() {
         let mut executor = WasmiExecutor::new();
         let wasm = wat_to_wasm(&valid_rule_wat());
-        executor.load(&wasm).expect("Failed to load rule");
+        executor
+            .load(&wasm, PluginOptions::default())
+            .expect("Failed to load rule");
 
         assert!(executor.unload("test-rule"));
         assert!(executor.loaded_rules().is_empty());
@@ -494,7 +506,9 @@ mod tests {
     fn test_executor_unload_all() {
         let mut executor = WasmiExecutor::new();
         let wasm = wat_to_wasm(&valid_rule_wat());
-        executor.load(&wasm).expect("Failed to load rule");
+        executor
+            .load(&wasm, PluginOptions::default())
+            .expect("Failed to load rule");
 
         assert_eq!(executor.loaded_rules().len(), 1);
         executor.unload_all();
@@ -504,7 +518,7 @@ mod tests {
     #[test]
     fn test_executor_empty_wasm() {
         let mut executor = WasmiExecutor::new();
-        let result = executor.load(&[]);
+        let result = executor.load(&[], PluginOptions::default());
         assert!(result.is_err());
     }
 
@@ -512,7 +526,7 @@ mod tests {
     fn test_executor_invalid_wasm_bytes() {
         let mut executor = WasmiExecutor::new();
         let invalid_wasm = b"not wasm at all";
-        let result = executor.load(invalid_wasm);
+        let result = executor.load(invalid_wasm, PluginOptions::default());
         assert!(result.is_err());
     }
 
@@ -522,7 +536,9 @@ mod tests {
 
         // Load first rule
         let wasm1 = wat_to_wasm(&valid_rule_wat());
-        executor.load(&wasm1).expect("Failed to load rule 1");
+        executor
+            .load(&wasm1, PluginOptions::default())
+            .expect("Failed to load rule 1");
 
         // Load second rule (different name)
         let manifest2 =
@@ -550,7 +566,9 @@ mod tests {
             )
             "#,
         ));
-        executor.load(&wasm2).expect("Failed to load rule 2");
+        executor
+            .load(&wasm2, PluginOptions::default())
+            .expect("Failed to load rule 2");
 
         assert_eq!(executor.loaded_rules().len(), 2);
         assert!(executor.loaded_rules().contains(&"test-rule"));
@@ -591,7 +609,9 @@ mod tests {
             "#,
         ));
 
-        executor.load(&wasm).expect("Failed to load rule");
+        executor
+            .load(&wasm, PluginOptions::default())
+            .expect("Failed to load rule");
         let result = executor.call_lint("invalid-utf8", b"{}");
         // Should handle the UTF-8 error (may succeed with replacement chars or fail gracefully)
         // The exact behavior depends on String::from_utf8_lossy vs from_utf8
@@ -617,7 +637,7 @@ mod tests {
         );
 
         // Loading should fail because the initial memory exceeds the limit
-        let result = executor.load(&wasm);
+        let result = executor.load(&wasm, PluginOptions::default());
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
@@ -661,7 +681,9 @@ mod tests {
             "#,
         ));
 
-        executor.load(&wasm).expect("Failed to load rule");
+        executor
+            .load(&wasm, PluginOptions::default())
+            .expect("Failed to load rule");
 
         // Should return an error (trap) due to fuel exhaustion
         let result = executor.call_lint("infinite-loop", b"{}");

@@ -8,10 +8,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use extism::{Manifest, Plugin, PluginBuilder, Wasm};
+use extism_manifest::MemoryOptions;
 use sha2::{Digest, Sha256};
 use tracing::{debug, info};
 
-use crate::executor::{LoadResult, RuleExecutor};
+use crate::executor::{LoadResult, PluginOptions, RuleExecutor};
 use crate::{PluginError, RuleManifest};
 
 /// Default memory limit for WASM instances (128 MB = 2048 pages).
@@ -73,49 +74,40 @@ impl ExtismExecutor {
         }
     }
 
-    /// Sets the timeout for WASM execution.
-    #[cfg(all(test, feature = "test-utils"))]
-    pub fn with_timeout(mut self, timeout_ms: u64) -> Self {
-        self.timeout_ms = timeout_ms;
-        self
-    }
+    /// Configures the manifest with security limits and options.
+    fn configure_manifest(&self, mut manifest: Manifest, options: &PluginOptions) -> Manifest {
+        // Set execution timeout
+        manifest.timeout_ms = options.timeout_ms.or(Some(self.timeout_ms));
 
-    /// Sets the fuel limit for WASM execution.
-    #[cfg(all(test, feature = "test-utils"))]
-    pub fn with_fuel_limit(mut self, limit: u64) -> Self {
-        self.fuel_limit = Some(limit);
-        self
-    }
-
-    /// Configures the manifest with security limits.
-    fn configure_manifest(&self, mut manifest: Manifest) -> Manifest {
-        // Set execution timeout to prevent infinite loops
-        manifest.timeout_ms = Some(self.timeout_ms);
-
-        // Set memory limits to prevent DoS via memory exhaustion
-        manifest.memory = extism_manifest::MemoryOptions {
-            max_pages: Some(DEFAULT_MEMORY_MAX_PAGES),
-            max_http_response_bytes: Some(0), // Deny HTTP response buffering
+        // Set memory limits
+        manifest.memory = MemoryOptions {
+            max_pages: options.memory_max_pages.or(Some(DEFAULT_MEMORY_MAX_PAGES)),
+            max_http_response_bytes: options.memory_max_http_response_bytes.or(Some(0)),
             max_var_bytes: Some(1024 * 1024), // Limit variable storage to 1MB
         };
 
-        // Deny all network access
-        manifest.allowed_hosts = Some(vec![]);
+        // Set allowed network hosts
+        manifest.allowed_hosts = options.allowed_hosts.clone().or(Some(vec![]));
 
-        // Deny all file system access
-        manifest.allowed_paths = Some(BTreeMap::new());
+        // Set allowed file system paths
+        manifest.allowed_paths = options.allowed_paths.clone().or(Some(BTreeMap::new()));
 
-        // Clear configuration to prevent environment leakage
-        manifest.config = BTreeMap::new();
+        // Set configuration variables
+        manifest.config = options.config.clone();
 
         manifest
     }
 
-    fn build_plugin(&self, source: &RuleSource) -> Result<Plugin, PluginError> {
+    fn build_plugin(
+        &self,
+        source: &RuleSource,
+        options: &PluginOptions,
+    ) -> Result<Plugin, PluginError> {
         let wasm = source.to_wasm();
         let manifest = Manifest::new([wasm]);
-        let manifest = self.configure_manifest(manifest);
+        let manifest = self.configure_manifest(manifest, options);
 
+        // Fetch Wasmtime JIT cache configuration if available
         let mut builder = PluginBuilder::new(manifest).with_wasi(true);
 
         if let Some(limit) = self.fuel_limit {
@@ -137,8 +129,12 @@ impl ExtismExecutor {
             .map_err(|e| PluginError::invalid_manifest(e.to_string()))
     }
 
-    fn load_rule(&mut self, source: RuleSource) -> Result<LoadResult, PluginError> {
-        let mut plugin = self.build_plugin(&source)?;
+    fn load_rule(
+        &mut self,
+        source: RuleSource,
+        options: PluginOptions,
+    ) -> Result<LoadResult, PluginError> {
+        let mut plugin = self.build_plugin(&source, &options)?;
         let rule_manifest = Self::fetch_manifest(&mut plugin)?;
 
         debug!(
@@ -169,20 +165,31 @@ impl Default for ExtismExecutor {
 }
 
 impl RuleExecutor for ExtismExecutor {
-    fn load(&mut self, wasm_bytes: &[u8]) -> Result<LoadResult, PluginError> {
+    fn load(
+        &mut self,
+        wasm_bytes: &[u8],
+        options: PluginOptions,
+    ) -> Result<LoadResult, PluginError> {
         info!("Loading WASM rule ({} bytes)", wasm_bytes.len());
 
         let mut hasher = Sha256::new();
         hasher.update(wasm_bytes);
         let hash = hex::encode(hasher.finalize());
 
-        self.load_rule(RuleSource::Bytes {
-            wasm: Arc::from(wasm_bytes),
-            hash,
-        })
+        self.load_rule(
+            RuleSource::Bytes {
+                wasm: Arc::from(wasm_bytes),
+                hash,
+            },
+            options,
+        )
     }
 
-    fn load_file(&mut self, path: &Path) -> Result<LoadResult, PluginError> {
+    fn load_file(
+        &mut self,
+        path: &Path,
+        options: PluginOptions,
+    ) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
 
         // Read the file to calculate the hash, but don't keep the bytes in memory
@@ -194,10 +201,13 @@ impl RuleExecutor for ExtismExecutor {
         hasher.update(&wasm_bytes);
         let hash = hex::encode(hasher.finalize());
 
-        self.load_rule(RuleSource::File {
-            path: path.to_path_buf(),
-            hash,
-        })
+        self.load_rule(
+            RuleSource::File {
+                path: path.to_path_buf(),
+                hash,
+            },
+            options,
+        )
     }
 
     fn configure(

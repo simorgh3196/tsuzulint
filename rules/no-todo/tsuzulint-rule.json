@@ -6,27 +6,43 @@
     "description": "Disallow TODO/FIXME comments",
     "repository": "https://github.com/simorgh3196/tsuzulint",
     "license": "MIT",
-    "keywords": ["todo", "fixme", "comment"],
+    "keywords": [
+      "todo",
+      "fixme",
+      "comment"
+    ],
     "fixable": false,
-    "node_types": ["Str"],
+    "node_types": [
+      "Str"
+    ],
     "isolation_level": "block"
   },
-  "artifacts": {
-    "wasm": "../target/wasm32-wasip1/release/tsuzulint_rule_no_todo.wasm",
-    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
-  },
+  "wasm": [
+    {
+      "url": "../target/wasm32-wasip1/release/tsuzulint_rule_no_todo.wasm",
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
   "options": {
     "type": "object",
     "properties": {
       "patterns": {
         "type": "array",
-        "items": { "type": "string" },
-        "default": ["TODO:", "FIXME:", "HACK:"],
+        "items": {
+          "type": "string"
+        },
+        "default": [
+          "TODO:",
+          "FIXME:",
+          "HACK:"
+        ],
         "description": "Patterns to detect"
       },
       "ignore_patterns": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "default": [],
         "description": "Patterns to ignore"
       },

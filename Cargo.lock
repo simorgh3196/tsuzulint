@@ -4456,6 +4456,7 @@ dependencies = [
  "assert_cmd",
  "assert_fs",
  "clap",
+ "extism-manifest",
  "jsonc-parser",
  "libc",
  "miette",
@@ -4520,6 +4521,7 @@ dependencies = [
  "blake3",
  "crossbeam-channel",
  "dirs",
+ "extism-manifest",
  "globset",
  "ignore",
  "insta",
@@ -4561,6 +4563,7 @@ dependencies = [
 name = "tsuzulint_manifest"
 version = "0.1.0"
 dependencies = [
+ "extism-manifest",
  "hex",
  "jsonschema",
  "proptest",
@@ -4611,6 +4614,7 @@ name = "tsuzulint_registry"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "extism-manifest",
  "futures-util",
  "miette",
  "proptest",

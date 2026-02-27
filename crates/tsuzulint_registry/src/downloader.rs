@@ -2,6 +2,7 @@
 
 use crate::http_client::{SecureFetchError, SecureHttpClient};
 use crate::manifest::{ExternalRuleManifest, HashVerifier};
+use extism_manifest::Wasm;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -98,21 +99,28 @@ impl WasmDownloader {
     /// 2. Downloads the WASM binary with size limit check
     /// 3. Computes the SHA256 hash after download
     ///
-    /// Note: Hash verification against `manifest.artifacts.sha256` is the caller's responsibility.
+    /// Note: Hash verification against `manifest.wasm[..].hash` is the caller's responsibility.
     pub async fn download(
         &self,
         manifest: &ExternalRuleManifest,
     ) -> Result<DownloadResult, DownloadError> {
-        let url = self.resolve_url(manifest);
+        let url = self.resolve_url(manifest)?;
         self.download_from_url(&url).await
     }
 
     /// Resolve the download URL by replacing `{version}` placeholder.
-    fn resolve_url(&self, manifest: &ExternalRuleManifest) -> String {
-        manifest
-            .artifacts
-            .wasm
-            .replace("{version}", &manifest.rule.version)
+    fn resolve_url(&self, manifest: &ExternalRuleManifest) -> Result<String, DownloadError> {
+        for w in &manifest.wasm {
+            match w {
+                Wasm::Url { req, .. } => {
+                    return Ok(req.url.replace("{version}", &manifest.rule.version));
+                }
+                Wasm::File { .. } | Wasm::Data { .. } => {}
+            }
+        }
+        Err(DownloadError::NotFound(
+            "No HTTP URL found in manifest wasm array".to_string(),
+        ))
     }
 
     /// Download WASM from a resolved URL.
@@ -143,6 +151,7 @@ impl WasmDownloader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use extism_manifest::{HttpRequest, WasmMetadata};
     use reqwest::StatusCode;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -163,11 +172,22 @@ mod tests {
                 languages: vec![],
                 capabilities: vec![],
             },
-            artifacts: crate::manifest::Artifacts {
-                wasm: wasm_url,
-                sha256: "ignored_in_download_method".to_string(),
-            },
-            permissions: None,
+            wasm: vec![Wasm::Url {
+                req: HttpRequest {
+                    url: wasm_url,
+                    headers: std::collections::BTreeMap::new(),
+                    method: None,
+                },
+                meta: WasmMetadata {
+                    name: None,
+                    hash: Some("0".repeat(64)),
+                },
+            }],
+            allowed_hosts: None,
+            allowed_paths: None,
+            config: std::collections::BTreeMap::new(),
+            memory: None,
+            timeout_ms: None,
             tsuzulint: None,
             options: None,
         }
@@ -190,17 +210,28 @@ mod tests {
                 languages: vec![],
                 capabilities: vec![],
             },
-            artifacts: crate::manifest::Artifacts {
-                wasm: "https://example.com/releases/v{version}/rule.wasm".to_string(),
-                sha256: "0".repeat(64),
-            },
-            permissions: None,
+            wasm: vec![Wasm::Url {
+                req: HttpRequest {
+                    url: "https://example.com/releases/v{version}/rule.wasm".to_string(),
+                    headers: std::collections::BTreeMap::new(),
+                    method: None,
+                },
+                meta: WasmMetadata {
+                    name: None,
+                    hash: Some("0".repeat(64)),
+                },
+            }],
+            allowed_hosts: None,
+            allowed_paths: None,
+            config: std::collections::BTreeMap::new(),
+            memory: None,
+            timeout_ms: None,
             tsuzulint: None,
             options: None,
         };
 
         let downloader = WasmDownloader::new()?;
-        let url = downloader.resolve_url(&manifest);
+        let url = downloader.resolve_url(&manifest)?;
 
         assert_eq!(url, "https://example.com/releases/v1.2.3/rule.wasm");
         Ok(())

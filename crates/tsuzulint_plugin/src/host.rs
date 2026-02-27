@@ -12,7 +12,7 @@ use tracing::warn;
 
 // RuleExecutor trait is used by the Executor type alias
 #[allow(unused_imports)]
-use crate::executor::RuleExecutor;
+use crate::executor::{PluginOptions, RuleExecutor};
 use crate::{Diagnostic, PluginError, RuleManifest};
 use tsuzulint_text::{Sentence, Token};
 
@@ -75,6 +75,25 @@ impl PreparedLintRequest {
     }
 }
 
+fn convert_node_to_value<T: Serialize>(node: &T) -> Result<serde_json::Value, PluginError> {
+    // Convert node to serde_json::Value for proper MsgPack serialization
+    let node_value = serde_json::to_value(node)
+        .map_err(|e| PluginError::call(format!("Failed to convert node: {}", e)))?;
+
+    // If the node is a string (from RawValue), parse it as JSON if it looks like an object/array
+    if let serde_json::Value::String(s) = node_value {
+        let trimmed = s.trim_start();
+        if trimmed.starts_with('{') || trimmed.starts_with('[') {
+            serde_json::from_str(&s)
+                .map_err(|e| PluginError::call(format!("Failed to parse node JSON: {}", e)))
+        } else {
+            Ok(serde_json::Value::String(s))
+        }
+    } else {
+        Ok(node_value)
+    }
+}
+
 /// Host for loading and executing WASM rule plugins.
 ///
 /// # Example
@@ -117,12 +136,17 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `path` - Path to the WASM file
+    /// * `options` - Security and execution options for the plugin
     ///
     /// # Returns
     ///
     /// The rule manifest on success.
-    pub fn load_rule(&mut self, path: impl AsRef<Path>) -> Result<RuleManifest, PluginError> {
-        let result = self.executor.load_file(path.as_ref())?;
+    pub fn load_rule(
+        &mut self,
+        path: impl AsRef<Path>,
+        options: PluginOptions,
+    ) -> Result<RuleManifest, PluginError> {
+        let result = self.executor.load_file(path.as_ref(), options)?;
 
         self.manifests
             .insert(result.name.clone(), result.manifest.clone());
@@ -137,12 +161,17 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `wasm_bytes` - The WASM binary content
+    /// * `options` - Security and execution options for the plugin
     ///
     /// # Returns
     ///
     /// The rule manifest on success.
-    pub fn load_rule_bytes(&mut self, wasm_bytes: &[u8]) -> Result<RuleManifest, PluginError> {
-        let result = self.executor.load(wasm_bytes)?;
+    pub fn load_rule_bytes(
+        &mut self,
+        wasm_bytes: &[u8],
+        options: PluginOptions,
+    ) -> Result<RuleManifest, PluginError> {
+        let result = self.executor.load(wasm_bytes, options)?;
 
         self.manifests
             .insert(result.name.clone(), result.manifest.clone());
@@ -290,16 +319,7 @@ impl PluginHost {
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
 
-        // Convert node to serde_json::Value for proper MsgPack serialization
-        let node_value = serde_json::to_value(node)
-            .map_err(|e| PluginError::call(format!("Failed to convert node: {}", e)))?;
-
-        let node_value = if let serde_json::Value::String(s) = node_value {
-            serde_json::from_str(&s)
-                .map_err(|e| PluginError::call(format!("Failed to parse node JSON: {}", e)))?
-        } else {
-            node_value
-        };
+        let node_value = convert_node_to_value(node)?;
 
         // Get config for this rule
         let config_bytes = self
@@ -353,17 +373,7 @@ impl PluginHost {
         sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<PreparedLintRequest, PluginError> {
-        // Convert node to serde_json::Value for proper MsgPack serialization
-        let node_value = serde_json::to_value(node)
-            .map_err(|e| PluginError::call(format!("Failed to convert node: {}", e)))?;
-
-        // If the node is a string (from RawValue), parse it as JSON
-        let node_value = if let serde_json::Value::String(s) = node_value {
-            serde_json::from_str(&s)
-                .map_err(|e| PluginError::call(format!("Failed to parse node JSON: {}", e)))?
-        } else {
-            node_value
-        };
+        let node_value = convert_node_to_value(node)?;
 
         let request = LintValueRequest {
             node: &node_value,
@@ -450,18 +460,7 @@ impl PluginHost {
     ) -> Result<Vec<Diagnostic>, PluginError> {
         let mut all_diagnostics = Vec::new();
 
-        // Convert node to serde_json::Value for proper MsgPack serialization
-        // This handles the case where node is Box<RawValue> (JSON string) by parsing it first
-        let node_value = serde_json::to_value(node)
-            .map_err(|e| PluginError::call(format!("Failed to convert node: {}", e)))?;
-
-        // If the node is a string (from RawValue), parse it as JSON
-        let node_value = if let serde_json::Value::String(s) = node_value {
-            serde_json::from_str(&s)
-                .map_err(|e| PluginError::call(format!("Failed to parse node JSON: {}", e)))?
-        } else {
-            node_value
-        };
+        let node_value = convert_node_to_value(node)?;
 
         // Iterate over manifest keys directly
         for name in self.manifests.keys() {
@@ -752,5 +751,37 @@ mod tests {
         // doesn't panic.
         let result = host.run_rule_with_prepared("nonexistent", &prepared);
         assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    fn test_convert_node_to_value_parsing() {
+        // 1) Object-like string -> Value::Object
+        let obj_str = r#"{"type":"Doc"}"#;
+        let val_obj = super::convert_node_to_value(&obj_str).unwrap();
+        assert!(val_obj.is_object());
+        assert_eq!(val_obj["type"], "Doc");
+
+        // 2) Array-like string -> Value::Array
+        let arr_str = r#"[1,2,3]"#;
+        let val_arr = super::convert_node_to_value(&arr_str).unwrap();
+        assert!(val_arr.is_array());
+        assert_eq!(val_arr[0], 1);
+
+        // 3) Normal string -> Value::String
+        let normal_str = "hello world";
+        let val_normal = super::convert_node_to_value(&normal_str).unwrap();
+        assert!(val_normal.is_string());
+        assert_eq!(val_normal.as_str().unwrap(), "hello world");
+
+        // 4) Error branch (Invalid JSON string that looks like an object)
+        let invalid_obj_str = r#"{"type":"Doc""#;
+        let val_invalid = super::convert_node_to_value(&invalid_obj_str);
+        assert!(val_invalid.is_err());
+        assert!(
+            val_invalid
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to parse node JSON")
+        );
     }
 }

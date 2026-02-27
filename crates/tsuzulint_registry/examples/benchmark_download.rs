@@ -1,6 +1,7 @@
+use extism_manifest::{HttpRequest, Wasm, WasmMetadata};
 use std::time::Instant;
 use tsuzulint_registry::downloader::WasmDownloader;
-use tsuzulint_registry::manifest::{Artifacts, ExternalRuleManifest, IsolationLevel, RuleMetadata};
+use tsuzulint_registry::manifest::{ExternalRuleManifest, IsolationLevel, RuleMetadata};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -15,7 +16,7 @@ async fn main() {
     let body = vec![b'x'; file_size_bytes];
 
     Mock::given(method("GET"))
-        .and(path("/large.wasm"))
+        .and(path("/rule.wasm"))
         .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
         .mount(&mock_server)
         .await;
@@ -35,11 +36,22 @@ async fn main() {
             languages: vec![],
             capabilities: vec![],
         },
-        artifacts: Artifacts {
-            wasm: format!("{}/large.wasm", mock_server.uri()),
-            sha256: "ignored".to_string(),
-        },
-        permissions: None,
+        wasm: vec![Wasm::Url {
+            req: HttpRequest {
+                url: format!("{}/rule.wasm", mock_server.uri()),
+                headers: std::collections::BTreeMap::new(),
+                method: None,
+            },
+            meta: WasmMetadata {
+                name: None,
+                hash: None,
+            },
+        }],
+        allowed_hosts: None,
+        allowed_paths: None,
+        config: std::collections::BTreeMap::new(),
+        memory: None,
+        timeout_ms: None,
         tsuzulint: None,
         options: None,
     };
