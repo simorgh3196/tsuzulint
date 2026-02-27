@@ -38,21 +38,6 @@ compile_error!("Either 'native' or 'browser' feature must be enabled.");
 
 /// Request sent to a rule's lint function.
 #[derive(Debug, Serialize)]
-struct LintRequest<'a, T: Serialize> {
-    /// Tokens in the text.
-    tokens: &'a [Token],
-    /// Sentences in the text.
-    sentences: &'a [Sentence],
-    /// The node to lint (serialized).
-    node: &'a T,
-    /// Source text.
-    source: &'a str,
-    /// File path (if available).
-    file_path: Option<&'a str>,
-}
-
-/// Request with pre-parsed JSON node for proper MsgPack serialization.
-#[derive(Debug, Serialize)]
 struct LintValueRequest<'a> {
     /// Tokens in the text.
     tokens: &'a [Token],
@@ -64,6 +49,9 @@ struct LintValueRequest<'a> {
     source: &'a str,
     /// File path (if available).
     file_path: Option<&'a str>,
+    /// Rule configuration (MsgPack bytes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    config: Option<&'a [u8]>,
 }
 
 /// Response from a rule's lint function.
@@ -107,8 +95,8 @@ pub struct PluginHost {
     executor: Executor,
     /// Rule manifests by name.
     manifests: HashMap<String, RuleManifest>,
-    /// Rule configurations by name.
-    configs: HashMap<String, serde_json::Value>,
+    /// Rule configurations by name (MsgPack bytes).
+    configs: HashMap<String, Vec<u8>>,
     /// Aliases mapping (alias -> real_name).
     aliases: HashMap<String, String>,
 }
@@ -138,8 +126,8 @@ impl PluginHost {
 
         self.manifests
             .insert(result.name.clone(), result.manifest.clone());
-        self.configs
-            .insert(result.name.clone(), serde_json::Value::Null);
+        // Empty MsgPack map: fixmap with 0 entries (0x80)
+        self.configs.insert(result.name.clone(), vec![0x80]);
 
         Ok(result.manifest)
     }
@@ -158,8 +146,8 @@ impl PluginHost {
 
         self.manifests
             .insert(result.name.clone(), result.manifest.clone());
-        self.configs
-            .insert(result.name.clone(), serde_json::Value::Null);
+        // Empty MsgPack map: fixmap with 0 entries (0x80)
+        self.configs.insert(result.name.clone(), vec![0x80]);
 
         Ok(result.manifest)
     }
@@ -228,7 +216,7 @@ impl PluginHost {
     /// # Arguments
     ///
     /// * `name` - Rule name
-    /// * `config` - Configuration value (will be passed to the rule)
+    /// * `config` - Configuration value (will be serialized to MsgPack and passed to the rule)
     pub fn configure_rule(
         &mut self,
         name: &str,
@@ -238,14 +226,9 @@ impl PluginHost {
             return Err(PluginError::not_found(name));
         }
 
-        let real_name = self
-            .aliases
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.to_string());
-
-        self.executor.configure(&real_name, &config)?;
-        self.configs.insert(name.to_string(), config);
+        let config_bytes = rmp_serde::to_vec_named(&config)
+            .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
+        self.configs.insert(name.to_string(), config_bytes);
         Ok(())
     }
 
@@ -305,14 +288,63 @@ impl PluginHost {
         sentences: &[Sentence],
         file_path: Option<&str>,
     ) -> Result<Vec<Diagnostic>, PluginError> {
-        let request = self.prepare_lint_request(node, source, tokens, sentences, file_path)?;
-        self.run_rule_with_prepared(name, &request)
+        let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
+        // Convert node to serde_json::Value for proper MsgPack serialization
+        let node_value = serde_json::to_value(node)
+            .map_err(|e| PluginError::call(format!("Failed to convert node: {}", e)))?;
+
+        let node_value = if let serde_json::Value::String(s) = node_value {
+            serde_json::from_str(&s)
+                .map_err(|e| PluginError::call(format!("Failed to parse node JSON: {}", e)))?
+        } else {
+            node_value
+        };
+
+        // Get config for this rule
+        let config_bytes = self
+            .configs
+            .get(name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[0x80]);
+
+        let request = LintValueRequest {
+            node: &node_value,
+            source,
+            tokens,
+            sentences,
+            file_path,
+            config: Some(config_bytes),
+        };
+
+        let request_bytes = rmp_serde::to_vec_named(&request)
+            .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
+
+        let response_bytes = self.executor.call_lint(real_name, &request_bytes)?;
+
+        let response: LintResponse = rmp_serde::from_slice(&response_bytes)
+            .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
+
+        let mut diagnostics = response.diagnostics;
+
+        if name != real_name {
+            for diag in &mut diagnostics {
+                if diag.rule_id == real_name {
+                    diag.rule_id = name.to_string();
+                }
+            }
+        }
+
+        Ok(diagnostics)
     }
 
     /// Prepares a lint request by serializing it once.
     ///
     /// Use this when you need to run multiple rules on the same input to avoid
     /// repeated serialization costs.
+    ///
+    /// Note: This does not include rule-specific config. Use `run_rule_with_parts`
+    /// for per-rule config support.
     pub fn prepare_lint_request<T: Serialize>(
         &self,
         node: &T,
@@ -339,6 +371,7 @@ impl PluginHost {
             tokens,
             sentences,
             file_path,
+            config: None,
         };
 
         let request_bytes = rmp_serde::to_vec_named(&request)
@@ -348,6 +381,9 @@ impl PluginHost {
     }
 
     /// Runs a specific rule using a pre-prepared (serialized) request.
+    ///
+    /// Note: This does not include rule-specific config. Use `run_rule_with_parts`
+    /// for per-rule config support.
     pub fn run_rule_with_prepared(
         &mut self,
         name: &str,
@@ -427,21 +463,34 @@ impl PluginHost {
             node_value
         };
 
-        // Serialize LintRequest ONCE
-        let request = LintValueRequest {
-            node: &node_value,
-            source,
-            tokens,
-            sentences,
-            file_path,
-        };
-
-        let request_bytes = rmp_serde::to_vec_named(&request)
-            .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
-
         // Iterate over manifest keys directly
         for name in self.manifests.keys() {
             let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
+            // Get config for this rule
+            let config_bytes = self
+                .configs
+                .get(name)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[0x80]);
+
+            // Serialize LintRequest with rule-specific config
+            let request = LintValueRequest {
+                node: &node_value,
+                source,
+                tokens,
+                sentences,
+                file_path,
+                config: Some(config_bytes),
+            };
+
+            let request_bytes = match rmp_serde::to_vec_named(&request) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    warn!("Failed to serialize request for '{}': {}", name, e);
+                    continue;
+                }
+            };
 
             match self.executor.call_lint(real_name, &request_bytes) {
                 Ok(response_bytes) => {
@@ -566,12 +615,13 @@ mod tests {
         let file_path = Some("test.md");
 
         // Host side
-        let host_request = LintRequest {
+        let host_request = LintValueRequest {
             node: &node_data,
             source,
             tokens: &tokens,
             sentences: &sentences,
             file_path,
+            config: None,
         };
 
         // Serialize using rmp_serde (as done in host)

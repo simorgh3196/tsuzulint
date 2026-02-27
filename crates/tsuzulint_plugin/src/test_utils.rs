@@ -19,8 +19,8 @@ pub fn bytes_to_wat_data(bytes: &[u8]) -> String {
 
 /// Helper to create a basic valid rule in WAT for testing.
 pub fn valid_rule_wat() -> String {
-    let manifest = RuleManifest::new("test-rule", "1.0.0")
-        .with_description("Test rule".to_string());
+    let manifest =
+        RuleManifest::new("test-rule", "1.0.0").with_description("Test rule".to_string());
     let msgpack_bytes = manifest_to_msgpack(&manifest);
     let len = msgpack_bytes.len();
     let data = bytes_to_wat_data(&msgpack_bytes);

@@ -367,7 +367,7 @@ pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
         return Ok(LintResponse { diagnostics });
     }
 
-    let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
+    let config: Config = request.get_config().unwrap_or_default();
     let tokens = request.get_tokens();
 
     let (node_start, node_end, _text) =

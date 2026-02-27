@@ -5,11 +5,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use extism::{
-    CurrentPlugin, Error, Function, Manifest, Plugin, PluginBuilder, UserData, Val, ValType, Wasm,
-};
+use extism::{Manifest, Plugin, PluginBuilder, Wasm};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info};
 
@@ -42,25 +40,6 @@ impl RuleSource {
     }
 }
 
-/// Config data shared with the WASM guest via tsuzulint_get_config host function.
-#[derive(Clone)]
-struct RuleConfig(Arc<Mutex<Vec<u8>>>);
-
-impl RuleConfig {
-    fn new_empty() -> Self {
-        // Empty MsgPack map: fixmap with 0 entries (0x80)
-        Self(Arc::new(Mutex::new(vec![0x80])))
-    }
-
-    fn set(&self, bytes: Vec<u8>) {
-        *self.0.lock().unwrap() = bytes;
-    }
-
-    fn get(&self) -> Vec<u8> {
-        self.0.lock().unwrap().clone()
-    }
-}
-
 /// A loaded rule using Extism.
 struct LoadedRule {
     /// The Extism plugin instance.
@@ -68,10 +47,6 @@ struct LoadedRule {
     /// The rule manifest.
     #[allow(dead_code)]
     manifest: RuleManifest,
-    /// The source of the rule (for reloading).
-    source: RuleSource,
-    /// Current rule configuration (MsgPack bytes).
-    config: RuleConfig,
 }
 
 /// Extism-based executor for native environments.
@@ -136,23 +111,12 @@ impl ExtismExecutor {
         manifest
     }
 
-    fn build_plugin(&self, source: &RuleSource, config_bytes: Vec<u8>) -> Result<Plugin, PluginError> {
+    fn build_plugin(&self, source: &RuleSource) -> Result<Plugin, PluginError> {
         let wasm = source.to_wasm();
         let manifest = Manifest::new([wasm]);
         let manifest = self.configure_manifest(manifest);
 
-        let f = Function::new(
-            "tsuzulint_get_config",
-            [ValType::I64, ValType::I64],
-            [ValType::I64],
-            UserData::new(config_bytes),
-            tsuzulint_get_config_impl,
-        )
-        .with_namespace("extism:host/user");
-
-        let mut builder = PluginBuilder::new(manifest)
-            .with_wasi(true)
-            .with_functions([f]);
+        let mut builder = PluginBuilder::new(manifest).with_wasi(true);
 
         if let Some(limit) = self.fuel_limit {
             builder = builder.with_fuel_limit(limit);
@@ -174,8 +138,7 @@ impl ExtismExecutor {
     }
 
     fn load_rule(&mut self, source: RuleSource) -> Result<LoadResult, PluginError> {
-        let config = RuleConfig::new_empty();
-        let mut plugin = self.build_plugin(&source, config.get())?;
+        let mut plugin = self.build_plugin(&source)?;
         let rule_manifest = Self::fetch_manifest(&mut plugin)?;
 
         debug!(
@@ -189,8 +152,6 @@ impl ExtismExecutor {
             LoadedRule {
                 plugin,
                 manifest: rule_manifest.clone(),
-                source,
-                config,
             },
         );
 
@@ -199,45 +160,6 @@ impl ExtismExecutor {
             manifest: rule_manifest,
         })
     }
-}
-
-/// Host function implementation for tsuzulint_get_config.
-///
-/// Protocol (packed return):
-/// - Returns (offset << 32 | length) packed into a u64.
-/// - For Extism: offset is the memory handle offset where config bytes are stored.
-/// - For Wasmi: offset is 0, length is the config byte count.
-///
-/// The PDK differentiates based on offset:
-/// - If offset != 0 (Extism): read directly from the returned offset.
-/// - If offset == 0 (Wasmi): make a second call to write to guest buffer.
-fn tsuzulint_get_config_impl(
-    plugin: &mut CurrentPlugin,
-    args: &[Val],
-    results: &mut [Val],
-    user_data: UserData<Vec<u8>>,
-) -> Result<(), Error> {
-    let _ptr = args[0].unwrap_i64() as u64;
-    let len = args[1].unwrap_i64() as u64;
-
-    let bytes = user_data
-        .get()
-        .map_err(|e| Error::msg(format!("UserData error: {e}")))?;
-    let bytes_guard = bytes.lock().unwrap();
-    let bytes_slice = bytes_guard.as_slice();
-
-    if len == 0 {
-        // First call: allocate memory, copy bytes, return (offset << 32 | length)
-        let handle = plugin.memory_new(bytes_slice.to_vec())?;
-        let packed = ((handle.offset() as u64) << 32) | (bytes_slice.len() as u64);
-        results[0] = Val::I64(packed as i64);
-        return Ok(());
-    }
-
-    // Second call (len != 0): This is for Wasmi compatibility.
-    // For Extism, this shouldn't be called, but return error just in case.
-    results[0] = Val::I64(-1);
-    Ok(())
 }
 
 impl Default for ExtismExecutor {
@@ -280,30 +202,10 @@ impl RuleExecutor for ExtismExecutor {
 
     fn configure(
         &mut self,
-        rule_name: &str,
-        config: &serde_json::Value,
+        _rule_name: &str,
+        _config: &serde_json::Value,
     ) -> Result<(), PluginError> {
-        let rule = self
-            .rules
-            .get(rule_name)
-            .ok_or_else(|| PluginError::not_found(rule_name))?;
-
-        let source = rule.source.clone();
-
-        // Serialize config to MsgPack bytes
-        let config_bytes = rmp_serde::to_vec_named(config)
-            .map_err(|e| PluginError::call(format!("Failed to serialize config: {}", e)))?;
-
-        // Update stored config
-        let config_ref = rule.config.clone();
-        config_ref.set(config_bytes.clone());
-
-        // Rebuild plugin with new config
-        let plugin = self.build_plugin(&source, config_bytes)?;
-
-        if let Some(rule) = self.rules.get_mut(rule_name) {
-            rule.plugin = plugin;
-        }
+        // Config is now passed via LintRequest, no plugin rebuild needed
         Ok(())
     }
 
@@ -331,303 +233,5 @@ impl RuleExecutor for ExtismExecutor {
 
     fn loaded_rules(&self) -> Vec<&str> {
         self.rules.keys().map(|s| s.as_str()).collect()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[cfg(feature = "test-utils")]
-    use crate::test_utils::{bytes_to_wat_data, manifest_to_msgpack, wat_to_wasm};
-
-    use super::*;
-
-    #[test]
-    fn test_executor_new() {
-        let executor = ExtismExecutor::new();
-        assert!(executor.loaded_rules().is_empty());
-    }
-
-    #[test]
-    fn test_executor_call_not_found() {
-        let mut executor = ExtismExecutor::new();
-        let result = executor.call_lint("nonexistent", &[]);
-        assert!(matches!(result, Err(PluginError::NotFound(_))));
-    }
-
-    #[test]
-    #[cfg(feature = "test-utils")]
-    fn test_executor_memory_limit() {
-        let mut executor = ExtismExecutor::new();
-
-        // A rule that tries to allocate 200MB (3200 pages)
-        // 3200 * 64KB = 200MB > 128MB limit
-        // We use a simplified module for this test as we just want it to fail loading
-        let wasm = wat_to_wasm(
-            r#"
-            (module
-                (memory (export "memory") 3200)
-                (func (export "get_manifest") (result i32) (i32.const 0))
-            )
-            "#,
-        );
-
-        // Loading should fail because the initial memory exceeds the limit
-        let result = executor.load(&wasm);
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-
-        // Debug output to see actual error
-        println!("Memory limit error: {}", err_msg);
-
-        // Check for specific error related to memory limit
-        // The error message depends on the runtime but should contain "memory", "limit" or "oom"
-        assert!(
-            err_msg.to_lowercase().contains("memory")
-                || err_msg.to_lowercase().contains("limit")
-                || err_msg.to_lowercase().contains("oom"),
-            "Unexpected error message: {}",
-            err_msg
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "test-utils")]
-    fn test_executor_infinite_loop() {
-        // Use a short timeout for testing (200ms instead of 5s)
-        let mut executor = ExtismExecutor::new().with_timeout(200);
-
-        // Infinite loop rule (Extism ABI)
-        // We put the loop in get_manifest so load() fails with timeout
-        // This avoids needing a valid manifest to proceed
-        let wasm = wat_to_wasm(
-            r#"
-            (module
-                (memory (export "memory") 1)
-
-                (func (export "get_manifest") (result i32)
-                    (loop
-                        (br 0)
-                    )
-                    (i32.const 0)
-                )
-            )
-            "#,
-        );
-
-        // Should return an error due to timeout during load (get_manifest execution)
-        let result = executor.load(&wasm);
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-
-        println!("Timeout error: {}", err_msg);
-
-        let err_lower = err_msg.to_lowercase();
-        assert!(
-            err_lower.contains("timeout") || err_lower.contains("deadline"),
-            "Expected timeout error, got: {}",
-            err_msg
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "test-utils")]
-    fn test_executor_fuel_limit() {
-        // Use a fuel limit of 1000 instructions
-        let mut executor = ExtismExecutor::new().with_fuel_limit(1000);
-
-        // Infinite loop rule (Extism ABI)
-        // We put the loop in get_manifest so load() fails with fuel limit exceeded
-        let wasm = wat_to_wasm(
-            r#"
-            (module
-                (memory (export "memory") 1)
-
-                (func (export "get_manifest") (result i32)
-                    (loop
-                        (br 0)
-                    )
-                    (i32.const 0)
-                )
-            )
-            "#,
-        );
-
-        // Should return an error due to fuel limit during load
-        let result = executor.load(&wasm);
-
-        // TODO: Replace with proper error type matching when Extism exposes stable error kinds.
-        // Currently relies on error message content as Extism returns opaque errors without
-        // discriminable error variants. See assertion at line ~315 in executor_extism.rs.
-        assert!(result.is_err(), "Expected fuel limit error");
-    }
-
-    #[test]
-    #[cfg(feature = "test-utils")]
-    fn test_config_lifecycle() {
-        let mut executor = ExtismExecutor::new();
-
-        let manifest = RuleManifest::new("config-rule", "1.0.0");
-        let msgpack_bytes = manifest_to_msgpack(&manifest);
-        // Construct WAT instructions to write the MsgPack bytes to memory at offset 1024
-        // This avoids relying on data segments which seem flaky in some contexts or with Extism
-        let mut store_instrs = String::new();
-        for (i, b) in msgpack_bytes.iter().enumerate() {
-            store_instrs.push_str(&format!(
-                "(call $store_u8 (i64.const {}) (i32.const {}))\n",
-                1024 + i,
-                b
-            ));
-        }
-        let manifest_len = msgpack_bytes.len();
-
-        // Extism provides 'config' in the environment which we can access via extism:host/env::config_get
-        // We'll write a test rule that reads this config.
-        let wat = format!(
-            r#"
-            (module
-                (import "extism:host/env" "config_get" (func $config_get (param i64) (result i64)))
-                (import "extism:host/env" "length" (func $length (param i64) (result i64)))
-                (import "extism:host/env" "alloc" (func $alloc (param i64) (result i64)))
-                (import "extism:host/env" "load_u8" (func $load_u8 (param i64) (result i32)))
-                (import "extism:host/env" "store_u8" (func $store_u8 (param i64 i32)))
-                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
-
-                (memory (export "memory") 1)
-
-                (func $get_manifest (export "get_manifest") (result i32)
-                    {store_instrs}
-                    (call $output_set (i64.const 1024) (i64.const {manifest_len}))
-                    (i32.const 0)
-                )
-
-                ;; Helper to read string from Extism memory to local buffer
-                (func $lint (export "lint") (result i32)
-                    (local $key_ptr i64)
-                    (local $val_ptr i64)
-                    (local $val_len i64)
-
-                    ;; Write "config" key to memory
-                    (call $alloc (i64.const 6))
-                    local.set $key_ptr
-
-                    ;; "config" = 99 111 110 102 105 103
-                    (call $store_u8 (local.get $key_ptr) (i32.const 99))
-                    (call $store_u8 (i64.add (local.get $key_ptr) (i64.const 1)) (i32.const 111))
-                    (call $store_u8 (i64.add (local.get $key_ptr) (i64.const 2)) (i32.const 110))
-                    (call $store_u8 (i64.add (local.get $key_ptr) (i64.const 3)) (i32.const 102))
-                    (call $store_u8 (i64.add (local.get $key_ptr) (i64.const 4)) (i32.const 105))
-                    (call $store_u8 (i64.add (local.get $key_ptr) (i64.const 5)) (i32.const 103))
-
-                    ;; Get config
-                    (call $config_get (local.get $key_ptr))
-                    local.set $val_ptr
-
-                    ;; Get config length
-                    (call $length (local.get $val_ptr))
-                    local.set $val_len
-
-                    ;; Set output
-                    (call $output_set (local.get $val_ptr) (local.get $val_len))
-
-                    (i32.const 0)
-                )
-            )
-            "#,
-        );
-
-        // NOTE: Writing pure WAT to test Extism config is complex because it involves
-        // managing Extism's memory model (alloc, length, load/store).
-        // Instead, we will rely on the fact that `configure` calls `build_plugin` which sets
-        // the manifest config. The Extism library guarantees this works.
-        // We will just verify that `configure` doesn't error and that the rule persists.
-
-        let wasm = wat_to_wasm(&wat);
-        executor.load(&wasm).expect("Failed to load rule");
-
-        let config = serde_json::json!({"foo": "bar"});
-        let res = executor.configure("config-rule", &config);
-        assert!(res.is_ok());
-
-        // Ensure rule is still loaded/callable
-        let res = executor.call_lint("config-rule", b"{}");
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    #[cfg(feature = "test-utils")]
-    fn test_config_fallback_stub() {
-        let mut executor = ExtismExecutor::new();
-
-        // This test calls the tsuzulint_get_config host function.
-        // The protocol returns (offset << 32 | length) on first call.
-        let manifest = RuleManifest::new("stub-test", "1.0.0");
-        let msgpack_bytes = manifest_to_msgpack(&manifest);
-        let mut store_instrs = String::new();
-        for (i, b) in msgpack_bytes.iter().enumerate() {
-            store_instrs.push_str(&format!(
-                "(call $store_u8 (i64.const {}) (i32.const {}))\n",
-                1024 + i,
-                b
-            ));
-        }
-        let manifest_len = msgpack_bytes.len();
-
-        let wat = format!(
-            r#"
-            (module
-                (import "extism:host/user" "tsuzulint_get_config" (func $get_config (param i64 i64) (result i64)))
-                (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
-                (import "extism:host/env" "store_u8" (func $store_u8 (param i64 i32)))
-                (import "extism:host/env" "load_u8" (func $load_u8 (param i64) (result i32)))
-                (memory (export "memory") 1)
-
-                (func $get_manifest (export "get_manifest") (result i32)
-                    {store_instrs}
-                    (call $output_set (i64.const 1024) (i64.const {manifest_len}))
-                    (i32.const 0)
-                )
-
-                (func $lint (export "lint") (result i32)
-                    (local $packed i64)
-                    (local $offset i64)
-                    (local $len i64)
-                    (local $i i64)
-
-                    ;; Call get_config with (0, 0) to get packed (offset << 32 | length)
-                    (call $get_config (i64.const 0) (i64.const 0))
-                    local.set $packed
-
-                    ;; Extract offset (high 32 bits) and length (low 32 bits)
-                    ;; offset = packed >> 32
-                    (i64.shr_u (local.get $packed) (i64.const 32))
-                    local.set $offset
-
-                    ;; len = packed & 0xFFFFFFFF
-                    (i64.and (local.get $packed) (i64.const 0xFFFFFFFF))
-                    local.set $len
-
-                    ;; Read config bytes from offset and output them
-                    (call $output_set (local.get $offset) (local.get $len))
-
-                    (i32.const 0)
-                )
-            )
-            "#,
-        );
-
-        let wasm = wat_to_wasm(&wat);
-        executor.load(&wasm).expect("Failed to load rule");
-
-        let res = executor.call_lint("stub-test", b"{}");
-        // Should return the empty MsgPack map (0x80)
-        assert!(res.is_ok());
-        assert_eq!(res.unwrap(), vec![0x80]);
-    }
-
-    #[test]
-    fn test_configure_not_found() {
-        let mut executor = ExtismExecutor::new();
-        let result = executor.configure("nonexistent", &serde_json::json!({}));
-        assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
 }

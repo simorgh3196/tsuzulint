@@ -86,8 +86,7 @@ pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
         return Ok(LintResponse { diagnostics });
     }
 
-    // Parse configuration
-    let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
+    let config: Config = request.get_config().unwrap_or_default();
 
     // Get patterns to check
     let patterns = config.effective_patterns();
@@ -127,13 +126,6 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tsuzulint_rule_pdk::AstNode;
 
-    fn create_request(text: &str) -> LintRequest {
-        LintRequest::single(
-            AstNode::new("Str", Some([0, text.len() as u32])),
-            text.to_string(),
-        )
-    }
-
     #[test]
     fn config_default_patterns() {
         let config = Config::default();
@@ -154,6 +146,25 @@ mod tests {
         assert!(patterns.contains(&"HACK:".to_string()));
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn create_request(text: &str) -> LintRequest {
+        LintRequest::single(
+            AstNode::new("Str", Some([0, text.len() as u32])),
+            text.to_string(),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn create_request_with_config<T: serde::Serialize>(text: &str, config: &T) -> LintRequest {
+        let mut request = LintRequest::single(
+            AstNode::new("Str", Some([0, text.len() as u32])),
+            text.to_string(),
+        );
+        request.config = Some(rmp_serde::to_vec_named(config).unwrap());
+        request
+    }
+
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn lint_detects_todo() {
         let request = create_request("This is a TODO: check");
@@ -165,12 +176,13 @@ mod tests {
         );
     }
 
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn lint_ignores_pattern() {
-        tsuzulint_rule_pdk::set_mock_config(&serde_json::json!({
-            "ignore_patterns": ["TODO:"]
-        }));
-        let request = create_request("This is a TODO: fix later");
+        let request = create_request_with_config(
+            "This is a TODO: fix later",
+            &serde_json::json!({ "ignore_patterns": ["TODO:"] }),
+        );
         let response = lint(request).unwrap();
         assert_eq!(response.diagnostics.len(), 0);
     }

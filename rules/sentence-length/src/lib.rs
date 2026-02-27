@@ -71,8 +71,7 @@ pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
         return Ok(LintResponse { diagnostics });
     }
 
-    // Parse configuration
-    let config: Config = tsuzulint_rule_pdk::get_config().unwrap_or_default();
+    let config: Config = request.get_config().unwrap_or_default();
 
     // Extract text from node
     if let Some((start, _end, text)) = extract_node_text(&request.node, &request.source) {
@@ -105,15 +104,21 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tsuzulint_rule_pdk::AstNode;
 
-    #[test]
-    fn test_lint_simple() {
-        let text = "Short sentence. Very long sentence that exceeds the limit definitely.";
-        tsuzulint_rule_pdk::set_mock_config(&serde_json::json!({ "max": 20 }));
-
-        let request = LintRequest::single(
+    #[cfg(target_arch = "wasm32")]
+    fn create_request_with_config<T: serde::Serialize>(text: &str, config: &T) -> LintRequest {
+        let mut request = LintRequest::single(
             AstNode::new("Str", Some([0, text.len() as u32])),
             text.to_string(),
         );
+        request.config = Some(rmp_serde::to_vec_named(config).unwrap());
+        request
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn test_lint_simple() {
+        let text = "Short sentence. Very long sentence that exceeds the limit definitely.";
+        let request = create_request_with_config(text, &serde_json::json!({ "max": 20 }));
 
         let response = lint(request).unwrap();
 

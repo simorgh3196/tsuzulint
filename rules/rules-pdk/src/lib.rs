@@ -6,76 +6,6 @@ use extism_pdk::*;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_arch = "wasm32")]
-#[link(wasm_import_module = "extism:host/user")]
-unsafe extern "C" {
-    fn tsuzulint_get_config(ptr: u64, len: u64) -> u64;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-use std::cell::RefCell;
-
-#[cfg(not(target_arch = "wasm32"))]
-thread_local! {
-    // Empty MsgPack map: fixmap with 0 entries (0x80)
-    static MOCK_CONFIG: RefCell<Vec<u8>> = RefCell::new(vec![0x80]);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn set_mock_config<T: serde::Serialize>(config: &T) {
-    let bytes = rmp_serde::to_vec_named(config).expect("Failed to serialize mock config");
-    MOCK_CONFIG.with(|c| *c.borrow_mut() = bytes);
-}
-
-/// Helper to get configuration for the current rule.
-pub fn get_config<T: DeserializeOwned>() -> FnResult<T> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        // First call to get packed result (offset << 32 | length)
-        let packed = unsafe { tsuzulint_get_config(0, 0) };
-
-        // Check for error sentinel (u64::MAX from -1 i64)
-        if packed == u64::MAX {
-            return Err(Error::msg("Failed to get config: host error").into());
-        }
-
-        let offset = (packed >> 32) as u32 as usize;
-        let len = (packed & 0xFFFFFFFF) as u32 as usize;
-
-        if len == 0 {
-            // Empty MsgPack map: fixmap with 0 entries (0x80)
-            return Ok(rmp_serde::from_slice(&[0x80])?);
-        }
-
-        let bytes = if offset != 0 {
-            // Extism: read from the allocated memory at offset
-            let memory = extism_pdk::Memory::find(offset as u64)
-                .ok_or_else(|| Error::msg("Failed to find config memory"))?;
-            memory.to_vec()
-        } else {
-            // Wasmi: second call to write to guest-allocated buffer
-            let mut buf = vec![0u8; len];
-            let result = unsafe { tsuzulint_get_config(buf.as_mut_ptr() as u64, len as u64) };
-
-            // Check for error sentinel on second call
-            if result == u64::MAX {
-                return Err(Error::msg("Failed to get config: memory write error").into());
-            }
-            buf
-        };
-
-        Ok(rmp_serde::from_slice(&bytes)?)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        MOCK_CONFIG.with(|c| {
-            let bytes = c.borrow();
-            Ok(rmp_serde::from_slice(&bytes)?)
-        })
-    }
-}
-
 /// A minimal AST node representation for lint rules.
 ///
 /// Rules only need the node type and byte range to perform linting.
@@ -169,6 +99,9 @@ pub struct LintRequest {
     /// Sentences (from host).
     #[serde(default)]
     pub sentences: Vec<TextSentence>,
+    /// Rule configuration (MsgPack bytes).
+    #[serde(default)]
+    pub config: Option<Vec<u8>>,
 }
 
 impl LintRequest {
@@ -182,6 +115,7 @@ impl LintRequest {
             helpers: None,
             tokens: Vec::new(),
             sentences: Vec::new(),
+            config: None,
         }
     }
 
@@ -196,6 +130,17 @@ impl LintRequest {
             helpers: None,
             tokens: Vec::new(),
             sentences: Vec::new(),
+            config: None,
+        }
+    }
+
+    /// Gets the rule configuration, deserializing from MsgPack bytes.
+    pub fn get_config<T: DeserializeOwned>(&self) -> FnResult<T> {
+        match &self.config {
+            Some(bytes) if !bytes.is_empty() => {
+                rmp_serde::from_slice(bytes).map_err(|e| Error::msg(e.to_string()).into())
+            }
+            _ => rmp_serde::from_slice(&[0x80]).map_err(|e| Error::msg(e.to_string()).into()),
         }
     }
 
@@ -1477,10 +1422,11 @@ mod tests {
         assert_eq!(decoded.diagnostics[0].rule_id, "test");
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    mod mock_config_tests {
-        use super::{Deserialize, Diagnostic, LintResponse, Span, get_config, set_mock_config};
-        use rmp_serde;
+    #[test]
+    fn lint_request_get_config_valid() {
+        let mut request = LintRequest::single(AstNode::new("Str", None), "test".to_string());
+        request.config =
+            Some(rmp_serde::to_vec_named(&serde_json::json!({"key": "value"})).unwrap());
 
         #[derive(Debug, Deserialize)]
         struct TestConfig {
@@ -1488,32 +1434,36 @@ mod tests {
             key: String,
         }
 
-        #[test]
-        fn test_get_config_valid() {
-            set_mock_config(&serde_json::json!({"key": "value"}));
-            let config: TestConfig = get_config().expect("Failed to get config");
-            assert_eq!(config.key, "value");
-            set_mock_config(&serde_json::json!({}));
+        let config: TestConfig = request.get_config().expect("Failed to get config");
+        assert_eq!(config.key, "value");
+    }
+
+    #[test]
+    fn lint_request_get_config_empty() {
+        let request = LintRequest::single(AstNode::new("Str", None), "test".to_string());
+
+        #[derive(Debug, Deserialize)]
+        struct TestConfig {
+            #[serde(default)]
+            key: String,
         }
 
-        #[test]
-        fn test_get_config_empty() {
-            set_mock_config(&serde_json::json!({}));
-            let config: TestConfig = get_config().expect("Failed to get empty config");
-            assert_eq!(config.key, "");
+        let config: TestConfig = request.get_config().expect("Failed to get empty config");
+        assert_eq!(config.key, "");
+    }
+
+    #[test]
+    fn lint_request_get_config_invalid() {
+        let mut request = LintRequest::single(AstNode::new("Str", None), "test".to_string());
+        request.config = Some(vec![0xFF, 0xFF]);
+
+        #[derive(Debug, Deserialize)]
+        struct TestConfig {
+            required_field: String,
         }
 
-        #[test]
-        fn test_get_config_invalid_json() {
-            #[derive(Debug, Deserialize)]
-            struct StrictConfig {
-                required_field: String,
-            }
-
-            set_mock_config(&serde_json::json!({}));
-            let result: Result<StrictConfig, _> = get_config();
-            assert!(result.is_err());
-        }
+        let result: Result<TestConfig, _> = request.get_config();
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1683,6 +1633,7 @@ mod tests {
             helpers: None,
             tokens: Vec::new(),
             sentences: Vec::new(),
+            config: None,
         };
 
         assert!(request.nodes.is_empty());
