@@ -172,7 +172,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "anyOf": [
+        "oneOf": [
           {
             "required": [
               "url",
@@ -192,6 +192,7 @@
             ]
           }
         ],
+        "additionalProperties": false,
         "properties": {
           "url": {
             "type": "string",
