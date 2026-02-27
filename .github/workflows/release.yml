@@ -90,7 +90,7 @@ jobs:
           Compress-Archive -Path "dist/*" -DestinationPath "tzlint-${{ matrix.target }}.zip"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: tzlint-${{ matrix.target }}
           path: tzlint-${{ matrix.target }}.${{ matrix.archive }}
@@ -113,7 +113,7 @@ jobs:
           cd crates/tsuzulint_wasm/pkg
           tar -czvf ../../../tsuzulint-wasm.tar.gz ./*
       - name: Upload WASM artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: tsuzulint-wasm
           path: tsuzulint-wasm.tar.gz
@@ -126,7 +126,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
