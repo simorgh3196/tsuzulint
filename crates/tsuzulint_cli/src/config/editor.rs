@@ -273,6 +273,7 @@ mod tests {
                 owner: "owner".to_string(),
                 repo: "repo".to_string(),
                 version: None,
+                server_url: None,
             },
             alias: None,
         }

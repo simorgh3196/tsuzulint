@@ -18,6 +18,7 @@ pub enum PluginSource {
         owner: String,
         repo: String,
         version: Option<String>,
+        server_url: Option<String>,
     },
     /// Direct URL to a manifest file.
     Url(String),
@@ -32,6 +33,7 @@ impl PluginSource {
             owner: owner.into(),
             repo: repo.into(),
             version: None,
+            server_url: None,
         }
     }
 
@@ -45,6 +47,7 @@ impl PluginSource {
             owner: owner.into(),
             repo: repo.into(),
             version: Some(version.into()),
+            server_url: None,
         }
     }
 
@@ -62,7 +65,6 @@ impl PluginSource {
 /// Fetcher for plugin manifests from various sources.
 pub struct ManifestFetcher {
     http_client: SecureHttpClient,
-    github_base_url: String,
     timeout: Duration,
     max_redirects: u32,
 }
@@ -81,19 +83,11 @@ impl ManifestFetcher {
                 .timeout(DEFAULT_TIMEOUT)
                 .max_redirects(DEFAULT_MAX_REDIRECTS)
                 .build(),
-            github_base_url: "https://github.com".to_string(),
             timeout: DEFAULT_TIMEOUT,
             max_redirects: DEFAULT_MAX_REDIRECTS,
         }
     }
 
-    /// Set the base URL for GitHub requests (for testing).
-    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
-        self.github_base_url = url.into();
-        self
-    }
-
-    /// Configure whether to allow fetching from local network addresses.
     pub fn allow_local(self, allow: bool) -> Self {
         Self {
             http_client: SecureHttpClient::builder()
@@ -101,7 +95,6 @@ impl ManifestFetcher {
                 .max_redirects(self.max_redirects)
                 .allow_local(allow)
                 .build(),
-            github_base_url: self.github_base_url,
             timeout: self.timeout,
             max_redirects: self.max_redirects,
         }
@@ -114,8 +107,9 @@ impl ManifestFetcher {
                 owner,
                 repo,
                 version,
+                server_url,
             } => {
-                self.fetch_from_github(owner, repo, version.as_deref())
+                self.fetch_from_github(owner, repo, version.as_deref(), server_url.as_deref())
                     .await
             }
             PluginSource::Url(url) => self.fetch_from_url(url).await,
@@ -129,8 +123,9 @@ impl ManifestFetcher {
         owner: &str,
         repo: &str,
         version: Option<&str>,
+        server_url: Option<&str>,
     ) -> Result<ExternalRuleManifest, FetchError> {
-        let base = &self.github_base_url;
+        let base = server_url.unwrap_or("https://github.com");
         let url = match version {
             Some(v) => format!("{base}/{owner}/{repo}/releases/download/v{v}/tsuzulint-rule.json"),
             None => format!("{base}/{owner}/{repo}/releases/latest/download/tsuzulint-rule.json"),
@@ -195,6 +190,7 @@ mod tests {
                 owner: "simorgh3196".to_string(),
                 repo: "tsuzulint-rule-no-todo".to_string(),
                 version: None,
+                server_url: None,
             }
         );
     }
@@ -209,6 +205,7 @@ mod tests {
                 owner: "simorgh3196".to_string(),
                 repo: "tsuzulint-rule-no-todo".to_string(),
                 version: Some("1.0.0".to_string()),
+                server_url: None,
             }
         );
     }
