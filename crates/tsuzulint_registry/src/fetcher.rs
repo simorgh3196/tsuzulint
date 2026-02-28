@@ -6,6 +6,9 @@ use crate::manifest::{ExternalRuleManifest, validate_manifest};
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Maximum allowed size for manifest files (10 MB).
+const MAX_MANIFEST_SIZE: u64 = 10 * 1024 * 1024;
+
 /// Source of a plugin manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginSource {
@@ -138,7 +141,10 @@ impl ManifestFetcher {
 
     /// Fetch manifest from a URL.
     async fn fetch_from_url(&self, url_str: &str) -> Result<ExternalRuleManifest, FetchError> {
-        let bytes = self.http_client.fetch(url_str).await?;
+        let bytes = self
+            .http_client
+            .fetch_with_size_limit(url_str, MAX_MANIFEST_SIZE)
+            .await?;
         let text = String::from_utf8(bytes)?;
         let manifest = validate_manifest(&text)?;
         Ok(manifest)
@@ -153,7 +159,23 @@ impl ManifestFetcher {
             )));
         }
 
-        let content = tokio::fs::read_to_string(path).await?;
+        let file = tokio::fs::File::open(path).await?;
+        let mut content = String::new();
+
+        // Read up to MAX_MANIFEST_SIZE + 1 bytes to detect if it exceeds the limit
+        use tokio::io::AsyncReadExt;
+        let bytes_read = file
+            .take(MAX_MANIFEST_SIZE + 1)
+            .read_to_string(&mut content)
+            .await?;
+
+        if bytes_read as u64 > MAX_MANIFEST_SIZE {
+            return Err(FetchError::IoError(std::io::Error::other(format!(
+                "Manifest file too large: exceeds limit of {} bytes",
+                MAX_MANIFEST_SIZE
+            ))));
+        }
+
         let manifest = validate_manifest(&content)?;
         Ok(manifest)
     }
@@ -283,6 +305,131 @@ mod tests {
                 "Expected SecureFetchError::SecurityError::LoopbackDenied, got {:?}",
                 res
             ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_size_limit {
+    use super::*;
+    use crate::http_client::SecureFetchError;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn create_valid_manifest_padded(target_size: usize) -> String {
+        let base_json = r#"{
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0"
+            },
+            "wasm": [{
+                "url": "https://example.com/rule.wasm",
+                "hash": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }]
+        }"#;
+
+        let mut padded = base_json.to_string();
+        if padded.len() < target_size {
+            padded.push_str(&" ".repeat(target_size - padded.len()));
+        }
+        padded
+    }
+
+    #[tokio::test]
+    async fn test_fetch_url_exact_limit() {
+        let mock_server = MockServer::start().await;
+
+        let body = create_valid_manifest_padded(MAX_MANIFEST_SIZE as usize);
+        assert_eq!(body.len(), MAX_MANIFEST_SIZE as usize);
+
+        Mock::given(method("GET"))
+            .and(path("/exact-manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(&body))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let url = format!("{}/exact-manifest.json", mock_server.uri());
+        let result = fetcher.fetch(&PluginSource::Url(url)).await;
+
+        assert!(
+            result.is_ok(),
+            "Manifest exactly at size limit should be accepted, but got: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_url_too_large() {
+        let mock_server = MockServer::start().await;
+
+        // Create a body slightly larger than MAX_MANIFEST_SIZE
+        let size = (MAX_MANIFEST_SIZE + 100) as usize;
+        let body = "a".repeat(size);
+
+        Mock::given(method("GET"))
+            .and(path("/large-manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(&body))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let url = format!("{}/large-manifest.json", mock_server.uri());
+        let result = fetcher.fetch(&PluginSource::Url(url)).await;
+
+        match result {
+            Err(FetchError::SecureFetchError(SecureFetchError::ResponseTooLarge {
+                size: s,
+                max: m,
+            })) => {
+                assert!(s > MAX_MANIFEST_SIZE);
+                assert_eq!(m, MAX_MANIFEST_SIZE);
+            }
+            res => panic!("Expected ResponseTooLarge error, got {:?}", res),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_path_exact_limit() {
+        // Create a temporary file exactly at MAX_MANIFEST_SIZE
+        let mut file = NamedTempFile::new().unwrap();
+        let body = create_valid_manifest_padded(MAX_MANIFEST_SIZE as usize);
+        file.write_all(body.as_bytes()).unwrap();
+        file.flush().unwrap();
+
+        let path = file.path().to_path_buf();
+        let fetcher = ManifestFetcher::new();
+        let result = fetcher.fetch(&PluginSource::Path(path)).await;
+
+        assert!(
+            result.is_ok(),
+            "Manifest exactly at size limit should be accepted, but got: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_path_too_large() {
+        // Create a temporary file larger than MAX_MANIFEST_SIZE
+        let mut file = NamedTempFile::new().unwrap();
+        // Write in chunks to avoid memory issues if possible, though 10MB is small enough
+        let chunk = vec![b'a'; 1024 * 1024]; // 1MB chunk
+        for _ in 0..11 {
+            file.write_all(&chunk).unwrap();
+        }
+        file.flush().unwrap();
+
+        let path = file.path().to_path_buf();
+        let fetcher = ManifestFetcher::new();
+        let result = fetcher.fetch(&PluginSource::Path(path)).await;
+
+        match result {
+            Err(FetchError::IoError(e)) => {
+                assert!(e.to_string().contains("Manifest file too large"));
+            }
+            res => panic!("Expected IoError for large file, got {:?}", res),
         }
     }
 }
