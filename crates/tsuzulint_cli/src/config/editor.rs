@@ -178,15 +178,34 @@ fn generate_rule_def(
     use tsuzulint_registry::resolver::PluginSource;
 
     match &spec.source {
-        PluginSource::GitHub { owner, repo, .. } => {
+        PluginSource::GitHub {
+            owner,
+            repo,
+            server_url,
+            ..
+        } => {
             let version = &manifest.rule.version;
             let source_str = format!("{}/{}@{}", owner, repo, version);
             let source_json = serde_json::to_string(&source_str).into_diagnostic()?;
             if let Some(a) = &spec.alias {
                 let alias_json = serde_json::to_string(a).into_diagnostic()?;
+                if let Some(server_url) = server_url {
+                    let server_url_json = serde_json::to_string(server_url).into_diagnostic()?;
+                    Ok(format!(
+                        "{{\n      \"github\": {},\n      \"server_url\": {},\n      \"as\": {}\n    }}",
+                        source_json, server_url_json, alias_json
+                    ))
+                } else {
+                    Ok(format!(
+                        "{{\n      \"github\": {},\n      \"as\": {}\n    }}",
+                        source_json, alias_json
+                    ))
+                }
+            } else if let Some(server_url) = server_url {
+                let server_url_json = serde_json::to_string(server_url).into_diagnostic()?;
                 Ok(format!(
-                    "{{\n      \"github\": {},\n      \"as\": {}\n    }}",
-                    source_json, alias_json
+                    "{{\n      \"github\": {},\n      \"server_url\": {}\n    }}",
+                    source_json, server_url_json
                 ))
             } else {
                 Ok(source_json)
@@ -273,6 +292,7 @@ mod tests {
                 owner: "owner".to_string(),
                 repo: "repo".to_string(),
                 version: None,
+                server_url: None,
             },
             alias: None,
         }

@@ -116,11 +116,13 @@ impl PluginResolver {
                 owner,
                 repo,
                 version,
+                server_url,
             } => (
                 PluginSource::GitHub {
                     owner: owner.clone(),
                     repo: repo.clone(),
                     version: version.clone(),
+                    server_url: server_url.clone(),
                 },
                 None,
             ),
@@ -259,6 +261,14 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    fn github_spec_with_server_url(server_url: &str) -> PluginSpec {
+        PluginSpec::parse(&json!({
+            "github": "owner/repo",
+            "server_url": server_url
+        }))
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn test_resolve_github_success() {
         let mock_server = MockServer::start().await;
@@ -291,9 +301,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let fetcher = ManifestFetcher::new()
-            .with_base_url(mock_server.uri())
-            .allow_local(true);
+        let fetcher = ManifestFetcher::new().allow_local(true);
 
         let downloader = WasmDownloader::new()
             .expect("Failed to create downloader")
@@ -305,7 +313,7 @@ mod tests {
             .with_downloader(downloader)
             .with_cache(PluginCache::with_dir(dir.path()));
 
-        let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
+        let spec = github_spec_with_server_url(&mock_server.uri());
 
         let resolved = resolver.resolve(&spec).await.expect("Resolve failed");
 
@@ -639,9 +647,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let fetcher = ManifestFetcher::new()
-            .with_base_url(mock_server.uri())
-            .allow_local(true);
+        let fetcher = ManifestFetcher::new().allow_local(true);
 
         let downloader = WasmDownloader::new()
             .expect("Failed to create downloader")
@@ -653,7 +659,7 @@ mod tests {
             .with_downloader(downloader)
             .with_cache(PluginCache::with_dir(dir.path()));
 
-        let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
+        let spec = github_spec_with_server_url(&mock_server.uri());
 
         let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
         let resolved2 = resolver
@@ -697,9 +703,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let fetcher = ManifestFetcher::new()
-            .with_base_url(mock_server.uri())
-            .allow_local(true);
+        let fetcher = ManifestFetcher::new().allow_local(true);
 
         let downloader = WasmDownloader::new()
             .expect("Failed to create downloader")
@@ -713,7 +717,7 @@ mod tests {
             .with_downloader(downloader)
             .with_cache(cache);
 
-        let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
+        let spec = github_spec_with_server_url(&mock_server.uri());
 
         let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
 
@@ -760,9 +764,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let fetcher = ManifestFetcher::new()
-            .with_base_url(mock_server.uri())
-            .allow_local(true);
+        let fetcher = ManifestFetcher::new().allow_local(true);
 
         let downloader = WasmDownloader::new()
             .expect("Failed to create downloader")
@@ -776,7 +778,7 @@ mod tests {
             .with_downloader(downloader)
             .with_cache(cache);
 
-        let spec = PluginSpec::parse(&json!("owner/repo")).unwrap();
+        let spec = github_spec_with_server_url(&mock_server.uri());
 
         let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
 

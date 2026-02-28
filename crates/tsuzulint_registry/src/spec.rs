@@ -63,6 +63,7 @@ impl PluginSpec {
                 owner: owner.to_string(),
                 repo: repo.to_string(),
                 version,
+                server_url: None,
             },
             alias: None,
         })
@@ -74,6 +75,7 @@ impl PluginSpec {
             github: Option<String>,
             url: Option<String>,
             path: Option<String>,
+            server_url: Option<String>,
             #[serde(rename = "as")]
             alias: Option<String>,
         }
@@ -92,8 +94,17 @@ impl PluginSpec {
             ));
         }
 
+        if obj.server_url.is_some() && obj.github.is_none() {
+            return Err(ParseError::InvalidObject(
+                "'server_url' can only be used with 'github' source".to_string(),
+            ));
+        }
+
         if let Some(github) = obj.github {
-            let spec = Self::parse_string(&github)?;
+            let mut spec = Self::parse_string(&github)?;
+            if let PluginSource::GitHub { server_url, .. } = &mut spec.source {
+                *server_url = obj.server_url;
+            }
             return Ok(Self {
                 source: spec.source,
                 alias: obj.alias,
@@ -137,7 +148,8 @@ mod tests {
             PluginSource::GitHub {
                 owner: "owner".to_string(),
                 repo: "repo".to_string(),
-                version: None
+                version: None,
+                server_url: None,
             }
         );
         assert_eq!(spec.alias, None);
@@ -152,7 +164,8 @@ mod tests {
             PluginSource::GitHub {
                 owner: "owner".to_string(),
                 repo: "repo".to_string(),
-                version: Some("v1.2.3".to_string())
+                version: Some("v1.2.3".to_string()),
+                server_url: None,
             }
         );
     }
@@ -169,7 +182,28 @@ mod tests {
             PluginSource::GitHub {
                 owner: "owner".to_string(),
                 repo: "repo".to_string(),
-                version: None
+                version: None,
+                server_url: None,
+            }
+        );
+        assert_eq!(spec.alias, Some("my-rule".to_string()));
+    }
+
+    #[test]
+    fn test_parse_object_github_with_server_url() {
+        let value = json!({
+            "github": "owner/repo",
+            "server_url": "https://git.internal.example.com",
+            "as": "my-rule"
+        });
+        let spec = PluginSpec::parse(&value).unwrap();
+        assert_eq!(
+            spec.source,
+            PluginSource::GitHub {
+                owner: "owner".to_string(),
+                repo: "repo".to_string(),
+                version: None,
+                server_url: Some("https://git.internal.example.com".to_string()),
             }
         );
         assert_eq!(spec.alias, Some("my-rule".to_string()));
@@ -239,6 +273,21 @@ mod tests {
             PluginSpec::parse(&json!("owner/repo@   ")),
             Err(ParseError::InvalidFormat)
         ));
+    }
+
+    #[test]
+    fn test_parse_object_error_server_url_with_non_github() {
+        let value = json!({
+            "url": "https://example.com/manifest.json",
+            "server_url": "https://git.internal.example.com",
+            "as": "alias"
+        });
+        match PluginSpec::parse(&value) {
+            Err(ParseError::InvalidObject(msg)) => {
+                assert!(msg.contains("'server_url' can only be used with 'github' source"));
+            }
+            _ => panic!("Should fail with InvalidObject about server_url"),
+        }
     }
 
     #[test]

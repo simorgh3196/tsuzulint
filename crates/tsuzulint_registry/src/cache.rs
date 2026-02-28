@@ -62,9 +62,27 @@ impl PluginCache {
         }
 
         match source {
-            PluginSource::GitHub { owner, repo, .. } => {
+            PluginSource::GitHub {
+                owner,
+                repo,
+                version: _,
+                server_url,
+            } => {
                 if is_safe(owner) && is_safe(repo) {
-                    Some(self.cache_dir.join(owner).join(repo).join(version))
+                    let host = if let Some(url) = server_url {
+                        tsuzulint_manifest::HashVerifier::compute(
+                            url.trim_end_matches('/').as_bytes(),
+                        )
+                    } else {
+                        "github.com".to_string()
+                    };
+                    Some(
+                        self.cache_dir
+                            .join(host)
+                            .join(owner)
+                            .join(repo)
+                            .join(version),
+                    )
                 } else {
                     None
                 }
@@ -262,8 +280,8 @@ mod tests {
         assert!(cache.get(&source2, "1.0").is_none());
 
         // Root dir should be empty or gone
-        assert!(!temp_dir.path().join("owner1").exists());
-        assert!(!temp_dir.path().join("owner2").exists());
+        assert!(!temp_dir.path().join("github.com").join("owner1").exists());
+        assert!(!temp_dir.path().join("github.com").join("owner2").exists());
     }
 
     #[test]
@@ -298,7 +316,7 @@ mod tests {
         let source = PluginSource::github("owner", "repo");
 
         // Create the directory with read-only permissions
-        let cache_path = temp_dir.path().join("owner/repo/1.0.0");
+        let cache_path = temp_dir.path().join("github.com/owner/repo/1.0.0");
         fs::create_dir_all(&cache_path).unwrap();
 
         // Remove write permissions from the directory so we can't create files inside it

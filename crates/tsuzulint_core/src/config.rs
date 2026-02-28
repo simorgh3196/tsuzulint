@@ -123,6 +123,8 @@ pub struct RuleDefinitionDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
@@ -582,6 +584,7 @@ mod tests {
     fn test_rule_definition_detail_equality() {
         let def1 = RuleDefinitionDetail {
             github: Some("owner/repo".to_string()),
+            server_url: None,
             url: None,
             path: None,
             r#as: Some("alias".to_string()),
@@ -589,6 +592,7 @@ mod tests {
 
         let def2 = RuleDefinitionDetail {
             github: Some("owner/repo".to_string()),
+            server_url: None,
             url: None,
             path: None,
             r#as: Some("alias".to_string()),
@@ -596,6 +600,7 @@ mod tests {
 
         let def3 = RuleDefinitionDetail {
             github: Some("other/repo".to_string()),
+            server_url: None,
             url: None,
             path: None,
             r#as: Some("alias".to_string()),
