@@ -353,3 +353,25 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_load_rule_manifest_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let file = File::create(&manifest_path).unwrap();
+        // create a file that's exactly MAX_MANIFEST_SIZE + 1 bytes long
+        file.set_len(MAX_MANIFEST_SIZE + 1).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("is too large"));
+    }
+}
