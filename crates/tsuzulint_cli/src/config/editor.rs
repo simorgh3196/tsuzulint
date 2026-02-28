@@ -201,16 +201,14 @@ fn generate_rule_def(
                         source_json, alias_json
                     ))
                 }
+            } else if let Some(server_url) = server_url {
+                let server_url_json = serde_json::to_string(server_url).into_diagnostic()?;
+                Ok(format!(
+                    "{{\n      \"github\": {},\n      \"server_url\": {}\n    }}",
+                    source_json, server_url_json
+                ))
             } else {
-                if let Some(server_url) = server_url {
-                    let server_url_json = serde_json::to_string(server_url).into_diagnostic()?;
-                    Ok(format!(
-                        "{{\n      \"github\": {},\n      \"server_url\": {}\n    }}",
-                        source_json, server_url_json
-                    ))
-                } else {
-                    Ok(source_json)
-                }
+                Ok(source_json)
             }
         }
         PluginSource::Url(url) => {
