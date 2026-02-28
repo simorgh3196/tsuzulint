@@ -125,7 +125,9 @@ impl ManifestFetcher {
         version: Option<&str>,
         server_url: Option<&str>,
     ) -> Result<ExternalRuleManifest, FetchError> {
-        let base = server_url.unwrap_or("https://github.com");
+        let base = server_url
+            .unwrap_or("https://github.com")
+            .trim_end_matches('/');
         let url = match version {
             Some(v) => format!("{base}/{owner}/{repo}/releases/download/v{v}/tsuzulint-rule.json"),
             None => format!("{base}/{owner}/{repo}/releases/latest/download/tsuzulint-rule.json"),

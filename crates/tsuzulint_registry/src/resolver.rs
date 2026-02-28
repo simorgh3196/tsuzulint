@@ -261,6 +261,14 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    fn github_spec_with_server_url(server_url: &str) -> PluginSpec {
+        PluginSpec::parse(&json!({
+            "github": "owner/repo",
+            "server_url": server_url
+        }))
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn test_resolve_github_success() {
         let mock_server = MockServer::start().await;
@@ -305,9 +313,7 @@ mod tests {
             .with_downloader(downloader)
             .with_cache(PluginCache::with_dir(dir.path()));
 
-        let spec =
-            PluginSpec::parse(&json!({ "github": "owner/repo", "server_url": mock_server.uri() }))
-                .unwrap();
+        let spec = github_spec_with_server_url(&mock_server.uri());
 
         let resolved = resolver.resolve(&spec).await.expect("Resolve failed");
 
@@ -653,9 +659,7 @@ mod tests {
             .with_downloader(downloader)
             .with_cache(PluginCache::with_dir(dir.path()));
 
-        let spec =
-            PluginSpec::parse(&json!({ "github": "owner/repo", "server_url": mock_server.uri() }))
-                .unwrap();
+        let spec = github_spec_with_server_url(&mock_server.uri());
 
         let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
         let resolved2 = resolver
@@ -713,9 +717,7 @@ mod tests {
             .with_downloader(downloader)
             .with_cache(cache);
 
-        let spec =
-            PluginSpec::parse(&json!({ "github": "owner/repo", "server_url": mock_server.uri() }))
-                .unwrap();
+        let spec = github_spec_with_server_url(&mock_server.uri());
 
         let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
 
@@ -776,9 +778,7 @@ mod tests {
             .with_downloader(downloader)
             .with_cache(cache);
 
-        let spec =
-            PluginSpec::parse(&json!({ "github": "owner/repo", "server_url": mock_server.uri() }))
-                .unwrap();
+        let spec = github_spec_with_server_url(&mock_server.uri());
 
         let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
 

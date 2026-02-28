@@ -94,6 +94,12 @@ impl PluginSpec {
             ));
         }
 
+        if obj.server_url.is_some() && obj.github.is_none() {
+            return Err(ParseError::InvalidObject(
+                "'server_url' can only be used with 'github' source".to_string(),
+            ));
+        }
+
         if let Some(github) = obj.github {
             let mut spec = Self::parse_string(&github)?;
             if let PluginSource::GitHub { server_url, .. } = &mut spec.source {
@@ -267,6 +273,21 @@ mod tests {
             PluginSpec::parse(&json!("owner/repo@   ")),
             Err(ParseError::InvalidFormat)
         ));
+    }
+
+    #[test]
+    fn test_parse_object_error_server_url_with_non_github() {
+        let value = json!({
+            "url": "https://example.com/manifest.json",
+            "server_url": "https://git.internal.example.com",
+            "as": "alias"
+        });
+        match PluginSpec::parse(&value) {
+            Err(ParseError::InvalidObject(msg)) => {
+                assert!(msg.contains("'server_url' can only be used with 'github' source"));
+            }
+            _ => panic!("Should fail with InvalidObject about server_url"),
+        }
     }
 
     #[test]
