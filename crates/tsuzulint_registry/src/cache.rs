@@ -70,7 +70,9 @@ impl PluginCache {
             } => {
                 if is_safe(owner) && is_safe(repo) {
                     let host = if let Some(url) = server_url {
-                        tsuzulint_manifest::HashVerifier::compute(url.as_bytes())
+                        tsuzulint_manifest::HashVerifier::compute(
+                            url.trim_end_matches('/').as_bytes(),
+                        )
                     } else {
                         "github.com".to_string()
                     };

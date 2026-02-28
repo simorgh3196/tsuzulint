@@ -39,6 +39,14 @@
                   "alice/tsuzulint-rule-foo@1.0.0"
                 ]
               },
+              "server_url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Optional GitHub Enterprise server URL",
+                "examples": [
+                  "https://git.internal.example.com"
+                ]
+              },
               "as": {
                 "type": "string",
                 "description": "Alias for this rule (used in options)",
