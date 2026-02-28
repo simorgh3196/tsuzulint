@@ -128,7 +128,7 @@ pub fn lint_file_internal(
                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                 }
                 if timings_enabled {
-                    *timings.entry(rule.clone()).or_insert(Duration::ZERO) += start.elapsed();
+                    *timings.entry(rule.to_string()).or_insert(Duration::ZERO) += start.elapsed();
                 }
             } else {
                 let ast_raw = to_raw_value(&ast, "AST")?;
@@ -145,7 +145,8 @@ pub fn lint_file_internal(
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
                     if timings_enabled {
-                        *timings.entry(rule.clone()).or_insert(Duration::ZERO) += start.elapsed();
+                        *timings.entry(rule.to_string()).or_insert(Duration::ZERO) +=
+                            start.elapsed();
                     }
                 }
             }
@@ -172,7 +173,7 @@ pub fn lint_file_internal(
                                 Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                             }
                             if timings_enabled {
-                                *timings.entry(rule.clone()).or_insert(Duration::ZERO) +=
+                                *timings.entry(rule.to_string()).or_insert(Duration::ZERO) +=
                                     start.elapsed();
                             }
                         } else if let Ok(node_raw) = to_raw_value(node, "block node") {
@@ -193,7 +194,7 @@ pub fn lint_file_internal(
                                         }
                                         if timings_enabled {
                                             *timings
-                                                .entry(rule.clone())
+                                                .entry(rule.to_string())
                                                 .or_insert(Duration::ZERO) += start.elapsed();
                                         }
                                     }
@@ -218,7 +219,7 @@ pub fn lint_file_internal(
     // Filter out diagnostics that are covered by global rules (by checking rule ID).
     // Global rules take precedence, and their diagnostics should not be stored in block cache.
     // This is faster than hashing entire Diagnostic objects.
-    let global_rule_ids: HashSet<&str> = global_rule_names.iter().map(|s| s.as_str()).collect();
+    let global_rule_ids: HashSet<&str> = global_rule_names.iter().copied().collect();
 
     filter_overridden_diagnostics(&mut local_diagnostics, &global_rule_ids);
 
@@ -358,18 +359,21 @@ impl ManifestProvider for PluginHost {
 /// This function iterates over `enabled_rules` (O(M)) instead of all loaded rules (O(N))
 /// to optimize performance when M << N. It sorts the results to ensure deterministic
 /// output since `enabled_rules` iteration order is arbitrary.
-fn get_classified_rules<P>(host: &P, enabled_rules: &HashSet<&str>) -> (Vec<String>, Vec<String>)
+fn get_classified_rules<'a, P>(
+    host: &P,
+    enabled_rules: &HashSet<&'a str>,
+) -> (Vec<&'a str>, Vec<&'a str>)
 where
     P: ManifestProvider,
 {
     let mut global_rules = Vec::new();
     let mut block_rules = Vec::new();
 
-    for name in enabled_rules {
+    for &name in enabled_rules {
         if let Some(manifest) = host.get_manifest(name) {
             match manifest.isolation_level {
-                IsolationLevel::Global => global_rules.push(name.to_string()),
-                IsolationLevel::Block => block_rules.push(name.to_string()),
+                IsolationLevel::Global => global_rules.push(name),
+                IsolationLevel::Block => block_rules.push(name),
             }
         } else {
             warn!("Missing manifest for enabled rule: {}", name);
@@ -469,14 +473,14 @@ mod tests {
 
         let (global_rules, block_rules) = get_classified_rules(&provider, &enabled_rules);
 
-        assert!(global_rules.contains(&global_name.to_string()));
-        assert!(!global_rules.contains(&disabled_name.to_string()));
-        assert!(!global_rules.contains(&missing_manifest_name.to_string()));
+        assert!(global_rules.contains(&global_name));
+        assert!(!global_rules.contains(&disabled_name));
+        assert!(!global_rules.contains(&missing_manifest_name));
 
-        assert!(block_rules.contains(&block_name.to_string()));
+        assert!(block_rules.contains(&block_name));
 
-        assert_eq!(global_rules, vec!["global-rule".to_string()]);
-        assert_eq!(block_rules, vec!["block-rule".to_string()]);
+        assert_eq!(global_rules, vec!["global-rule"]);
+        assert_eq!(block_rules, vec!["block-rule"]);
     }
 
     #[test]
@@ -504,14 +508,8 @@ mod tests {
 
         let (global_rules, block_rules) = get_classified_rules(&provider, &enabled_rules);
 
-        assert_eq!(
-            global_rules,
-            vec!["a-global".to_string(), "z-global".to_string()]
-        );
-        assert_eq!(
-            block_rules,
-            vec!["a-block".to_string(), "z-block".to_string()]
-        );
+        assert_eq!(global_rules, vec!["a-global", "z-global"]);
+        assert_eq!(block_rules, vec!["a-block", "z-block"]);
     }
 
     #[test]
