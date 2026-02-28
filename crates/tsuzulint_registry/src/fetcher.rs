@@ -318,6 +318,49 @@ mod tests_size_limit {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    fn create_valid_manifest_padded(target_size: usize) -> String {
+        let base_json = r#"{
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0"
+            },
+            "wasm": [{
+                "url": "https://example.com/rule.wasm",
+                "hash": "a3b6408225010668045610815132640108602685710662650426543168015505"
+            }]
+        }"#;
+
+        let mut padded = base_json.to_string();
+        if padded.len() < target_size {
+            padded.push_str(&" ".repeat(target_size - padded.len()));
+        }
+        padded
+    }
+
+    #[tokio::test]
+    async fn test_fetch_url_exact_limit() {
+        let mock_server = MockServer::start().await;
+
+        let body = create_valid_manifest_padded(MAX_MANIFEST_SIZE as usize);
+        assert_eq!(body.len(), MAX_MANIFEST_SIZE as usize);
+
+        Mock::given(method("GET"))
+            .and(path("/exact-manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(&body))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let url = format!("{}/exact-manifest.json", mock_server.uri());
+        let result = fetcher.fetch(&PluginSource::Url(url)).await;
+
+        assert!(
+            result.is_ok(),
+            "Manifest exactly at size limit should be accepted, but got: {:?}",
+            result
+        );
+    }
+
     #[tokio::test]
     async fn test_fetch_url_too_large() {
         let mock_server = MockServer::start().await;
@@ -346,6 +389,25 @@ mod tests_size_limit {
             }
             res => panic!("Expected ResponseTooLarge error, got {:?}", res),
         }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_path_exact_limit() {
+        // Create a temporary file exactly at MAX_MANIFEST_SIZE
+        let mut file = NamedTempFile::new().unwrap();
+        let body = create_valid_manifest_padded(MAX_MANIFEST_SIZE as usize);
+        file.write_all(body.as_bytes()).unwrap();
+        file.flush().unwrap();
+
+        let path = file.path().to_path_buf();
+        let fetcher = ManifestFetcher::new();
+        let result = fetcher.fetch(&PluginSource::Path(path)).await;
+
+        assert!(
+            result.is_ok(),
+            "Manifest exactly at size limit should be accepted, but got: {:?}",
+            result
+        );
     }
 
     #[tokio::test]
