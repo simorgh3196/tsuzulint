@@ -86,6 +86,7 @@ fn resolve_rules(
                     Ok(resolved) => {
                         let new_rule = RuleDefinition::Detail(RuleDefinitionDetail {
                             github: None,
+                            server_url: None,
                             url: None,
                             path: Some(resolved.path),
                             r#as: original_alias.or(Some(resolved.alias)),
@@ -170,12 +171,16 @@ fn extract_plugin_spec(rule: &RuleDefinition) -> Option<(PluginSpec, Option<Stri
         }
         RuleDefinition::Detail(d) => {
             if let Some(gh) = &d.github {
-                let (spec, alias) =
-                    super::rules::build_spec_from_detail("github", gh, d.r#as.as_deref());
+                let (spec, alias) = super::rules::build_spec_from_detail(
+                    "github",
+                    gh,
+                    d.server_url.as_deref(),
+                    d.r#as.as_deref(),
+                );
                 spec.map(|s| (s, alias))
             } else if let Some(url) = &d.url {
                 let (spec, alias) =
-                    super::rules::build_spec_from_detail("url", url, d.r#as.as_deref());
+                    super::rules::build_spec_from_detail("url", url, None, d.r#as.as_deref());
                 spec.map(|s| (s, alias))
             } else {
                 None

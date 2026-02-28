@@ -415,6 +415,7 @@ mod tests {
         config.rules.push(crate::config::RuleDefinition::Detail(
             crate::config::RuleDefinitionDetail {
                 github: None,
+                server_url: None,
                 url: None,
                 path: Some(abs_manifest_path.to_string_lossy().to_string()),
                 r#as: None,

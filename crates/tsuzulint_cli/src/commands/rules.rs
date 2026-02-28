@@ -317,6 +317,7 @@ pub fn run_add_rule(path: &Path, alias: Option<&str>, config_path: Option<PathBu
 pub fn build_spec_from_detail(
     key: &str,
     value: &str,
+    server_url: Option<&str>,
     alias: Option<&str>,
 ) -> (Option<PluginSpec>, Option<String>) {
     let mut map = serde_json::Map::new();
@@ -324,6 +325,12 @@ pub fn build_spec_from_detail(
         key.to_string(),
         serde_json::Value::String(value.to_string()),
     );
+    if let Some(su) = server_url {
+        map.insert(
+            "server_url".to_string(),
+            serde_json::Value::String(su.to_string()),
+        );
+    }
     if let Some(a) = alias {
         map.insert("as".to_string(), serde_json::Value::String(a.to_string()));
     }
@@ -347,7 +354,7 @@ mod tests {
 
     #[test]
     fn test_build_spec_from_detail() {
-        let (spec, alias) = build_spec_from_detail("github", "owner/repo", Some("alias"));
+        let (spec, alias) = build_spec_from_detail("github", "owner/repo", None, Some("alias"));
         assert!(spec.is_some());
         assert!(matches!(
             spec.as_ref().unwrap().source,
@@ -355,15 +362,19 @@ mod tests {
         ));
         assert_eq!(alias, Some("alias".to_string()));
 
-        let (spec, alias) = build_spec_from_detail("invalid", "value", None);
+        let (spec, alias) = build_spec_from_detail("invalid", "value", None, None);
         assert!(spec.is_none());
         assert!(alias.is_none());
     }
 
     #[test]
     fn test_build_spec_from_detail_url() {
-        let (spec, alias) =
-            build_spec_from_detail("url", "https://example.com/rule.wasm", Some("my-rule"));
+        let (spec, alias) = build_spec_from_detail(
+            "url",
+            "https://example.com/rule.wasm",
+            None,
+            Some("my-rule"),
+        );
         assert!(spec.is_some());
         assert!(matches!(
             spec.as_ref().unwrap().source,
@@ -374,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_build_spec_from_detail_github_no_alias() {
-        let (spec, alias) = build_spec_from_detail("github", "owner/repo", None);
+        let (spec, alias) = build_spec_from_detail("github", "owner/repo", None, None);
         assert!(spec.is_some());
         assert!(matches!(
             spec.as_ref().unwrap().source,
