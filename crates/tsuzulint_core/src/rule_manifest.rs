@@ -16,7 +16,26 @@ pub struct LoadRuleManifestResult {
     pub wasm_bytes: Vec<u8>,
 }
 
+const MAX_MANIFEST_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
+
 pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult, LinterError> {
+    if manifest_path.exists() {
+        let metadata = fs::metadata(manifest_path).map_err(|e| {
+            LinterError::Config(format!(
+                "Failed to read metadata for rule manifest '{}': {}",
+                manifest_path.display(),
+                e
+            ))
+        })?;
+
+        if metadata.len() > MAX_MANIFEST_SIZE {
+            return Err(LinterError::Config(format!(
+                "Rule manifest '{}' is too large (exceeds 10MB limit)",
+                manifest_path.display()
+            )));
+        }
+    }
+
     let content = fs::read_to_string(manifest_path).map_err(|e| {
         LinterError::Config(format!(
             "Failed to read rule manifest '{}': {}",
