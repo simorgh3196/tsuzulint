@@ -16,7 +16,26 @@ pub struct LoadRuleManifestResult {
     pub wasm_bytes: Vec<u8>,
 }
 
+const MAX_MANIFEST_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
+
 pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult, LinterError> {
+    if manifest_path.exists() {
+        let metadata = fs::metadata(manifest_path).map_err(|e| {
+            LinterError::Config(format!(
+                "Failed to read metadata for rule manifest '{}': {}",
+                manifest_path.display(),
+                e
+            ))
+        })?;
+
+        if metadata.len() > MAX_MANIFEST_SIZE {
+            return Err(LinterError::Config(format!(
+                "Rule manifest '{}' is too large (exceeds 10MB limit)",
+                manifest_path.display()
+            )));
+        }
+    }
+
     let content = fs::read_to_string(manifest_path).map_err(|e| {
         LinterError::Config(format!(
             "Failed to read rule manifest '{}': {}",
@@ -331,6 +350,47 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("Invalid rule manifest")
+        );
+    }
+}
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_load_rule_manifest_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let file = File::create(&manifest_path).unwrap();
+        // create a file that's exactly MAX_MANIFEST_SIZE + 1 bytes long
+        file.set_len(MAX_MANIFEST_SIZE + 1).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("is too large"));
+    }
+
+    #[test]
+    fn test_load_rule_manifest_at_size_limit() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let file = File::create(&manifest_path).unwrap();
+        // create a file that's exactly MAX_MANIFEST_SIZE bytes long
+        file.set_len(MAX_MANIFEST_SIZE).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err()); // Will fail to parse as JSON, but shouldn't fail size limit
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            !err_msg.contains("is too large"),
+            "Expected error not to be about size, but got: {}",
+            err_msg
         );
     }
 }
