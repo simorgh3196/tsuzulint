@@ -374,4 +374,23 @@ mod extra_tests {
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("is too large"));
     }
+
+    #[test]
+    fn test_load_rule_manifest_at_size_limit() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let file = File::create(&manifest_path).unwrap();
+        // create a file that's exactly MAX_MANIFEST_SIZE bytes long
+        file.set_len(MAX_MANIFEST_SIZE).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err()); // Will fail to parse as JSON, but shouldn't fail size limit
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            !err_msg.contains("is too large"),
+            "Expected error not to be about size, but got: {}",
+            err_msg
+        );
+    }
 }
