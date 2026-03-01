@@ -694,6 +694,39 @@ mod tests {
     }
 
     #[test]
+    fn test_any_rule_has_capability_no_enabled_rules_filter() {
+        let mut manifests = HashMap::new();
+        manifests.insert(
+            "rule-morphology".to_string(),
+            create_manifest_with_capabilities(vec![tsuzulint_plugin::Capability::Morphology]),
+        );
+        manifests.insert(
+            "rule-none".to_string(),
+            create_manifest_with_capabilities(vec![]),
+        );
+
+        let provider = MockManifestProvider { manifests };
+
+        // Test with a rule that has the capability, passing None for enabled_rules
+        let rules: Vec<String> = vec!["rule-morphology".to_string()];
+        assert!(any_rule_has_capability(
+            rules.iter(),
+            &provider,
+            None,
+            |m| m.needs_morphology()
+        ));
+
+        // Test with a rule that doesn't have the capability, passing None for enabled_rules
+        let rules: Vec<String> = vec!["rule-none".to_string()];
+        assert!(!any_rule_has_capability(
+            rules.iter(),
+            &provider,
+            None,
+            |m| m.needs_morphology()
+        ));
+    }
+
+    #[test]
     fn test_select_parser_markdown() {
         let parser = select_parser("md");
         assert_eq!(parser.name(), "markdown");
