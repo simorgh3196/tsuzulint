@@ -86,6 +86,7 @@ pub fn lint_file_internal(
     let ignore_ranges = extract_ignore_ranges(&ast);
 
     let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), host, enabled_rules);
+    let needs_sentences = any_rule_needs_sentences(host.loaded_rules(), host, enabled_rules);
 
     let tokens = if needs_morphology {
         tokenizer
@@ -94,7 +95,11 @@ pub fn lint_file_internal(
     } else {
         Vec::new()
     };
-    let sentences = SentenceSplitter::split(&content, &ignore_ranges);
+    let sentences = if needs_sentences {
+        SentenceSplitter::split(&content, &ignore_ranges)
+    } else {
+        Vec::new()
+    };
 
     let current_blocks = extract_blocks(&ast, &content);
 
@@ -274,10 +279,11 @@ pub fn lint_content(
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
-    let needs_morphology = host
-        .loaded_rules()
-        .filter_map(|name| host.get_manifest(name))
-        .any(|m| m.needs_morphology());
+    let needs_morphology =
+        any_rule_has_capability(host.loaded_rules(), host, None, |m| m.needs_morphology());
+
+    let needs_sentences =
+        any_rule_has_capability(host.loaded_rules(), host, None, |m| m.needs_sentences());
 
     let tokens = if needs_morphology {
         tokenizer
@@ -286,7 +292,11 @@ pub fn lint_content(
     } else {
         Vec::new()
     };
-    let sentences = SentenceSplitter::split(content, &ignore_ranges);
+    let sentences = if needs_sentences {
+        SentenceSplitter::split(content, &ignore_ranges)
+    } else {
+        Vec::new()
+    };
 
     let diagnostics =
         host.run_all_rules_with_parts(&ast_raw, content, &tokens, &sentences, path.to_str())?;
@@ -395,22 +405,42 @@ fn filter_overridden_diagnostics(
     }
 }
 
+fn any_rule_has_capability<'a, I, P, F>(
+    rules: I,
+    host: &P,
+    enabled_rules: Option<&HashSet<&str>>,
+    predicate: F,
+) -> bool
+where
+    I: Iterator<Item = &'a String>,
+    P: ManifestProvider,
+    F: Fn(&RuleManifest) -> bool,
+{
+    for name in rules {
+        if enabled_rules.is_some_and(|enabled| !enabled.contains(name.as_str())) {
+            continue;
+        }
+        if host.get_manifest(name).is_some_and(&predicate) {
+            return true;
+        }
+    }
+    false
+}
+
 fn any_rule_needs_morphology<'a, I, P>(rules: I, host: &P, enabled_rules: &HashSet<&str>) -> bool
 where
     I: Iterator<Item = &'a String>,
     P: ManifestProvider,
 {
-    for name in rules {
-        if !enabled_rules.contains(name.as_str()) {
-            continue;
-        }
-        if let Some(manifest) = host.get_manifest(name)
-            && manifest.needs_morphology()
-        {
-            return true;
-        }
-    }
-    false
+    any_rule_has_capability(rules, host, Some(enabled_rules), |m| m.needs_morphology())
+}
+
+fn any_rule_needs_sentences<'a, I, P>(rules: I, host: &P, enabled_rules: &HashSet<&str>) -> bool
+where
+    I: Iterator<Item = &'a String>,
+    P: ManifestProvider,
+{
+    any_rule_has_capability(rules, host, Some(enabled_rules), |m| m.needs_sentences())
 }
 
 #[cfg(test)]
@@ -441,6 +471,14 @@ mod tests {
             languages: vec![],
             capabilities: vec![],
         }
+    }
+
+    fn create_manifest_with_capabilities(
+        capabilities: Vec<tsuzulint_plugin::Capability>,
+    ) -> RuleManifest {
+        let mut manifest = create_manifest(IsolationLevel::Global);
+        manifest.capabilities = capabilities;
+        manifest
     }
 
     #[test]
@@ -551,6 +589,141 @@ mod tests {
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule_id, "local-rule");
+    }
+
+    #[test]
+    fn test_any_rule_needs_morphology() {
+        let mut manifests = HashMap::new();
+        manifests.insert(
+            "rule-morphology".to_string(),
+            create_manifest_with_capabilities(vec![tsuzulint_plugin::Capability::Morphology]),
+        );
+        manifests.insert(
+            "rule-none".to_string(),
+            create_manifest_with_capabilities(vec![]),
+        );
+
+        let provider = MockManifestProvider { manifests };
+
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert("rule-morphology");
+        let rules: Vec<String> = vec!["rule-morphology".to_string()];
+        assert!(any_rule_needs_morphology(
+            rules.iter(),
+            &provider,
+            &enabled_rules
+        ));
+
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert("rule-none");
+        let rules: Vec<String> = vec!["rule-none".to_string()];
+        assert!(!any_rule_needs_morphology(
+            rules.iter(),
+            &provider,
+            &enabled_rules
+        ));
+
+        let enabled_rules = HashSet::new(); // empty
+        let rules: Vec<String> = vec!["rule-morphology".to_string()];
+        assert!(!any_rule_needs_morphology(
+            rules.iter(),
+            &provider,
+            &enabled_rules
+        ));
+
+        // test rule not in provider
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert("missing");
+        let rules: Vec<String> = vec!["missing".to_string()];
+        assert!(!any_rule_needs_morphology(
+            rules.iter(),
+            &provider,
+            &enabled_rules
+        ));
+    }
+
+    #[test]
+    fn test_any_rule_needs_sentences() {
+        let mut manifests = HashMap::new();
+        manifests.insert(
+            "rule-sentences".to_string(),
+            create_manifest_with_capabilities(vec![tsuzulint_plugin::Capability::Sentences]),
+        );
+        manifests.insert(
+            "rule-none".to_string(),
+            create_manifest_with_capabilities(vec![]),
+        );
+
+        let provider = MockManifestProvider { manifests };
+
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert("rule-sentences");
+        let rules: Vec<String> = vec!["rule-sentences".to_string()];
+        assert!(any_rule_needs_sentences(
+            rules.iter(),
+            &provider,
+            &enabled_rules
+        ));
+
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert("rule-none");
+        let rules: Vec<String> = vec!["rule-none".to_string()];
+        assert!(!any_rule_needs_sentences(
+            rules.iter(),
+            &provider,
+            &enabled_rules
+        ));
+
+        let enabled_rules = HashSet::new(); // empty
+        let rules: Vec<String> = vec!["rule-sentences".to_string()];
+        assert!(!any_rule_needs_sentences(
+            rules.iter(),
+            &provider,
+            &enabled_rules
+        ));
+
+        // test rule not in provider
+        let mut enabled_rules = HashSet::new();
+        enabled_rules.insert("missing");
+        let rules: Vec<String> = vec!["missing".to_string()];
+        assert!(!any_rule_needs_sentences(
+            rules.iter(),
+            &provider,
+            &enabled_rules
+        ));
+    }
+
+    #[test]
+    fn test_any_rule_has_capability_no_enabled_rules_filter() {
+        let mut manifests = HashMap::new();
+        manifests.insert(
+            "rule-morphology".to_string(),
+            create_manifest_with_capabilities(vec![tsuzulint_plugin::Capability::Morphology]),
+        );
+        manifests.insert(
+            "rule-none".to_string(),
+            create_manifest_with_capabilities(vec![]),
+        );
+
+        let provider = MockManifestProvider { manifests };
+
+        // Test with a rule that has the capability, passing None for enabled_rules
+        let rules: Vec<String> = vec!["rule-morphology".to_string()];
+        assert!(any_rule_has_capability(
+            rules.iter(),
+            &provider,
+            None,
+            |m| m.needs_morphology()
+        ));
+
+        // Test with a rule that doesn't have the capability, passing None for enabled_rules
+        let rules: Vec<String> = vec!["rule-none".to_string()];
+        assert!(!any_rule_has_capability(
+            rules.iter(),
+            &provider,
+            None,
+            |m| m.needs_morphology()
+        ));
     }
 
     #[test]
