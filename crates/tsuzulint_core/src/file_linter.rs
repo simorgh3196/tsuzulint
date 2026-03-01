@@ -279,15 +279,11 @@ pub fn lint_content(
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
-    let needs_morphology = host
-        .loaded_rules()
-        .filter_map(|name| host.get_manifest(name))
-        .any(|m| m.needs_morphology());
+    let needs_morphology =
+        any_rule_has_capability(host.loaded_rules(), host, None, |m| m.needs_morphology());
 
-    let needs_sentences = host
-        .loaded_rules()
-        .filter_map(|name| host.get_manifest(name))
-        .any(|m| m.needs_sentences());
+    let needs_sentences =
+        any_rule_has_capability(host.loaded_rules(), host, None, |m| m.needs_sentences());
 
     let tokens = if needs_morphology {
         tokenizer
@@ -409,23 +405,34 @@ fn filter_overridden_diagnostics(
     }
 }
 
+fn any_rule_has_capability<'a, I, P, F>(
+    rules: I,
+    host: &P,
+    enabled_rules: Option<&HashSet<&str>>,
+    predicate: F,
+) -> bool
+where
+    I: Iterator<Item = &'a String>,
+    P: ManifestProvider,
+    F: Fn(&RuleManifest) -> bool,
+{
+    for name in rules {
+        if enabled_rules.is_some_and(|enabled| !enabled.contains(name.as_str())) {
+            continue;
+        }
+        if host.get_manifest(name).is_some_and(&predicate) {
+            return true;
+        }
+    }
+    false
+}
+
 fn any_rule_needs_morphology<'a, I, P>(rules: I, host: &P, enabled_rules: &HashSet<&str>) -> bool
 where
     I: Iterator<Item = &'a String>,
     P: ManifestProvider,
 {
-    for name in rules {
-        if !enabled_rules.contains(name.as_str()) {
-            continue;
-        }
-        if host
-            .get_manifest(name)
-            .is_some_and(|m| m.needs_morphology())
-        {
-            return true;
-        }
-    }
-    false
+    any_rule_has_capability(rules, host, Some(enabled_rules), |m| m.needs_morphology())
 }
 
 fn any_rule_needs_sentences<'a, I, P>(rules: I, host: &P, enabled_rules: &HashSet<&str>) -> bool
@@ -433,15 +440,7 @@ where
     I: Iterator<Item = &'a String>,
     P: ManifestProvider,
 {
-    for name in rules {
-        if !enabled_rules.contains(name.as_str()) {
-            continue;
-        }
-        if host.get_manifest(name).is_some_and(|m| m.needs_sentences()) {
-            return true;
-        }
-    }
-    false
+    any_rule_has_capability(rules, host, Some(enabled_rules), |m| m.needs_sentences())
 }
 
 #[cfg(test)]
