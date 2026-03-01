@@ -2,10 +2,14 @@
 
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
-use tsuzulint_core::{Diagnostic as TsuzuLintDiagnostic, Severity as TsuzuLintSeverity};
+use tsuzulint_core::{Certainty, Diagnostic as TsuzuLintDiagnostic, Severity as TsuzuLintSeverity};
 
 /// Converts a TsuzuLint diagnostic to an LSP diagnostic.
 pub fn to_lsp_diagnostic(diag: &TsuzuLintDiagnostic, text: &str) -> Option<Diagnostic> {
+    if diag.certainty == Certainty::Heuristic {
+        return None;
+    }
+
     let range = offset_to_range(diag.span.start as usize, diag.span.end as usize, text)?;
 
     let severity = match diag.severity {
@@ -20,6 +24,7 @@ pub fn to_lsp_diagnostic(diag: &TsuzuLintDiagnostic, text: &str) -> Option<Diagn
         code: Some(NumberOrString::String(diag.rule_id.clone())),
         source: Some("tsuzulint".to_string()),
         message: diag.message.clone(),
+        data: diag.metadata.clone(),
         ..Default::default()
     })
 }
@@ -177,6 +182,26 @@ mod tests {
             .with_severity(TsuzuLintSeverity::Info);
         let lsp_info = to_lsp_diagnostic(&info_diag, text).unwrap();
         assert_eq!(lsp_info.severity, Some(DiagnosticSeverity::INFORMATION));
+    }
+
+    #[test]
+    fn test_to_lsp_diagnostic_filters_heuristic() {
+        let text = "Hello World";
+        let diag = TsuzuLintDiagnostic::new("r", "m", Span::new(0, 1))
+            .with_certainty(Certainty::Heuristic);
+
+        let lsp_diag = to_lsp_diagnostic(&diag, text);
+        assert!(lsp_diag.is_none());
+    }
+
+    #[test]
+    fn test_to_lsp_diagnostic_maps_metadata() {
+        let text = "Hello World";
+        let meta = serde_json::json!({"hint": "use X instead"});
+        let diag = TsuzuLintDiagnostic::new("r", "m", Span::new(0, 1)).with_metadata(meta.clone());
+
+        let lsp_diag = to_lsp_diagnostic(&diag, text).unwrap();
+        assert_eq!(lsp_diag.data, Some(meta));
     }
 
     #[test]

@@ -217,6 +217,8 @@ mod tests {
             }),
             severity: Severity::Error,
             fix: None,
+            certainty: Default::default(),
+            metadata: None,
         };
 
         let js_diag = JsDiagnostic::from(diag);
@@ -247,6 +249,8 @@ mod tests {
                 span: Span { start: 0, end: 10 },
                 text: "fixed text".to_string(),
             }),
+            certainty: Default::default(),
+            metadata: None,
         };
 
         let js_diag = JsDiagnostic::from(diag);
@@ -277,6 +281,8 @@ mod tests {
                 loc: None,
                 severity,
                 fix: None,
+                certainty: Default::default(),
+                metadata: None,
             };
 
             let js_diag = JsDiagnostic::from(diag);

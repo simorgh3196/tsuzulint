@@ -58,4 +58,4 @@ pub use result::LintResult;
 #[cfg(test)]
 pub mod test_utils;
 
-pub use tsuzulint_plugin::{Diagnostic, Fix, Severity};
+pub use tsuzulint_plugin::{Certainty, Diagnostic, Fix, Severity};
