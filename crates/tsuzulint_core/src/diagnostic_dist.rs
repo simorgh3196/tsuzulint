@@ -79,6 +79,8 @@ mod tests {
             severity: Severity::Error,
             fix: None,
             loc: None,
+            certainty: Default::default(),
+            metadata: None,
         }
     }
 

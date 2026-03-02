@@ -22,6 +22,23 @@ pub enum Severity {
     Error,
 }
 
+/// Certainty level of a diagnostic.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Certainty {
+    /// Certain - high confidence issue.
+    #[default]
+    Certain,
+    /// Heuristic - low confidence issue or AI hint.
+    Heuristic,
+}
+
 /// A diagnostic message from a lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(
@@ -49,6 +66,15 @@ pub struct Diagnostic {
     /// Optional fix for this diagnostic.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fix: Option<Fix>,
+
+    /// Certainty level for this diagnostic.
+    #[serde(default)]
+    pub certainty: Certainty,
+
+    /// Optional arbitrary metadata for AI hints or other extensions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Skip))]
+    pub metadata: Option<serde_json::Value>,
 }
 
 // Two diagnostics are considered equal if they share the same identity fields
@@ -100,6 +126,8 @@ impl Diagnostic {
             loc: None,
             severity: Severity::Error,
             fix: None,
+            certainty: Certainty::default(),
+            metadata: None,
         }
     }
 
@@ -118,6 +146,18 @@ impl Diagnostic {
     /// Sets an auto-fix.
     pub fn with_fix(mut self, fix: Fix) -> Self {
         self.fix = Some(fix);
+        self
+    }
+
+    /// Sets the certainty level.
+    pub fn with_certainty(mut self, certainty: Certainty) -> Self {
+        self.certainty = certainty;
+        self
+    }
+
+    /// Sets the arbitrary metadata.
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = Some(metadata);
         self
     }
 }
@@ -415,5 +455,34 @@ mod tests {
         let d7 = Diagnostic::new("rule-a", "msg", Span::new(0, 10));
         let d8 = Diagnostic::new("rule-b", "msg", Span::new(0, 10));
         assert!(d7 < d8);
+    }
+
+    #[test]
+    fn test_certainty_default() {
+        let certainty = Certainty::default();
+        assert_eq!(certainty, Certainty::Certain);
+    }
+
+    #[test]
+    fn test_certainty_serialization() {
+        assert_eq!(
+            serde_json::to_string(&Certainty::Certain).unwrap(),
+            "\"certain\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Certainty::Heuristic).unwrap(),
+            "\"heuristic\""
+        );
+    }
+
+    #[test]
+    fn test_diagnostic_with_certainty_and_metadata() {
+        let diag = Diagnostic::new("rule", "msg", Span::new(0, 5))
+            .with_certainty(Certainty::Heuristic)
+            .with_metadata(serde_json::json!({"bracket_count": 5}));
+
+        assert_eq!(diag.certainty, Certainty::Heuristic);
+        assert!(diag.metadata.is_some());
+        assert_eq!(diag.metadata.unwrap()["bracket_count"], 5);
     }
 }

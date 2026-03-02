@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use std::path::PathBuf;
 
-use tsuzulint_plugin::Diagnostic;
+use tsuzulint_plugin::{Certainty, Diagnostic};
 
 /// Result of linting a single file.
 #[derive(Debug)]
@@ -46,12 +46,17 @@ impl LintResult {
 
     /// Returns true if there are any errors.
     pub fn has_errors(&self) -> bool {
-        !self.diagnostics.is_empty()
+        self.diagnostics
+            .iter()
+            .any(|d| d.certainty != Certainty::Heuristic)
     }
 
     /// Returns the number of diagnostics.
     pub fn error_count(&self) -> usize {
-        self.diagnostics.len()
+        self.diagnostics
+            .iter()
+            .filter(|d| d.certainty != Certainty::Heuristic)
+            .count()
     }
 }
 
@@ -83,7 +88,7 @@ impl LintSummary {
             if result.from_cache {
                 summary.files_from_cache += 1;
             }
-            summary.total_diagnostics += result.diagnostics.len();
+            summary.total_diagnostics += result.error_count();
             if result.has_errors() {
                 summary.files_with_errors += 1;
             }
@@ -142,6 +147,33 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_result_with_heuristics_only() {
+        let diagnostics = vec![
+            Diagnostic::new("rule1", "Hint 1", Span::new(0, 5))
+                .with_certainty(Certainty::Heuristic),
+            Diagnostic::new("rule2", "Hint 2", Span::new(10, 15))
+                .with_certainty(Certainty::Heuristic),
+        ];
+        let result = LintResult::new(PathBuf::from("test.md"), diagnostics);
+
+        assert!(!result.has_errors());
+        assert_eq!(result.error_count(), 0);
+    }
+
+    #[test]
+    fn test_lint_result_mixed_diagnostics() {
+        let diagnostics = vec![
+            Diagnostic::new("rule1", "Error 1", Span::new(0, 5)),
+            Diagnostic::new("rule2", "Hint 1", Span::new(10, 15))
+                .with_certainty(Certainty::Heuristic),
+        ];
+        let result = LintResult::new(PathBuf::from("test.md"), diagnostics);
+
+        assert!(result.has_errors());
+        assert_eq!(result.error_count(), 1);
+    }
+
+    #[test]
     fn test_lint_result_path() {
         let result = LintResult::new(PathBuf::from("/path/to/file.md"), vec![]);
         assert_eq!(result.path, PathBuf::from("/path/to/file.md"));
@@ -195,12 +227,19 @@ mod tests {
     }
 
     #[test]
-    fn test_lint_summary_default() {
-        let summary = LintSummary::default();
+    fn test_lint_summary_with_heuristics() {
+        let results = vec![LintResult::new(
+            PathBuf::from("a.md"),
+            vec![
+                Diagnostic::new("rule1", "Error 1", Span::new(0, 5)),
+                Diagnostic::new("rule1", "Hint 1", Span::new(10, 15))
+                    .with_certainty(Certainty::Heuristic),
+            ],
+        )];
 
-        assert_eq!(summary.files_checked, 0);
-        assert_eq!(summary.files_from_cache, 0);
-        assert_eq!(summary.total_diagnostics, 0);
-        assert_eq!(summary.files_with_errors, 0);
+        let summary = LintSummary::from_results(&results);
+
+        assert_eq!(summary.total_diagnostics, 1);
+        assert_eq!(summary.files_with_errors, 1);
     }
 }

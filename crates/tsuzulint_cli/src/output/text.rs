@@ -3,16 +3,34 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use tsuzulint_core::{LintResult, Severity};
+use tsuzulint_core::{Certainty, LintResult, Severity};
+
+pub(crate) fn count_displayable_issues(results: &[LintResult]) -> usize {
+    results
+        .iter()
+        .map(|r| {
+            r.diagnostics
+                .iter()
+                .filter(|d| d.certainty != Certainty::Heuristic)
+                .count()
+        })
+        .sum()
+}
 
 pub fn output_text(results: &[LintResult], timings: bool) {
     for result in results {
-        if result.diagnostics.is_empty() {
+        let displayable_diags: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.certainty != Certainty::Heuristic)
+            .collect();
+
+        if displayable_diags.is_empty() {
             continue;
         }
 
         println!("\n{}:", result.path.display());
-        for diag in &result.diagnostics {
+        for diag in displayable_diags {
             let severity = match diag.severity {
                 Severity::Error => "error",
                 Severity::Warning => "warning",
@@ -26,7 +44,7 @@ pub fn output_text(results: &[LintResult], timings: bool) {
     }
 
     let total_files = results.len();
-    let total_issues: usize = results.iter().map(|r| r.diagnostics.len()).sum();
+    let total_issues = count_displayable_issues(results);
     let cached = results.iter().filter(|r| r.from_cache).count();
 
     println!();
@@ -69,5 +87,44 @@ fn output_timings(results: &[LintResult]) {
         }
         println!("{:-<30}-+-{:-<15}-+-{:-<10}", "", "", "");
         println!("{:<30} | {:<15?}", "Total", total_duration);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_displayable_issues;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use tsuzulint_core::{Diagnostic, LintResult};
+
+    #[test]
+    fn test_count_displayable_issues() {
+        let diag1: Diagnostic = serde_json::from_value(serde_json::json!({
+            "rule_id": "rule1",
+            "message": "error",
+            "span": { "start": 0, "end": 5 },
+            "severity": "error",
+            "certainty": "certain"
+        }))
+        .unwrap();
+
+        let diag2: Diagnostic = serde_json::from_value(serde_json::json!({
+            "rule_id": "rule2",
+            "message": "hint",
+            "span": { "start": 0, "end": 5 },
+            "severity": "warning",
+            "certainty": "heuristic"
+        }))
+        .unwrap();
+
+        let result = LintResult {
+            path: PathBuf::from("test.md"),
+            diagnostics: vec![diag1, diag2],
+            from_cache: false,
+            timings: HashMap::new(),
+        };
+
+        // We only expect 1 displayable issue (the Certain one)
+        assert_eq!(count_displayable_issues(&[result]), 1);
     }
 }
