@@ -62,8 +62,7 @@ impl CacheManager {
         if !self.enabled {
             return None;
         }
-        let key = path.to_string_lossy().to_string();
-        self.entries.get(&key)
+        self.entries.get(path.to_string_lossy().as_ref() as &str)
     }
 
     /// Checks if a file's cache is valid.
@@ -85,8 +84,7 @@ impl CacheManager {
             return false;
         }
 
-        let key = path.to_string_lossy().to_string();
-        match self.entries.get(&key) {
+        match self.entries.get(path.to_string_lossy().as_ref() as &str) {
             Some(entry) => entry.is_valid(content_hash, config_hash, rule_versions),
             None => false,
         }
@@ -123,8 +121,7 @@ impl CacheManager {
             return (reused_diagnostics, matched_mask);
         }
 
-        let key = path.to_string_lossy().to_string();
-        let cached_entry = match self.entries.get(&key) {
+        let cached_entry = match self.entries.get(path.to_string_lossy().as_ref() as &str) {
             Some(entry) => entry,
             None => return (reused_diagnostics, matched_mask),
         };
@@ -214,15 +211,14 @@ impl CacheManager {
     /// Stores a cache entry for a file.
     pub fn set(&mut self, path: PathBuf, entry: CacheEntry) {
         if self.enabled {
-            let key = path.to_string_lossy().to_string();
-            self.entries.insert(key, entry);
+            self.entries
+                .insert(path.to_string_lossy().into_owned(), entry);
         }
     }
 
     /// Removes a cache entry.
     pub fn remove(&mut self, path: &Path) {
-        let key = path.to_string_lossy().to_string();
-        self.entries.remove(&key);
+        self.entries.remove(path.to_string_lossy().as_ref() as &str);
     }
 
     /// Clears all cache entries.
@@ -327,6 +323,21 @@ mod tests {
 
         assert!(manager.get(&path).is_some());
         assert_eq!(manager.len(), 1);
+    }
+
+    #[test]
+    fn test_cache_manager_string_allocation() {
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let path = PathBuf::from("/test/test_alloc.md");
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
+
+        // Should work without panicking and find the entry
+        manager.set(path.clone(), entry);
+        assert!(manager.get(&path).is_some());
+
+        // Should work without panicking and remove the entry
+        manager.remove(&path);
+        assert!(manager.get(&path).is_none());
     }
 
     #[test]
