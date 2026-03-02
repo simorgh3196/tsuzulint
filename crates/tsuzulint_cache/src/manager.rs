@@ -13,6 +13,8 @@ use crate::{
     entry::{BlockCacheEntry, BlockHash},
 };
 
+pub const MAX_CACHE_SIZE: u64 = 100 * 1024 * 1024; // 100 MB limit
+
 /// Manages the lint cache for all files.
 pub struct CacheManager {
     /// Directory where cache files are stored.
@@ -241,6 +243,14 @@ impl CacheManager {
         if !cache_file.exists() {
             debug!("No cache file found at {}", cache_file.display());
             return Ok(());
+        }
+
+        let metadata = fs::metadata(&cache_file)?;
+        if metadata.len() > MAX_CACHE_SIZE {
+            return Err(CacheError::corrupted(format!(
+                "Cache file exceeds maximum size of {} bytes",
+                MAX_CACHE_SIZE
+            )));
         }
 
         let content = fs::read(&cache_file)?;
@@ -700,5 +710,32 @@ mod tests {
         // Span (16,18) -> (11,13)
         // In both cases, the span should be (11,13) because they are identical blocks.
         assert_eq!(diagnostics[0].span, Span::new(11, 13));
+    }
+}
+
+#[cfg(test)]
+mod tests_extra {
+    use super::*;
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_load_cache_exceeds_max_size() {
+        let temp_dir = tempdir().unwrap();
+        let mut manager = CacheManager::new(temp_dir.path());
+
+        // Create an oversized cache file
+        let cache_file = temp_dir.path().join("cache.rkyv");
+        let file = File::create(&cache_file).unwrap();
+        file.set_len(MAX_CACHE_SIZE + 1).unwrap();
+
+        let result = manager.load();
+        assert!(result.is_err());
+
+        if let Err(CacheError::Corrupted(msg)) = result {
+            assert!(msg.contains("Cache file exceeds maximum size"));
+        } else {
+            panic!("Expected CacheError::Corrupted, got {:?}", result);
+        }
     }
 }
