@@ -147,6 +147,33 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_result_with_heuristics_only() {
+        let diagnostics = vec![
+            Diagnostic::new("rule1", "Hint 1", Span::new(0, 5))
+                .with_certainty(Certainty::Heuristic),
+            Diagnostic::new("rule2", "Hint 2", Span::new(10, 15))
+                .with_certainty(Certainty::Heuristic),
+        ];
+        let result = LintResult::new(PathBuf::from("test.md"), diagnostics);
+
+        assert!(!result.has_errors());
+        assert_eq!(result.error_count(), 0);
+    }
+
+    #[test]
+    fn test_lint_result_mixed_diagnostics() {
+        let diagnostics = vec![
+            Diagnostic::new("rule1", "Error 1", Span::new(0, 5)),
+            Diagnostic::new("rule2", "Hint 1", Span::new(10, 15))
+                .with_certainty(Certainty::Heuristic),
+        ];
+        let result = LintResult::new(PathBuf::from("test.md"), diagnostics);
+
+        assert!(result.has_errors());
+        assert_eq!(result.error_count(), 1);
+    }
+
+    #[test]
     fn test_lint_result_path() {
         let result = LintResult::new(PathBuf::from("/path/to/file.md"), vec![]);
         assert_eq!(result.path, PathBuf::from("/path/to/file.md"));
