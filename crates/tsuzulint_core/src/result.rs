@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use std::path::PathBuf;
 
-use tsuzulint_plugin::Diagnostic;
+use tsuzulint_plugin::{Certainty, Diagnostic};
 
 /// Result of linting a single file.
 #[derive(Debug)]
@@ -46,12 +46,17 @@ impl LintResult {
 
     /// Returns true if there are any errors.
     pub fn has_errors(&self) -> bool {
-        !self.diagnostics.is_empty()
+        self.diagnostics
+            .iter()
+            .any(|d| d.certainty != Certainty::Heuristic)
     }
 
     /// Returns the number of diagnostics.
     pub fn error_count(&self) -> usize {
-        self.diagnostics.len()
+        self.diagnostics
+            .iter()
+            .filter(|d| d.certainty != Certainty::Heuristic)
+            .count()
     }
 }
 

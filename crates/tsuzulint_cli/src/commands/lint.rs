@@ -3,7 +3,7 @@
 use miette::{IntoDiagnostic, Result};
 use tokio::runtime::Runtime;
 use tracing::{info, warn};
-use tsuzulint_core::{Linter, LinterConfig, RuleDefinition, RuleDefinitionDetail};
+use tsuzulint_core::{Certainty, Linter, LinterConfig, RuleDefinition, RuleDefinitionDetail};
 use tsuzulint_registry::resolver::{PluginResolver, PluginSpec};
 
 use crate::cli::{Cli, OutputFormat};
@@ -60,9 +60,11 @@ pub fn run_lint(
             return output_results(&results, format, timings_enabled);
         }
 
-        let unfixable_errors = results
-            .iter()
-            .any(|r| r.diagnostics.iter().any(|d| d.fix.is_none()));
+        let unfixable_errors = results.iter().any(|r| {
+            r.diagnostics
+                .iter()
+                .any(|d| d.certainty != Certainty::Heuristic && d.fix.is_none())
+        });
         return Ok(unfixable_errors || !failures.is_empty());
     }
 

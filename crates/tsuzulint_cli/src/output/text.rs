@@ -92,7 +92,7 @@ fn output_timings(results: &[LintResult]) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::count_displayable_issues;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use tsuzulint_core::{Diagnostic, LintResult};
@@ -125,6 +125,6 @@ mod tests {
         };
 
         // We only expect 1 displayable issue (the Certain one)
-        assert_eq!(super::count_displayable_issues(&[result]), 1);
+        assert_eq!(count_displayable_issues(&[result]), 1);
     }
 }
