@@ -1,0 +1,13 @@
+--- crates/tsuzulint_cache/src/manager.rs
++++ crates/tsuzulint_cache/src/manager.rs
+@@ -750,9 +750,9 @@
+         file.set_len(MAX_CACHE_SIZE).unwrap();
+
+         let result = manager.load();
+-        // The content won't parse as valid rkyv, so we expect a serialization error, NOT size error
+         assert!(result.is_err());
+         if let Err(e) = result {
++            // The content won't parse as valid rkyv, so we expect a serialization error, NOT size error
+             assert!(!e.to_string().contains("Cache file exceeds maximum size"));
+         }
+     }
