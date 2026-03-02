@@ -208,7 +208,13 @@ impl LanguageServer for Backend {
         };
         let path = match params.text_document.uri.to_file_path() {
             Ok(p) => p,
-            Err(_) => return Ok(None),
+            Err(_) => {
+                debug!(
+                    "Skipping code action for non-file URI: {}",
+                    params.text_document.uri
+                );
+                return Ok(None);
+            }
         };
 
         let diagnostics = self.lint_text(&text, &path).await;
