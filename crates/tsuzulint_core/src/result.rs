@@ -88,7 +88,7 @@ impl LintSummary {
             if result.from_cache {
                 summary.files_from_cache += 1;
             }
-            summary.total_diagnostics += result.diagnostics.len();
+            summary.total_diagnostics += result.error_count();
             if result.has_errors() {
                 summary.files_with_errors += 1;
             }
@@ -200,12 +200,19 @@ mod tests {
     }
 
     #[test]
-    fn test_lint_summary_default() {
-        let summary = LintSummary::default();
+    fn test_lint_summary_with_heuristics() {
+        let results = vec![LintResult::new(
+            PathBuf::from("a.md"),
+            vec![
+                Diagnostic::new("rule1", "Error 1", Span::new(0, 5)),
+                Diagnostic::new("rule1", "Hint 1", Span::new(10, 15))
+                    .with_certainty(Certainty::Heuristic),
+            ],
+        )];
 
-        assert_eq!(summary.files_checked, 0);
-        assert_eq!(summary.files_from_cache, 0);
-        assert_eq!(summary.total_diagnostics, 0);
-        assert_eq!(summary.files_with_errors, 0);
+        let summary = LintSummary::from_results(&results);
+
+        assert_eq!(summary.total_diagnostics, 1);
+        assert_eq!(summary.files_with_errors, 1);
     }
 }
