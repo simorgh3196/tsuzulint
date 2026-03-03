@@ -714,4 +714,21 @@ mod tests {
         // In both cases, the span should be (11,13) because they are identical blocks.
         assert_eq!(diagnostics[0].span, Span::new(11, 13));
     }
+
+    #[test]
+    fn test_cache_manager_load_exceeds_max_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut manager = CacheManager::new(dir.path());
+
+        let cache_file = dir.path().join("cache.rkyv");
+        let file = std::fs::File::create(&cache_file).unwrap();
+        // create a file larger than MAX_CACHE_SIZE
+        file.set_len(MAX_CACHE_SIZE + 1).unwrap();
+        // ensure file handle is flushed/closed before checking
+        drop(file);
+
+        let result = manager.load();
+        assert!(result.is_ok());
+        assert!(manager.is_empty());
+    }
 }
