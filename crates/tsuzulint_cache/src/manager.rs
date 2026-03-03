@@ -13,6 +13,9 @@ use crate::{
     entry::{BlockCacheEntry, BlockHash},
 };
 
+/// Maximum allowed cache file size (100MB) to prevent OOM DOS attacks
+pub const MAX_CACHE_SIZE: u64 = 100 * 1024 * 1024;
+
 /// Manages the lint cache for all files.
 pub struct CacheManager {
     /// Directory where cache files are stored.
@@ -240,6 +243,16 @@ impl CacheManager {
 
         if !cache_file.exists() {
             debug!("No cache file found at {}", cache_file.display());
+            return Ok(());
+        }
+
+        let metadata = fs::metadata(&cache_file)?;
+        if metadata.len() > MAX_CACHE_SIZE {
+            tracing::warn!(
+                "Cache file {} exceeds maximum size of {} bytes. Treating cache as empty to prevent OOM.",
+                cache_file.display(),
+                MAX_CACHE_SIZE
+            );
             return Ok(());
         }
 
