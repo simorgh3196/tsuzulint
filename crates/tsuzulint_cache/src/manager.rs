@@ -314,19 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_manager_set_get() {
-        let mut manager = CacheManager::new("/tmp/test-cache");
-        let path = PathBuf::from("/test/file.md");
-        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
-
-        manager.set(path.clone(), entry);
-
-        assert!(manager.get(&path).is_some());
-        assert_eq!(manager.len(), 1);
-    }
-
-    #[test]
-    fn test_cache_manager_string_allocation() {
+    fn test_cache_manager_set_get_remove() {
         let mut manager = CacheManager::new("/tmp/test-cache");
         let path = PathBuf::from("/test/test_alloc.md");
         let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
