@@ -192,6 +192,16 @@ impl RuleExecutor for ExtismExecutor {
     ) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
 
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| PluginError::load(format!("Failed to read file metadata: {}", e)))?;
+
+        if metadata.len() > crate::executor::MAX_WASM_SIZE {
+            return Err(PluginError::load(format!(
+                "WASM file size exceeds maximum allowed limit of {} bytes",
+                crate::executor::MAX_WASM_SIZE
+            )));
+        }
+
         // Read the file to calculate the hash, but don't keep the bytes in memory
         // if we are using RuleSource::File.
         let wasm_bytes = std::fs::read(path)

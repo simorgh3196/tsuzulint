@@ -8,6 +8,10 @@ use crate::{PluginError, RuleManifest};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+/// Maximum size for a loaded WASM file (50 MB)
+/// This prevents OOM DoS attacks when loading plugins from disk.
+pub const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024;
+
 /// Options for configuring a WASM plugin payload at load time.
 #[derive(Debug, Clone, Default)]
 pub struct PluginOptions {
@@ -73,6 +77,16 @@ pub trait RuleExecutor {
         path: &std::path::Path,
         options: PluginOptions,
     ) -> Result<LoadResult, PluginError> {
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| PluginError::load(format!("Failed to read file metadata: {}", e)))?;
+
+        if metadata.len() > MAX_WASM_SIZE {
+            return Err(PluginError::load(format!(
+                "WASM file size exceeds maximum allowed limit of {} bytes",
+                MAX_WASM_SIZE
+            )));
+        }
+
         let wasm_bytes = std::fs::read(path)?;
         self.load(&wasm_bytes, options)
     }
