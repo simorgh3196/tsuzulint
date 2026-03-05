@@ -62,8 +62,8 @@ impl CacheManager {
         if !self.enabled {
             return None;
         }
-        let key = path.to_string_lossy().to_string();
-        self.entries.get(&key)
+        // Optimization: Avoid String allocation during map lookup by using as_ref() on the Cow string.
+        self.entries.get(path.to_string_lossy().as_ref())
     }
 
     /// Checks if a file's cache is valid.
@@ -85,8 +85,7 @@ impl CacheManager {
             return false;
         }
 
-        let key = path.to_string_lossy().to_string();
-        match self.entries.get(&key) {
+        match self.entries.get(path.to_string_lossy().as_ref()) {
             Some(entry) => entry.is_valid(content_hash, config_hash, rule_versions),
             None => false,
         }
@@ -123,8 +122,7 @@ impl CacheManager {
             return (reused_diagnostics, matched_mask);
         }
 
-        let key = path.to_string_lossy().to_string();
-        let cached_entry = match self.entries.get(&key) {
+        let cached_entry = match self.entries.get(path.to_string_lossy().as_ref()) {
             Some(entry) => entry,
             None => return (reused_diagnostics, matched_mask),
         };
@@ -214,15 +212,15 @@ impl CacheManager {
     /// Stores a cache entry for a file.
     pub fn set(&mut self, path: PathBuf, entry: CacheEntry) {
         if self.enabled {
-            let key = path.to_string_lossy().to_string();
+            // Optimization: Use into_owned() to reuse the existing String allocation if the path is valid UTF-8.
+            let key = path.to_string_lossy().into_owned();
             self.entries.insert(key, entry);
         }
     }
 
     /// Removes a cache entry.
     pub fn remove(&mut self, path: &Path) {
-        let key = path.to_string_lossy().to_string();
-        self.entries.remove(&key);
+        self.entries.remove(path.to_string_lossy().as_ref());
     }
 
     /// Clears all cache entries.
