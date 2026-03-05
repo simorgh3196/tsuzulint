@@ -22,9 +22,7 @@ impl DependencyGraph {
                 for dep in deps {
                     if rules.contains(&dep.as_str()) {
                         graph.entry(dep.as_str()).or_default().push(*rule);
-                        *in_degree
-                            .get_mut(*rule)
-                            .expect("rule must exist in dependency graph") += 1;
+                        in_degree.entry(*rule).and_modify(|degree| *degree += 1);
                     }
                 }
             }
@@ -41,12 +39,12 @@ impl DependencyGraph {
             result.push(rule);
             if let Some(next) = graph.get(rule) {
                 for &next_rule in next {
-                    *in_degree
-                        .get_mut(next_rule)
-                        .expect("dependent rule must exist in dependency graph") -= 1;
-                    if in_degree[next_rule] == 0 {
-                        queue.push(next_rule);
-                    }
+                    in_degree.entry(next_rule).and_modify(|degree| {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push(next_rule);
+                        }
+                    });
                 }
             }
         }
