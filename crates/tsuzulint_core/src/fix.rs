@@ -22,9 +22,7 @@ impl DependencyGraph {
                 for dep in deps {
                     if rules.contains(&dep.as_str()) {
                         graph.entry(dep.as_str()).or_default().push(*rule);
-                        if let Some(degree) = in_degree.get_mut(*rule) {
-                            *degree += 1;
-                        }
+                        *in_degree.entry(*rule).or_default() += 1;
                     }
                 }
             }
@@ -46,6 +44,8 @@ impl DependencyGraph {
                         if *degree == 0 {
                             queue.push(next_rule);
                         }
+                    } else {
+                        // Normally this branch won't be hit, but safe handling
                     }
                 }
             }
