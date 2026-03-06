@@ -136,7 +136,6 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
-
     // A dummy executor to test the default `load_file` method.
     struct DummyExecutor;
 
@@ -152,11 +151,19 @@ mod tests {
             })
         }
 
-        fn configure(&mut self, _rule_name: &str, _config: &serde_json::Value) -> Result<(), PluginError> {
+        fn configure(
+            &mut self,
+            _rule_name: &str,
+            _config: &serde_json::Value,
+        ) -> Result<(), PluginError> {
             Ok(())
         }
 
-        fn call_lint(&mut self, _rule_name: &str, _input_bytes: &[u8]) -> Result<Vec<u8>, PluginError> {
+        fn call_lint(
+            &mut self,
+            _rule_name: &str,
+            _input_bytes: &[u8],
+        ) -> Result<Vec<u8>, PluginError> {
             Ok(vec![])
         }
 

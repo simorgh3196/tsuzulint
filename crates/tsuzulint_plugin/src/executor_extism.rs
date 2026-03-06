@@ -265,7 +265,9 @@ mod tests {
     fn test_extism_load_file_size_limit() {
         let file = NamedTempFile::new().unwrap();
         // Set the size to be just above MAX_WASM_SIZE
-        file.as_file().set_len(crate::executor::MAX_WASM_SIZE + 1).unwrap();
+        file.as_file()
+            .set_len(crate::executor::MAX_WASM_SIZE + 1)
+            .unwrap();
 
         let mut executor = ExtismExecutor::new();
         let result = executor.load_file(file.path(), PluginOptions::default());
