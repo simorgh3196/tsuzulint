@@ -67,7 +67,7 @@ impl CacheManager {
         if !self.enabled {
             return None;
         }
-        self.entries.get(path_key(path).as_ref() as &str)
+        self.entries.get(path_key(path).as_ref())
     }
 
     /// Checks if a file's cache is valid.
@@ -89,7 +89,7 @@ impl CacheManager {
             return false;
         }
 
-        match self.entries.get(path_key(path).as_ref() as &str) {
+        match self.entries.get(path_key(path).as_ref()) {
             Some(entry) => entry.is_valid(content_hash, config_hash, rule_versions),
             None => false,
         }
@@ -126,7 +126,7 @@ impl CacheManager {
             return (reused_diagnostics, matched_mask);
         }
 
-        let cached_entry = match self.entries.get(path_key(path).as_ref() as &str) {
+        let cached_entry = match self.entries.get(path_key(path).as_ref()) {
             Some(entry) => entry,
             None => return (reused_diagnostics, matched_mask),
         };
@@ -222,7 +222,7 @@ impl CacheManager {
 
     /// Removes a cache entry.
     pub fn remove(&mut self, path: &Path) {
-        self.entries.remove(path_key(path).as_ref() as &str);
+        self.entries.remove(path_key(path).as_ref());
     }
 
     /// Clears all cache entries.
@@ -328,6 +328,24 @@ mod tests {
         assert!(manager.get(&path).is_some());
 
         // Should work without panicking and remove the entry
+        manager.remove(&path);
+        assert!(manager.get(&path).is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_cache_manager_set_get_remove_non_utf8_path() {
+        use std::os::unix::ffi::OsStringExt;
+        let mut manager = CacheManager::new("/tmp/test-cache");
+        let os_str = std::ffi::OsString::from_vec(vec![
+            b'n', b'o', b'n', b'_', b'u', b't', b'f', b'8', 0xFF,
+        ]);
+        let path = PathBuf::from(os_str);
+        let entry = CacheEntry::new(dummy_hash(1), dummy_hash(2), HashMap::new(), vec![], vec![]);
+
+        manager.set(path.clone(), entry);
+        assert!(manager.get(&path).is_some());
+
         manager.remove(&path);
         assert!(manager.get(&path).is_none());
     }
