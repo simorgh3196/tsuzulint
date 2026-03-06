@@ -130,3 +130,63 @@ pub trait RuleExecutor {
         self.loaded_rules().contains(&rule_name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+
+    // A dummy executor to test the default `load_file` method.
+    struct DummyExecutor;
+
+    impl RuleExecutor for DummyExecutor {
+        fn load(
+            &mut self,
+            _wasm_bytes: &[u8],
+            _options: PluginOptions,
+        ) -> Result<LoadResult, PluginError> {
+            Ok(LoadResult {
+                name: "dummy".to_string(),
+                manifest: RuleManifest::new("dummy", "1.0.0"),
+            })
+        }
+
+        fn configure(&mut self, _rule_name: &str, _config: &serde_json::Value) -> Result<(), PluginError> {
+            Ok(())
+        }
+
+        fn call_lint(&mut self, _rule_name: &str, _input_bytes: &[u8]) -> Result<Vec<u8>, PluginError> {
+            Ok(vec![])
+        }
+
+        fn unload(&mut self, _rule_name: &str) -> bool {
+            true
+        }
+
+        fn unload_all(&mut self) {}
+
+        fn loaded_rules(&self) -> Vec<&str> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn test_load_file_size_limit() {
+        let file = NamedTempFile::new().unwrap();
+        // Set the size to be just above MAX_WASM_SIZE
+        file.as_file().set_len(MAX_WASM_SIZE + 1).unwrap();
+
+        let mut executor = DummyExecutor;
+        let result = executor.load_file(file.path(), PluginOptions::default());
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            PluginError::LoadError(msg) => {
+                assert!(msg.contains("is too large (exceeds 50MB limit)"));
+            }
+            _ => panic!("Expected LoadError"),
+        }
+    }
+}
