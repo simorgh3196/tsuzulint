@@ -8,6 +8,9 @@ use crate::{PluginError, RuleManifest};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+/// Maximum allowed size for a WASM file (50MB) to prevent OOM DoS attacks.
+pub const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024;
+
 /// Options for configuring a WASM plugin payload at load time.
 #[derive(Debug, Clone, Default)]
 pub struct PluginOptions {
@@ -73,6 +76,13 @@ pub trait RuleExecutor {
         path: &std::path::Path,
         options: PluginOptions,
     ) -> Result<LoadResult, PluginError> {
+        let metadata = std::fs::metadata(path)?;
+        if metadata.len() > MAX_WASM_SIZE {
+            return Err(PluginError::load(format!(
+                "WASM file '{}' is too large (exceeds 50MB limit)",
+                path.display()
+            )));
+        }
         let wasm_bytes = std::fs::read(path)?;
         self.load(&wasm_bytes, options)
     }
@@ -118,5 +128,72 @@ pub trait RuleExecutor {
     /// Checks if a rule is loaded.
     fn is_loaded(&self, rule_name: &str) -> bool {
         self.loaded_rules().contains(&rule_name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    // A dummy executor to test the default `load_file` method.
+    struct DummyExecutor;
+
+    impl RuleExecutor for DummyExecutor {
+        fn load(
+            &mut self,
+            _wasm_bytes: &[u8],
+            _options: PluginOptions,
+        ) -> Result<LoadResult, PluginError> {
+            Ok(LoadResult {
+                name: "dummy".to_string(),
+                manifest: RuleManifest::new("dummy", "1.0.0"),
+            })
+        }
+
+        fn configure(
+            &mut self,
+            _rule_name: &str,
+            _config: &serde_json::Value,
+        ) -> Result<(), PluginError> {
+            Ok(())
+        }
+
+        fn call_lint(
+            &mut self,
+            _rule_name: &str,
+            _input_bytes: &[u8],
+        ) -> Result<Vec<u8>, PluginError> {
+            Ok(vec![])
+        }
+
+        fn unload(&mut self, _rule_name: &str) -> bool {
+            true
+        }
+
+        fn unload_all(&mut self) {}
+
+        fn loaded_rules(&self) -> Vec<&str> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn test_load_file_size_limit() {
+        let file = NamedTempFile::new().unwrap();
+        // Set the size to be just above MAX_WASM_SIZE
+        file.as_file().set_len(MAX_WASM_SIZE + 1).unwrap();
+
+        let mut executor = DummyExecutor;
+        let result = executor.load_file(file.path(), PluginOptions::default());
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            PluginError::LoadError(msg) => {
+                assert!(msg.contains("is too large (exceeds 50MB limit)"));
+            }
+            _ => panic!("Expected LoadError"),
+        }
     }
 }

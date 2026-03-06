@@ -192,6 +192,16 @@ impl RuleExecutor for ExtismExecutor {
     ) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
 
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| PluginError::load(format!("Failed to read metadata: {}", e)))?;
+
+        if metadata.len() > crate::executor::MAX_WASM_SIZE {
+            return Err(PluginError::load(format!(
+                "WASM file '{}' is too large (exceeds 50MB limit)",
+                path.display()
+            )));
+        }
+
         // Read the file to calculate the hash, but don't keep the bytes in memory
         // if we are using RuleSource::File.
         let wasm_bytes = std::fs::read(path)
@@ -243,5 +253,32 @@ impl RuleExecutor for ExtismExecutor {
 
     fn loaded_rules(&self) -> Vec<&str> {
         self.rules.keys().map(|s| s.as_str()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_extism_load_file_size_limit() {
+        let file = NamedTempFile::new().unwrap();
+        // Set the size to be just above MAX_WASM_SIZE
+        file.as_file()
+            .set_len(crate::executor::MAX_WASM_SIZE + 1)
+            .unwrap();
+
+        let mut executor = ExtismExecutor::new();
+        let result = executor.load_file(file.path(), PluginOptions::default());
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            PluginError::LoadError(msg) => {
+                assert!(msg.contains("is too large (exceeds 50MB limit)"));
+            }
+            _ => panic!("Expected LoadError"),
+        }
     }
 }
