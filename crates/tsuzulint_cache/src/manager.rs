@@ -23,6 +23,11 @@ pub struct CacheManager {
     enabled: bool,
 }
 
+#[inline]
+fn path_key(path: &Path) -> std::borrow::Cow<'_, str> {
+    path.to_string_lossy()
+}
+
 impl CacheManager {
     /// Creates a new cache manager.
     ///
@@ -62,7 +67,7 @@ impl CacheManager {
         if !self.enabled {
             return None;
         }
-        self.entries.get(path.to_string_lossy().as_ref() as &str)
+        self.entries.get(path_key(path).as_ref() as &str)
     }
 
     /// Checks if a file's cache is valid.
@@ -84,7 +89,7 @@ impl CacheManager {
             return false;
         }
 
-        match self.entries.get(path.to_string_lossy().as_ref() as &str) {
+        match self.entries.get(path_key(path).as_ref() as &str) {
             Some(entry) => entry.is_valid(content_hash, config_hash, rule_versions),
             None => false,
         }
@@ -121,7 +126,7 @@ impl CacheManager {
             return (reused_diagnostics, matched_mask);
         }
 
-        let cached_entry = match self.entries.get(path.to_string_lossy().as_ref() as &str) {
+        let cached_entry = match self.entries.get(path_key(path).as_ref() as &str) {
             Some(entry) => entry,
             None => return (reused_diagnostics, matched_mask),
         };
@@ -211,14 +216,13 @@ impl CacheManager {
     /// Stores a cache entry for a file.
     pub fn set(&mut self, path: PathBuf, entry: CacheEntry) {
         if self.enabled {
-            self.entries
-                .insert(path.to_string_lossy().into_owned(), entry);
+            self.entries.insert(path_key(&path).into_owned(), entry);
         }
     }
 
     /// Removes a cache entry.
     pub fn remove(&mut self, path: &Path) {
-        self.entries.remove(path.to_string_lossy().as_ref() as &str);
+        self.entries.remove(path_key(path).as_ref() as &str);
     }
 
     /// Clears all cache entries.
