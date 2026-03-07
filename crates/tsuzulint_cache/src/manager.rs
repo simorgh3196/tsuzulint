@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tracing::{debug, info};
@@ -245,7 +246,8 @@ impl CacheManager {
             return Ok(());
         }
 
-        let metadata = fs::metadata(&cache_file)?;
+        let file = std::fs::File::open(&cache_file)?;
+        let metadata = file.metadata()?;
         if metadata.len() > MAX_CACHE_SIZE {
             return Err(CacheError::corrupted(format!(
                 "Cache file exceeds maximum size of {} bytes",
@@ -253,7 +255,15 @@ impl CacheManager {
             )));
         }
 
-        let content = fs::read(&cache_file)?;
+        let mut content = Vec::new();
+        file.take(MAX_CACHE_SIZE + 1).read_to_end(&mut content)?;
+
+        if content.len() as u64 > MAX_CACHE_SIZE {
+            return Err(CacheError::corrupted(format!(
+                "Cache file exceeds maximum size of {} bytes",
+                MAX_CACHE_SIZE
+            )));
+        }
         let entries: HashMap<String, CacheEntry> =
             rkyv::from_bytes::<_, rkyv::rancor::Error>(&content)
                 .map_err(|e| CacheError::corrupted(e.to_string()))?;
@@ -732,10 +742,12 @@ mod tests_extra {
         let result = manager.load();
         assert!(result.is_err());
 
-        if let Err(CacheError::Corrupted(msg)) = result {
-            assert!(msg.contains("Cache file exceeds maximum size"));
-        } else {
-            panic!("Expected CacheError::Corrupted, got {:?}", result);
+        match result {
+            Err(CacheError::Corrupted(msg)) => {
+                assert!(msg.contains("Cache file exceeds maximum size"));
+            }
+            Err(other) => panic!("Expected CacheError::Corrupted, got {:?}", other),
+            Ok(ok_val) => panic!("Expected CacheError::Corrupted, got Ok({:?})", ok_val),
         }
     }
 
@@ -749,6 +761,18 @@ mod tests_extra {
         let file = File::create(&cache_file).unwrap();
         file.set_len(MAX_CACHE_SIZE).unwrap();
 
-        let _result = manager.load();
+        let result = manager.load();
+
+        match result {
+            Err(CacheError::Corrupted(msg)) => {
+                assert!(!msg.contains("Cache file exceeds maximum size"));
+            }
+            Err(err) => panic!("Unexpected error: {:?}", err),
+            Ok(_) => {} // It is acceptable if rkyv decodes zeroed bytes as an empty map
+        }
+
+        // Assert post-conditions
+        assert!(cache_file.exists());
+        assert_eq!(manager.len(), 0);
     }
 }

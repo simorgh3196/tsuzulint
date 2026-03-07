@@ -41,3 +41,5 @@ TODO.md
 .worktrees/
 crates/tsuzulint_core/tests/fixtures/simple_rule/target
 docs/plans/
+*.orig
+
