@@ -42,3 +42,31 @@ impl CacheError {
         Self::Corrupted(message.into())
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cache_error_constructors() {
+        let read_err = CacheError::read("read error");
+        if let CacheError::ReadError(msg) = read_err {
+            assert_eq!(msg, "read error");
+        } else {
+            panic!("Expected ReadError");
+        }
+
+        let write_err = CacheError::write("write error");
+        if let CacheError::WriteError(msg) = write_err {
+            assert_eq!(msg, "write error");
+        } else {
+            panic!("Expected WriteError");
+        }
+
+        let corrupted_err = CacheError::corrupted("corrupted error");
+        if let CacheError::Corrupted(msg) = corrupted_err {
+            assert_eq!(msg, "corrupted error");
+        } else {
+            panic!("Expected Corrupted");
+        }
+    }
+}
