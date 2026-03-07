@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tracing::{debug, info};
@@ -12,6 +13,8 @@ use crate::{
     CacheEntry, CacheError,
     entry::{BlockCacheEntry, BlockHash},
 };
+
+pub const MAX_CACHE_SIZE: u64 = 100 * 1024 * 1024; // 100 MB limit
 
 /// Manages the lint cache for all files.
 pub struct CacheManager {
@@ -243,7 +246,24 @@ impl CacheManager {
             return Ok(());
         }
 
-        let content = fs::read(&cache_file)?;
+        let file = fs::File::open(&cache_file)?;
+        let metadata = file.metadata()?;
+        if metadata.len() > MAX_CACHE_SIZE {
+            return Err(CacheError::corrupted(format!(
+                "Cache file exceeds maximum size of {} bytes",
+                MAX_CACHE_SIZE
+            )));
+        }
+
+        let mut content = Vec::new();
+        file.take(MAX_CACHE_SIZE + 1).read_to_end(&mut content)?;
+
+        if content.len() as u64 > MAX_CACHE_SIZE {
+            return Err(CacheError::corrupted(format!(
+                "Cache file exceeds maximum size of {} bytes",
+                MAX_CACHE_SIZE
+            )));
+        }
         let entries: HashMap<String, CacheEntry> =
             rkyv::from_bytes::<_, rkyv::rancor::Error>(&content)
                 .map_err(|e| CacheError::corrupted(e.to_string()))?;
@@ -721,5 +741,59 @@ mod tests {
         // Span (16,18) -> (11,13)
         // In both cases, the span should be (11,13) because they are identical blocks.
         assert_eq!(diagnostics[0].span, Span::new(11, 13));
+    }
+}
+
+#[cfg(test)]
+mod tests_extra {
+    use super::*;
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_load_cache_exceeds_max_size() {
+        let temp_dir = tempdir().unwrap();
+        let mut manager = CacheManager::new(temp_dir.path());
+
+        // Create an oversized cache file
+        let cache_file = temp_dir.path().join("cache.rkyv");
+        let file = File::create(&cache_file).unwrap();
+        file.set_len(MAX_CACHE_SIZE + 1).unwrap();
+
+        let result = manager.load();
+        assert!(result.is_err());
+
+        match result {
+            Err(CacheError::Corrupted(msg)) => {
+                assert!(msg.contains("Cache file exceeds maximum size"));
+            }
+            Err(other) => panic!("Expected CacheError::Corrupted, got {:?}", other),
+            Ok(ok_val) => panic!("Expected CacheError::Corrupted, got Ok({:?})", ok_val),
+        }
+    }
+
+    #[test]
+    fn test_load_cache_at_exact_max_size() {
+        let temp_dir = tempdir().unwrap();
+        let mut manager = CacheManager::new(temp_dir.path());
+
+        // Create a cache file exactly at MAX_CACHE_SIZE
+        let cache_file = temp_dir.path().join("cache.rkyv");
+        let file = File::create(&cache_file).unwrap();
+        file.set_len(MAX_CACHE_SIZE).unwrap();
+
+        let result = manager.load();
+
+        match result {
+            Err(CacheError::Corrupted(msg)) => {
+                assert!(!msg.contains("Cache file exceeds maximum size"));
+            }
+            Err(err) => panic!("Unexpected error: {:?}", err),
+            Ok(_) => {} // It is acceptable if rkyv decodes zeroed bytes as an empty map
+        }
+
+        // Assert post-conditions
+        assert!(cache_file.exists());
+        assert_eq!(manager.len(), 0);
     }
 }
