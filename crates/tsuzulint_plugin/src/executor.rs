@@ -149,3 +149,104 @@ pub trait RuleExecutor {
         self.loaded_rules().contains(&rule_name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    struct DummyExecutor;
+
+    impl RuleExecutor for DummyExecutor {
+        fn load(
+            &mut self,
+            _wasm_bytes: &[u8],
+            _options: PluginOptions,
+        ) -> Result<LoadResult, PluginError> {
+            Ok(LoadResult {
+                name: "dummy".to_string(),
+                manifest: RuleManifest {
+                    name: "dummy".to_string(),
+                    version: "1.0.0".to_string(),
+                    description: None,
+                    fixable: false,
+                    node_types: vec![],
+                    isolation_level: crate::IsolationLevel::default(),
+                    capabilities: vec![],
+                    schema: None,
+                    languages: vec![],
+                },
+            })
+        }
+        fn configure(
+            &mut self,
+            _rule_name: &str,
+            _config: &serde_json::Value,
+        ) -> Result<(), PluginError> {
+            Ok(())
+        }
+        fn call_lint(
+            &mut self,
+            _rule_name: &str,
+            _input_bytes: &[u8],
+        ) -> Result<Vec<u8>, PluginError> {
+            Ok(vec![])
+        }
+        fn unload(&mut self, _rule_name: &str) -> bool {
+            true
+        }
+        fn unload_all(&mut self) {}
+        fn loaded_rules(&self) -> Vec<&str> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn test_load_file_not_found() {
+        let mut executor = DummyExecutor;
+        let result = executor.load_file(
+            std::path::Path::new("nonexistent_file.wasm"),
+            PluginOptions::default(),
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to open file")
+        );
+    }
+
+    #[test]
+    fn test_load_file_exceeds_size() {
+        let mut executor = DummyExecutor;
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path();
+
+        let f = File::create(path).unwrap();
+        f.set_len(crate::MAX_WASM_SIZE + 10).unwrap();
+
+        let result = executor.load_file(path, PluginOptions::default());
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds maximum allowed size")
+        );
+    }
+
+    #[test]
+    fn test_load_file_success() {
+        let mut executor = DummyExecutor;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"dummy data").unwrap();
+        file.flush().unwrap();
+
+        let result = executor.load_file(file.path(), PluginOptions::default());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().name, "dummy");
+    }
+}
