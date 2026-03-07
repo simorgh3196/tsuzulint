@@ -173,4 +173,17 @@ mod tests {
 
         assert!(matches!(result, FixResult::Converged { .. }));
     }
+
+    #[test]
+    fn test_topological_sort_missing_dependency() {
+        let mut graph = DependencyGraph::new();
+        graph
+            .dependencies
+            .insert("RuleA".into(), vec!["RuleMissing".into()]);
+
+        let rules = vec!["RuleA"];
+        let sorted = graph.topological_sort(&rules);
+
+        assert_eq!(sorted, vec!["RuleA"]);
+    }
 }
