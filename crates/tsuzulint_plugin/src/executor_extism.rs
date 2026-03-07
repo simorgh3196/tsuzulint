@@ -191,11 +191,37 @@ impl RuleExecutor for ExtismExecutor {
         options: PluginOptions,
     ) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
+        use std::io::Read;
+
+        let mut file = std::fs::File::open(path)
+            .map_err(|e| crate::PluginError::load(format!("Failed to open file: {}", e)))?;
+
+        let metadata = file.metadata().map_err(|e| {
+            crate::PluginError::load(format!("Failed to read file metadata: {}", e))
+        })?;
+
+        if metadata.len() > crate::MAX_WASM_SIZE {
+            return Err(crate::PluginError::load(format!(
+                "WASM file size {} exceeds maximum allowed size of {} bytes",
+                metadata.len(),
+                crate::MAX_WASM_SIZE
+            )));
+        }
 
         // Read the file to calculate the hash, but don't keep the bytes in memory
         // if we are using RuleSource::File.
-        let wasm_bytes = std::fs::read(path)
-            .map_err(|e| PluginError::load(format!("Failed to read file: {}", e)))?;
+        let mut wasm_bytes = Vec::new();
+        let bytes_read = (&mut file)
+            .take(crate::MAX_WASM_SIZE + 1)
+            .read_to_end(&mut wasm_bytes)
+            .map_err(|e| crate::PluginError::load(format!("Failed to read file: {}", e)))?;
+
+        if bytes_read > crate::MAX_WASM_SIZE as usize {
+            return Err(crate::PluginError::load(format!(
+                "WASM file size exceeds maximum allowed size of {} bytes",
+                crate::MAX_WASM_SIZE
+            )));
+        }
 
         let mut hasher = Sha256::new();
         hasher.update(&wasm_bytes);
