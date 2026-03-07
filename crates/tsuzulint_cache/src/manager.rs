@@ -246,7 +246,7 @@ impl CacheManager {
             return Ok(());
         }
 
-        let file = std::fs::File::open(&cache_file)?;
+        let file = fs::File::open(&cache_file)?;
         let metadata = file.metadata()?;
         if metadata.len() > MAX_CACHE_SIZE {
             return Err(CacheError::corrupted(format!(
