@@ -89,4 +89,21 @@ mod native_tests {
             );
         }
     }
+
+    #[test]
+    fn test_file_open_failure() {
+        use tsuzulint_plugin::PluginOptions;
+        let mut host = PluginHost::new();
+        let result = host.load_rule(
+            std::path::Path::new("does_not_exist_at_all.wasm"),
+            PluginOptions::default(),
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to open file")
+        );
+    }
 }

@@ -193,7 +193,7 @@ impl RuleExecutor for ExtismExecutor {
         info!("Loading rule from file: {}", path.display());
         use std::io::Read;
 
-        let file = std::fs::File::open(path)
+        let mut file = std::fs::File::open(path)
             .map_err(|e| crate::PluginError::load(format!("Failed to open file: {}", e)))?;
 
         let metadata = file.metadata().map_err(|e| {
@@ -211,11 +211,7 @@ impl RuleExecutor for ExtismExecutor {
         // Read the file to calculate the hash, but don't keep the bytes in memory
         // if we are using RuleSource::File.
         let mut wasm_bytes = Vec::new();
-        let bytes_read = file
-            .try_clone()
-            .map_err(|e| {
-                crate::PluginError::load(format!("Failed to clone file descriptor: {}", e))
-            })?
+        let bytes_read = (&mut file)
             .take(crate::MAX_WASM_SIZE + 1)
             .read_to_end(&mut wasm_bytes)
             .map_err(|e| crate::PluginError::load(format!("Failed to read file: {}", e)))?;
