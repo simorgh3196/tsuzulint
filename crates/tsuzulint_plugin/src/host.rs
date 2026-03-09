@@ -151,7 +151,7 @@ impl PluginHost {
         self.manifests
             .insert(result.name.clone(), result.manifest.clone());
         // Empty MsgPack map: fixmap with 0 entries (0x80)
-        self.configs.insert(result.name.clone(), vec![0x80]);
+        self.configs.insert(result.name, vec![0x80]);
 
         Ok(result.manifest)
     }
@@ -176,7 +176,7 @@ impl PluginHost {
         self.manifests
             .insert(result.name.clone(), result.manifest.clone());
         // Empty MsgPack map: fixmap with 0 entries (0x80)
-        self.configs.insert(result.name.clone(), vec![0x80]);
+        self.configs.insert(result.name, vec![0x80]);
 
         Ok(result.manifest)
     }
