@@ -754,6 +754,20 @@ mod tests {
     }
 
     #[test]
+    fn test_load_rule_invalid_path() {
+        let mut host = PluginHost::new();
+        let result = host.load_rule("nonexistent_path.wasm", PluginOptions::default());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_rule_bytes_invalid_bytes() {
+        let mut host = PluginHost::new();
+        let result = host.load_rule_bytes(b"invalid wasm bytes", PluginOptions::default());
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_convert_node_to_value_parsing() {
         // 1) Object-like string -> Value::Object
         let obj_str = r#"{"type":"Doc"}"#;
