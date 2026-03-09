@@ -13,7 +13,7 @@ impl DependencyGraph {
         Self { dependencies: deps }
     }
 
-    pub fn topological_sort<'a>(&self, rules: &[&'a str]) -> Vec<&'a str> {
+    pub fn topological_sort<'a>(&self, rules: &[&'a str]) -> Result<Vec<&'a str>, String> {
         let mut in_degree: HashMap<&str, usize> = rules.iter().map(|r| (*r, 0)).collect();
         let mut graph: HashMap<&str, Vec<&str>> = HashMap::new();
 
@@ -22,9 +22,10 @@ impl DependencyGraph {
                 for dep in deps {
                     if rules.contains(&dep.as_str()) {
                         graph.entry(dep.as_str()).or_default().push(*rule);
-                        *in_degree
+                        let degree = in_degree
                             .get_mut(*rule)
-                            .expect("rule must exist in dependency graph") += 1;
+                            .ok_or_else(|| format!("Rule '{}' not found in dependency graph", rule))?;
+                        *degree += 1;
                     }
                 }
             }
@@ -43,7 +44,7 @@ impl DependencyGraph {
                 for &next_rule in next {
                     let degree = in_degree
                         .get_mut(next_rule)
-                        .expect("dependent rule must exist in dependency graph");
+                        .ok_or_else(|| format!("Dependent rule '{}' not found in dependency graph", next_rule))?;
                     *degree -= 1;
                     if *degree == 0 {
                         queue.push(next_rule);
@@ -51,7 +52,7 @@ impl DependencyGraph {
                 }
             }
         }
-        result
+        Ok(result)
     }
 }
 
@@ -129,7 +130,7 @@ mod tests {
     fn test_topological_sort() {
         let graph = DependencyGraph::new();
         let rules = vec!["MD064", "MD010", "MD007"];
-        let sorted = graph.topological_sort(&rules);
+        let sorted = graph.topological_sort(&rules).unwrap();
 
         let md007_idx = sorted.iter().position(|&r| r == "MD007").unwrap();
         let md010_idx = sorted.iter().position(|&r| r == "MD010").unwrap();
