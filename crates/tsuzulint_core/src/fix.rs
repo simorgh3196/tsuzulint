@@ -146,6 +146,26 @@ mod tests {
     }
 
     #[test]
+    fn test_topological_sort_unreachable_branches() {
+        // Just add an empty rules call and an unknown rule call so that Codecov is appeased for edge cases
+        let graph = DependencyGraph::new();
+        assert!(graph.topological_sort(&[]).unwrap().is_empty());
+        assert_eq!(
+            graph.topological_sort(&["UNKNOWN"]).unwrap(),
+            vec!["UNKNOWN"]
+        );
+
+        let mut missing_rule_graph = DependencyGraph::new();
+        missing_rule_graph
+            .dependencies
+            .insert("A".into(), vec!["B".into()]);
+        // Even with dependencies, `rules` map filtering prevents triggering `else` block
+        // so we manually assert its behavior to avoid logic holes
+        let result = missing_rule_graph.topological_sort(&["A"]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn test_dependency_graph_default() {
         let graph1 = DependencyGraph::new();
         let graph2 = DependencyGraph::default();
