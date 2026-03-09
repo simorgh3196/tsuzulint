@@ -22,10 +22,11 @@ impl DependencyGraph {
                 for dep in deps {
                     if rules.contains(&dep.as_str()) {
                         graph.entry(dep.as_str()).or_default().push(*rule);
-                        let degree = in_degree.get_mut(*rule).ok_or_else(|| {
-                            format!("Rule '{}' not found in dependency graph", rule)
-                        })?;
-                        *degree += 1;
+                        if let Some(degree) = in_degree.get_mut(*rule) {
+                            *degree += 1;
+                        } else {
+                            return Err(format!("Rule '{}' not found in dependency graph", rule));
+                        }
                     }
                 }
             }
@@ -42,15 +43,16 @@ impl DependencyGraph {
             result.push(rule);
             if let Some(next) = graph.get(rule) {
                 for &next_rule in next {
-                    let degree = in_degree.get_mut(next_rule).ok_or_else(|| {
-                        format!(
+                    if let Some(degree) = in_degree.get_mut(next_rule) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push(next_rule);
+                        }
+                    } else {
+                        return Err(format!(
                             "Dependent rule '{}' not found in dependency graph",
                             next_rule
-                        )
-                    })?;
-                    *degree -= 1;
-                    if *degree == 0 {
-                        queue.push(next_rule);
+                        ));
                     }
                 }
             }
@@ -141,6 +143,20 @@ mod tests {
 
         assert!(md007_idx < md010_idx);
         assert!(md010_idx < md064_idx);
+    }
+
+    #[test]
+    fn test_dependency_graph_default() {
+        let graph1 = DependencyGraph::new();
+        let graph2 = DependencyGraph::default();
+        assert_eq!(graph1.dependencies.len(), graph2.dependencies.len());
+    }
+
+    #[test]
+    fn test_fix_coordinator_default() {
+        let coord1 = FixCoordinator::new();
+        let coord2 = FixCoordinator::default();
+        assert_eq!(coord1.max_iterations, coord2.max_iterations);
     }
 
     #[test]
