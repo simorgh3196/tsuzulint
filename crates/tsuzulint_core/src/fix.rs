@@ -139,6 +139,21 @@ mod tests {
     }
 
     #[test]
+    fn test_topological_sort_missing_dependency() {
+        let graph = DependencyGraph::new();
+        // Here we include MD064, which depends on MD010, but MD010 is not in the list.
+        // It shouldn't crash because we replaced .expect() with safe if let Some().
+        let rules = vec!["MD064", "MD007"];
+        let sorted = graph.topological_sort(&rules);
+
+        let md007_idx = sorted.iter().position(|&r| r == "MD007").unwrap();
+        let md064_idx = sorted.iter().position(|&r| r == "MD064").unwrap();
+
+        assert!(md007_idx < md064_idx || md064_idx < md007_idx); // Validates it does not crash
+        assert_eq!(sorted.len(), 2);
+    }
+
+    #[test]
     fn test_cycle_detection() {
         let coordinator = FixCoordinator::new();
         let mut content = "a".to_string();
