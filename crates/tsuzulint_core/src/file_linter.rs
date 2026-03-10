@@ -223,10 +223,9 @@ pub fn lint_file_internal(
 
     // Filter out diagnostics that are covered by global rules (by checking rule ID).
     // Global rules take precedence, and their diagnostics should not be stored in block cache.
-    // This is faster than hashing entire Diagnostic objects.
-    let global_rule_ids: HashSet<&str> = global_rule_names.iter().copied().collect();
-
-    filter_overridden_diagnostics(&mut local_diagnostics, &global_rule_ids);
+    // We reuse the already sorted `global_rule_names` slice to perform binary searches,
+    // avoiding the allocation of a HashSet for every file.
+    filter_overridden_diagnostics(&mut local_diagnostics, &global_rule_names);
 
     local_diagnostics.sort_unstable();
     local_diagnostics.dedup();
@@ -398,10 +397,15 @@ where
 
 fn filter_overridden_diagnostics(
     local_diagnostics: &mut Vec<tsuzulint_plugin::Diagnostic>,
-    global_rule_ids: &HashSet<&str>,
+    global_rule_names: &[&str],
 ) {
-    if !global_rule_ids.is_empty() {
-        local_diagnostics.retain(|d| !global_rule_ids.contains(d.rule_id.as_str()));
+    if !global_rule_names.is_empty() {
+        debug_assert!(global_rule_names.windows(2).all(|w| w[0] <= w[1]));
+        local_diagnostics.retain(|d| {
+            global_rule_names
+                .binary_search(&d.rule_id.as_str())
+                .is_err()
+        });
     }
 }
 
@@ -560,10 +564,9 @@ mod tests {
             Diagnostic::new(local_id, "Local msg", Span::new(20, 30)),
         ];
 
-        let mut global_rule_ids = HashSet::new();
-        global_rule_ids.insert(global_id);
+        let global_rule_names = vec![global_id];
 
-        filter_overridden_diagnostics(&mut diagnostics, &global_rule_ids);
+        filter_overridden_diagnostics(&mut diagnostics, &global_rule_names);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule_id, local_id);
@@ -572,9 +575,9 @@ mod tests {
     #[test]
     fn test_filter_overridden_diagnostics_empty_global_set() {
         let mut diagnostics = vec![Diagnostic::new("rule", "msg", Span::new(0, 10))];
-        let global_rule_ids = HashSet::new();
+        let global_rule_names: Vec<&str> = vec![];
 
-        filter_overridden_diagnostics(&mut diagnostics, &global_rule_ids);
+        filter_overridden_diagnostics(&mut diagnostics, &global_rule_names);
 
         assert_eq!(diagnostics.len(), 1);
     }
@@ -582,10 +585,9 @@ mod tests {
     #[test]
     fn test_filter_overridden_diagnostics_no_match() {
         let mut diagnostics = vec![Diagnostic::new("local-rule", "msg", Span::new(0, 10))];
-        let mut global_rule_ids = HashSet::new();
-        global_rule_ids.insert("other-global-rule");
+        let global_rule_names = vec!["other-global-rule"];
 
-        filter_overridden_diagnostics(&mut diagnostics, &global_rule_ids);
+        filter_overridden_diagnostics(&mut diagnostics, &global_rule_names);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule_id, "local-rule");
