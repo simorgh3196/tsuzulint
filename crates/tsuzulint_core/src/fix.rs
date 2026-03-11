@@ -22,9 +22,9 @@ impl DependencyGraph {
                 for dep in deps {
                     if rules.contains(&dep.as_str()) {
                         graph.entry(dep.as_str()).or_default().push(*rule);
-                        *in_degree
-                            .get_mut(*rule)
-                            .expect("rule must exist in dependency graph") += 1;
+                        if let Some(count) = in_degree.get_mut(*rule) {
+                            *count += 1;
+                        }
                     }
                 }
             }
@@ -41,11 +41,11 @@ impl DependencyGraph {
             result.push(rule);
             if let Some(next) = graph.get(rule) {
                 for &next_rule in next {
-                    *in_degree
-                        .get_mut(next_rule)
-                        .expect("dependent rule must exist in dependency graph") -= 1;
-                    if in_degree[next_rule] == 0 {
-                        queue.push(next_rule);
+                    if let Some(count) = in_degree.get_mut(next_rule) {
+                        *count -= 1;
+                        if *count == 0 {
+                            queue.push(next_rule);
+                        }
                     }
                 }
             }
@@ -136,6 +136,33 @@ mod tests {
 
         assert!(md007_idx < md010_idx);
         assert!(md010_idx < md064_idx);
+    }
+
+    #[test]
+    fn test_topological_sort_missing_in_degree() {
+        // Test what happens if the graph logic goes wrong and a rule is missing
+        // from in_degree map. Since topological_sort constructs the map using `rules`,
+        // a standard input won't trigger the missing map entry.
+        // But we can artificially simulate a situation where it's safe by verifying it
+        // doesn't panic.
+        let mut graph = DependencyGraph::new();
+        // Add a dependency to a completely unknown rule
+        graph
+            .dependencies
+            .insert("UnknownA".into(), vec!["UnknownB".into()]);
+
+        // Include "UnknownA", but not "UnknownB"
+        let rules = vec!["UnknownA"];
+        let sorted = graph.topological_sort(&rules);
+        assert_eq!(sorted, vec!["UnknownA"]);
+
+        // Include both
+        let rules_both = vec!["UnknownA", "UnknownB"];
+        let sorted_both = graph.topological_sort(&rules_both);
+
+        let idx_b = sorted_both.iter().position(|&r| r == "UnknownB").unwrap();
+        let idx_a = sorted_both.iter().position(|&r| r == "UnknownA").unwrap();
+        assert!(idx_b < idx_a);
     }
 
     #[test]
