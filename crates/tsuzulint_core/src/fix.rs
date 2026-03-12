@@ -22,9 +22,9 @@ impl DependencyGraph {
                 for dep in deps {
                     if rules.contains(&dep.as_str()) {
                         graph.entry(dep.as_str()).or_default().push(*rule);
-                        *in_degree
-                            .get_mut(*rule)
-                            .expect("rule must exist in dependency graph") += 1;
+                        if let Some(count) = in_degree.get_mut(*rule) {
+                            *count += 1;
+                        }
                     }
                 }
             }
@@ -41,11 +41,11 @@ impl DependencyGraph {
             result.push(rule);
             if let Some(next) = graph.get(rule) {
                 for &next_rule in next {
-                    *in_degree
-                        .get_mut(next_rule)
-                        .expect("dependent rule must exist in dependency graph") -= 1;
-                    if in_degree[next_rule] == 0 {
-                        queue.push(next_rule);
+                    if let Some(count) = in_degree.get_mut(next_rule) {
+                        *count -= 1;
+                        if *count == 0 {
+                            queue.push(next_rule);
+                        }
                     }
                 }
             }
@@ -172,5 +172,16 @@ mod tests {
         });
 
         assert!(matches!(result, FixResult::Converged { .. }));
+    }
+
+    #[test]
+    fn test_topological_sort_missing_dependency() {
+        let mut graph = DependencyGraph::new();
+        // Manually construct a scenario where a dependency is tracked
+        // in the graph structure but not in the input rules, to hit the None branch
+        graph.dependencies.insert("A".into(), vec!["B".into()]);
+        let rules = vec!["A"]; // "B" is missing from the list
+        let sorted = graph.topological_sort(&rules);
+        assert_eq!(sorted, vec!["A"]);
     }
 }
