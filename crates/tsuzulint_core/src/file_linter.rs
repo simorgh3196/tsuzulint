@@ -32,9 +32,27 @@ pub fn lint_file_internal(
 ) -> Result<LintResult, LinterError> {
     debug!("Linting {}", path.display());
 
+    // Do an initial metadata check to quickly reject non-regular files (like FIFOs)
+    // without blocking on `File::open` (which hangs on FIFOs).
+    let initial_metadata = fs::metadata(path).map_err(|e| {
+        LinterError::file(format!(
+            "Failed to read metadata for {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    if !initial_metadata.is_file() {
+        return Err(LinterError::file(format!(
+            "Not a regular file: {}",
+            path.display()
+        )));
+    }
+
     let file = fs::File::open(path)
         .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
 
+    // Perform secure checks on the file descriptor to prevent TOCTOU
     let metadata = file.metadata().map_err(|e| {
         LinterError::file(format!(
             "Failed to read metadata for {}: {}",
