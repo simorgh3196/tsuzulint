@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -31,7 +32,10 @@ pub fn lint_file_internal(
 ) -> Result<LintResult, LinterError> {
     debug!("Linting {}", path.display());
 
-    let metadata = fs::metadata(path).map_err(|e| {
+    let file = fs::File::open(path)
+        .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
+
+    let metadata = file.metadata().map_err(|e| {
         LinterError::file(format!(
             "Failed to read metadata for {}: {}",
             path.display(),
@@ -54,8 +58,18 @@ pub fn lint_file_internal(
         )));
     }
 
-    let content = fs::read_to_string(path)
+    let mut content = String::new();
+    file.take(MAX_FILE_SIZE + 1)
+        .read_to_string(&mut content)
         .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
+
+    if content.len() as u64 > MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            MAX_FILE_SIZE,
+            path.display()
+        )));
+    }
 
     let content_hash = CacheManager::hash_content(&content);
     let rule_versions = super::rule_loader::get_rule_versions_from_host(host);
