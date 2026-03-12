@@ -520,6 +520,19 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_file_not_found() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let non_existent_file = temp_dir.path().join("does_not_exist.txt");
+
+        let result = linter.lint_file(&non_existent_file);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to read metadata for"));
+    }
+
+    #[test]
     #[cfg(unix)]
     fn test_lint_file_rejects_special_files() {
         use std::process::Command;
