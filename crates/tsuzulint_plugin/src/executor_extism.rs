@@ -140,9 +140,8 @@ impl ExtismExecutor {
             rule_manifest.name, rule_manifest.version
         );
 
-        let name = rule_manifest.name.clone();
         self.rules.insert(
-            name.clone(),
+            rule_manifest.name.clone(),
             LoadedRule {
                 plugin,
                 manifest: rule_manifest.clone(),
@@ -150,7 +149,7 @@ impl ExtismExecutor {
         );
 
         Ok(LoadResult {
-            name,
+            name: rule_manifest.name.clone(),
             manifest: rule_manifest,
         })
     }

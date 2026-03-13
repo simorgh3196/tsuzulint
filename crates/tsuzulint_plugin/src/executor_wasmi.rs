@@ -259,9 +259,8 @@ impl RuleExecutor for WasmiExecutor {
             rule_manifest.name, rule_manifest.version
         );
 
-        let name = rule_manifest.name.clone();
         self.rules.insert(
-            name.clone(),
+            rule_manifest.name.clone(),
             LoadedRule {
                 store,
                 get_manifest_fn,
@@ -272,7 +271,7 @@ impl RuleExecutor for WasmiExecutor {
         );
 
         Ok(LoadResult {
-            name,
+            name: rule_manifest.name.clone(),
             manifest: rule_manifest,
         })
     }
