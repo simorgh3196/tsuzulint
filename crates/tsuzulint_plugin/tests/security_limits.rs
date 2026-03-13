@@ -56,4 +56,52 @@ mod native_tests {
             Err(e) => panic!("Expected OOM error, but got unexpected error: {:?}", e),
         }
     }
+
+    #[test]
+    fn test_max_wasm_size_limit() {
+        use tempfile::NamedTempFile;
+        use tsuzulint_plugin::MAX_WASM_SIZE;
+        use tsuzulint_plugin::PluginOptions;
+
+        let mut host = PluginHost::new();
+
+        // Create a temporary file
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path();
+
+        // Set its length to slightly above the limit (51MB)
+        file.as_file().set_len(MAX_WASM_SIZE + 1024).unwrap();
+
+        let result = host.load_rule(path, PluginOptions::default());
+
+        assert!(
+            result.is_err(),
+            "Expected load to fail due to file size limit"
+        );
+        if let Err(e) = result {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("exceeds maximum allowed size"),
+                "Unexpected error message: {}",
+                msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_file_open_failure() {
+        use tsuzulint_plugin::PluginOptions;
+        let mut host = PluginHost::new();
+        let result = host.load_rule(
+            std::path::Path::new("does_not_exist_at_all.wasm"),
+            PluginOptions::default(),
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to open file")
+        );
+    }
 }
