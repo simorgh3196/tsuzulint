@@ -758,6 +758,7 @@ mod tests {
         let mut host = PluginHost::new();
         let result = host.load_rule("nonexistent_path.wasm", PluginOptions::default());
         assert!(result.is_err());
+        assert!(host.loaded_rules().next().is_none());
     }
 
     #[test]
@@ -765,6 +766,7 @@ mod tests {
         let mut host = PluginHost::new();
         let result = host.load_rule_bytes(b"invalid wasm bytes", PluginOptions::default());
         assert!(result.is_err());
+        assert!(host.loaded_rules().next().is_none());
     }
 
     #[test]
