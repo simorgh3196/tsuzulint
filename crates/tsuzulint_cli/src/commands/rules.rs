@@ -177,7 +177,23 @@ fn find_manifest(wasm_path: &Path) -> Option<PathBuf> {
 }
 
 fn load_manifest(path: &Path) -> Result<tsuzulint_manifest::ExternalRuleManifest, AddRuleError> {
-    let content = std::fs::read_to_string(path).map_err(AddRuleError::ManifestReadError)?;
+    let read_manifest = || -> Result<String, std::io::Error> {
+        let mut file = std::fs::File::open(path)?;
+        let metadata = file.metadata()?;
+        let limit = 10 * 1024 * 1024; // 10MB limit
+        if metadata.len() > limit {
+            return Err(std::io::Error::other("File too large"));
+        }
+        let mut content = String::new();
+        use std::io::Read;
+        (&mut file).take(limit + 1).read_to_string(&mut content)?;
+        if content.len() as u64 > limit {
+            return Err(std::io::Error::other("File too large"));
+        }
+        Ok(content)
+    };
+
+    let content = read_manifest().map_err(AddRuleError::ManifestReadError)?;
 
     tsuzulint_manifest::validate_manifest(&content).map_err(AddRuleError::ManifestParseError)
 }
@@ -189,7 +205,23 @@ fn generate_minimal_manifest(
     use tsuzulint_manifest::{IsolationLevel, RuleMetadata};
     use tsuzulint_registry::HashVerifier;
 
-    let wasm_content = std::fs::read(wasm_path).map_err(AddRuleError::WasmReadError)?;
+    let read_wasm = || -> Result<Vec<u8>, std::io::Error> {
+        let mut file = std::fs::File::open(wasm_path)?;
+        let metadata = file.metadata()?;
+        let limit = 50 * 1024 * 1024; // 50MB limit
+        if metadata.len() > limit {
+            return Err(std::io::Error::other("File too large"));
+        }
+        let mut bytes = Vec::new();
+        use std::io::Read;
+        (&mut file).take(limit + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > limit {
+            return Err(std::io::Error::other("File too large"));
+        }
+        Ok(bytes)
+    };
+
+    let wasm_content = read_wasm().map_err(AddRuleError::WasmReadError)?;
     let sha256 = HashVerifier::compute(&wasm_content);
 
     Ok(tsuzulint_manifest::ExternalRuleManifest {
@@ -236,7 +268,23 @@ fn copy_plugin_files(
 
     std::fs::copy(wasm_path, &target_wasm).map_err(AddRuleError::CopyError)?;
 
-    let wasm_content = std::fs::read(&target_wasm).map_err(AddRuleError::WasmReadError)?;
+    let read_wasm = || -> Result<Vec<u8>, std::io::Error> {
+        let mut file = std::fs::File::open(&target_wasm)?;
+        let metadata = file.metadata()?;
+        let limit = 50 * 1024 * 1024; // 50MB limit
+        if metadata.len() > limit {
+            return Err(std::io::Error::other("File too large"));
+        }
+        let mut bytes = Vec::new();
+        use std::io::Read;
+        (&mut file).take(limit + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > limit {
+            return Err(std::io::Error::other("File too large"));
+        }
+        Ok(bytes)
+    };
+
+    let wasm_content = read_wasm().map_err(AddRuleError::WasmReadError)?;
     let sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
 
     manifest.wasm = vec![Wasm::File {

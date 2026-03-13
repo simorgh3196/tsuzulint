@@ -164,7 +164,23 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            let read_cached_wasm = || -> Result<Vec<u8>, std::io::Error> {
+                let mut file = std::fs::File::open(&cached.wasm_path)?;
+                let metadata = file.metadata()?;
+                let limit = 50 * 1024 * 1024; // 50MB limit
+                if metadata.len() > limit {
+                    return Err(std::io::Error::other("File too large"));
+                }
+                let mut bytes = Vec::new();
+                use std::io::Read;
+                (&mut file).take(limit + 1).read_to_end(&mut bytes)?;
+                if bytes.len() as u64 > limit {
+                    return Err(std::io::Error::other("File too large"));
+                }
+                Ok(bytes)
+            };
+
+            match read_cached_wasm() {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -233,7 +249,23 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let read_local_wasm = || -> Result<Vec<u8>, std::io::Error> {
+            let mut file = std::fs::File::open(&wasm_path)?;
+            let metadata = file.metadata()?;
+            let limit = 50 * 1024 * 1024; // 50MB limit
+            if metadata.len() > limit {
+                return Err(std::io::Error::other("File too large"));
+            }
+            let mut bytes = Vec::new();
+            use std::io::Read;
+            (&mut file).take(limit + 1).read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > limit {
+                return Err(std::io::Error::other("File too large"));
+            }
+            Ok(bytes)
+        };
+
+        let bytes = read_local_wasm().map_err(DownloadError::IoError)?;
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
