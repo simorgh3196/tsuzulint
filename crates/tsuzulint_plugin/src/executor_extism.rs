@@ -208,8 +208,9 @@ impl RuleExecutor for ExtismExecutor {
             )));
         }
 
-        // Read the file to calculate the hash, but don't keep the bytes in memory
-        // if we are using RuleSource::File.
+        // Read the file to calculate the hash and keep bytes in memory
+        // to prevent TOCTOU attacks (file could change between check and load).
+        let mut wasm_bytes = Vec::new();
         let mut wasm_bytes = Vec::new();
         let bytes_read = (&mut file)
             .take(crate::MAX_WASM_SIZE + 1)

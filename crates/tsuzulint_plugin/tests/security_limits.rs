@@ -59,7 +59,6 @@ mod native_tests {
 
     #[test]
     fn test_max_wasm_size_limit() {
-        use std::fs::File;
         use tempfile::NamedTempFile;
         use tsuzulint_plugin::MAX_WASM_SIZE;
         use tsuzulint_plugin::PluginOptions;
@@ -71,8 +70,7 @@ mod native_tests {
         let path = file.path();
 
         // Set its length to slightly above the limit (51MB)
-        let f = File::create(path).unwrap();
-        f.set_len(MAX_WASM_SIZE + 1024).unwrap();
+        file.as_file().set_len(MAX_WASM_SIZE + 1024).unwrap();
 
         let result = host.load_rule(path, PluginOptions::default());
 
