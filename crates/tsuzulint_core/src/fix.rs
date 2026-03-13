@@ -177,8 +177,8 @@ mod tests {
     #[test]
     fn test_topological_sort_missing_dependency() {
         let mut graph = DependencyGraph::new();
-        // Manually construct a scenario where a dependency is tracked
-        // in the graph structure but not in the input rules, to hit the None branch
+        // Test that a rule is correctly sorted when its dependency
+        // is not included in the input rules list
         graph.dependencies.insert("A".into(), vec!["B".into()]);
         let rules = vec!["A"]; // "B" is missing from the list
         let sorted = graph.topological_sort(&rules);
