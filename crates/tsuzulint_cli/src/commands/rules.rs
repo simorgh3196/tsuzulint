@@ -570,6 +570,75 @@ mod manifest_tests {
     }
 
     #[test]
+    fn test_load_manifest_too_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let f = std::fs::File::create(&manifest_path).unwrap();
+        f.set_len(10 * 1024 * 1024 + 1).unwrap();
+
+        let result = load_manifest(&manifest_path);
+        assert!(
+            matches!(result, Err(AddRuleError::ManifestReadError(e)) if e.to_string() == "File too large")
+        );
+    }
+
+    #[test]
+    fn test_generate_minimal_manifest_too_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let f = std::fs::File::create(&wasm_path).unwrap();
+        f.set_len(50 * 1024 * 1024 + 1).unwrap();
+
+        let result = generate_minimal_manifest(&wasm_path, "my-alias");
+        assert!(
+            matches!(result, Err(AddRuleError::WasmReadError(e)) if e.to_string() == "File too large")
+        );
+    }
+
+    #[test]
+    fn test_copy_plugin_files_too_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        let f = std::fs::File::create(&wasm_path).unwrap();
+        f.set_len(50 * 1024 * 1024 + 1).unwrap();
+
+        let target_dir = dir.path().join("plugins/test-rule");
+        // Create a dummy manifest
+        use tsuzulint_manifest::{IsolationLevel, RuleMetadata};
+        let manifest = tsuzulint_manifest::ExternalRuleManifest {
+            rule: RuleMetadata {
+                name: "test-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                license: None,
+                authors: vec![],
+                fixable: false,
+                isolation_level: IsolationLevel::Global,
+                languages: vec![],
+                capabilities: vec![],
+                node_types: vec![],
+                keywords: vec![],
+            },
+            wasm: vec![],
+            allowed_hosts: None,
+            allowed_paths: None,
+            config: std::collections::BTreeMap::new(),
+            memory: None,
+            timeout_ms: None,
+            tsuzulint: None,
+            options: None,
+        };
+
+        let result = copy_plugin_files(&wasm_path, manifest, &target_dir);
+        assert!(
+            matches!(result, Err(AddRuleError::WasmReadError(e)) if e.to_string() == "File too large")
+        );
+    }
+
+    #[test]
     fn test_copy_plugin_files() {
         let dir = tempfile::tempdir().unwrap();
         let wasm_path = dir.path().join("rule.wasm");

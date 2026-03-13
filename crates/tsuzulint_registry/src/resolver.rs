@@ -408,6 +408,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_path_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // Create an oversized file
+        let f = std::fs::File::create(&wasm_path).unwrap();
+        f.set_len(50 * 1024 * 1024 + 1).unwrap();
+
+        let manifest = json!({
+            "rule": {
+                "name": "local-rule",
+                "version": "1.0.0",
+            },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
+        let spec = PluginSpec::parse(&json!({
+            "path": manifest_path.to_str().unwrap(),
+            "as": "local-alias"
+        }))
+        .unwrap();
+
+        let result = resolver.resolve(&spec).await;
+        assert!(
+            matches!(result, Err(ResolveError::DownloadError(DownloadError::IoError(e))) if e.to_string() == "File too large")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_cached_wasm_too_large() {
+        let mock_server = MockServer::start().await;
+        let wasm_content = b"fake wasm content";
+        let wasm_hash = HashVerifier::compute(wasm_content);
+
+        let manifest = json!({
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0",
+                "isolation_level": "global"
+            },
+            "wasm": [{
+                "url": format!("{}/rule.wasm", mock_server.uri()),
+                "hash": wasm_hash
+            }]
+        });
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/owner/repo/releases/latest/download/tsuzulint-rule.json",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&manifest))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/rule.wasm"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(wasm_content.as_slice()))
+            .mount(&mock_server)
+            .await;
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+
+        let downloader = WasmDownloader::new()
+            .expect("Failed to create downloader")
+            .allow_local(true);
+
+        let temp_dir = tempdir().unwrap();
+        let cache = PluginCache::with_dir(temp_dir.path().to_path_buf());
+
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .expect("Failed to create resolver")
+            .with_downloader(downloader)
+            .with_cache(cache);
+
+        let spec = github_spec_with_server_url(&mock_server.uri());
+
+        let resolved1 = resolver.resolve(&spec).await.expect("First resolve failed");
+
+        // Make the cached file too large
+        let f = std::fs::File::options()
+            .write(true)
+            .open(&resolved1.wasm_path)
+            .unwrap();
+        f.set_len(50 * 1024 * 1024 + 1).unwrap();
+
+        // Resolving again should hit the cache, fail to read, and redownload
+        let resolved2 = resolver
+            .resolve(&spec)
+            .await
+            .expect("Second resolve failed");
+
+        let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
+        assert_eq!(wasm_bytes, wasm_content);
+    }
+
+    #[tokio::test]
     async fn test_resolve_path_success() {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
