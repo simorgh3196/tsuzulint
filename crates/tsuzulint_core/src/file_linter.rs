@@ -1,7 +1,7 @@
 //! Single file linting logic.
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -31,7 +31,14 @@ pub fn lint_file_internal(
 ) -> Result<LintResult, LinterError> {
     debug!("Linting {}", path.display());
 
-    let metadata = fs::metadata(path).map_err(|e| {
+    // Open with O_NONBLOCK so that opening a FIFO (or other special file)
+    // does not block. This eliminates the TOCTOU window between a metadata
+    // check and the actual open call.
+    let file = open_nonblocking(path)
+        .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
+
+    // Verify the opened fd refers to a regular file (TOCTOU-safe, uses fstat).
+    let metadata = file.metadata().map_err(|e| {
         LinterError::file(format!(
             "Failed to read metadata for {}: {}",
             path.display(),
@@ -54,8 +61,37 @@ pub fn lint_file_internal(
         )));
     }
 
-    let content = fs::read_to_string(path)
-        .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
+    let mut content = String::new();
+    // Clear O_NONBLOCK so that subsequent reads block normally.
+    clear_nonblocking(&file).map_err(|e| {
+        LinterError::file(format!(
+            "Failed to clear O_NONBLOCK on {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    file.take(MAX_FILE_SIZE + 1)
+        .read_to_string(&mut content)
+        .map_err(|e| {
+            // EAGAIN / EWOULDBLOCK can theoretically appear if O_NONBLOCK was not
+            // successfully cleared; surface a clear error in that case.
+            #[cfg(unix)]
+            if e.raw_os_error() == Some(libc::EAGAIN) {
+                return LinterError::file(format!(
+                    "Failed to read {} (EAGAIN: O_NONBLOCK still set)",
+                    path.display()
+                ));
+            }
+            LinterError::file(format!("Failed to read {}: {}", path.display(), e))
+        })?;
+
+    if content.len() as u64 > MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            MAX_FILE_SIZE,
+            path.display()
+        )));
+    }
 
     let content_hash = CacheManager::hash_content(&content);
     let rule_versions = super::rule_loader::get_rule_versions_from_host(host);
@@ -342,6 +378,50 @@ fn select_parser(extension: &str) -> FileParser {
     } else {
         FileParser::Text(PlainTextParser::new())
     }
+}
+
+/// Opens a file with `O_NONBLOCK` on Unix to avoid blocking on FIFOs or other
+/// special files.  After a successful open the caller must clear `O_NONBLOCK`
+/// before performing blocking reads (use [`clear_nonblocking`]).
+///
+/// On non-Unix platforms this is a plain `fs::File::open`.
+fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::File::open(path)
+    }
+}
+
+/// Clears the `O_NONBLOCK` flag on an open file descriptor so that subsequent
+/// reads block normally.  This is a no-op on non-Unix platforms.
+#[cfg(unix)]
+fn clear_nonblocking(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd as _;
+    let fd = file.as_raw_fd();
+    // SAFETY: `fd` is a valid, open file descriptor owned by `file`.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let new_flags = flags & !libc::O_NONBLOCK;
+    // SAFETY: same fd, setting valid flags.
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, new_flags) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn clear_nonblocking(_file: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn to_raw_value<T: serde::Serialize>(

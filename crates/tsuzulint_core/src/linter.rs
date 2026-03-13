@@ -520,6 +520,63 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_file_exact_size() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let exact_file = temp_dir.path().join("exact.txt");
+        // Write a valid UTF-8 payload of exactly MAX_FILE_SIZE bytes so that the
+        // boundary check is exercised deterministically without NUL-filled content.
+        let payload = "a".repeat(crate::file_linter::MAX_FILE_SIZE as usize);
+        fs::write(&exact_file, payload.as_bytes()).unwrap();
+
+        let result = linter.lint_file(&exact_file);
+        // A file at exactly the limit must succeed; it must NOT produce a size error.
+        assert!(
+            !matches!(&result, Err(LinterError::File(msg)) if msg.contains("File size exceeds limit")),
+            "Exact-size file should not be rejected by the size check"
+        );
+        assert!(
+            result.is_ok(),
+            "lint_file should succeed for exact-size file"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_lint_file_symlink() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let target_file = temp_dir.path().join("target.txt");
+        fs::write(&target_file, "content").unwrap();
+
+        let symlink_path = temp_dir.path().join("symlink.txt");
+        std::os::unix::fs::symlink(&target_file, &symlink_path).expect("Failed to create symlink");
+
+        // Symlinks resolving to normal files should work as long as they are normal files
+        let result = linter.lint_file(&symlink_path);
+        // It might be parsed cleanly
+        assert!(
+            result.is_ok(),
+            "Symlinks resolving to a normal file should be supported"
+        );
+    }
+
+    #[test]
+    fn test_lint_file_not_found() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let non_existent_file = temp_dir.path().join("does_not_exist.txt");
+
+        let result = linter.lint_file(&non_existent_file);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to open"));
+    }
+
+    #[test]
     #[cfg(unix)]
     fn test_lint_file_rejects_special_files() {
         use std::process::Command;
