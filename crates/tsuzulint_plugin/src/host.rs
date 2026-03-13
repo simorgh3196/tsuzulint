@@ -151,7 +151,7 @@ impl PluginHost {
         self.manifests
             .insert(result.name.clone(), result.manifest.clone());
         // Empty MsgPack map: fixmap with 0 entries (0x80)
-        self.configs.insert(result.name.clone(), vec![0x80]);
+        self.configs.insert(result.name, vec![0x80]);
 
         Ok(result.manifest)
     }
@@ -176,7 +176,7 @@ impl PluginHost {
         self.manifests
             .insert(result.name.clone(), result.manifest.clone());
         // Empty MsgPack map: fixmap with 0 entries (0x80)
-        self.configs.insert(result.name.clone(), vec![0x80]);
+        self.configs.insert(result.name, vec![0x80]);
 
         Ok(result.manifest)
     }
@@ -751,6 +751,22 @@ mod tests {
         // doesn't panic.
         let result = host.run_rule_with_prepared("nonexistent", &prepared);
         assert!(matches!(result, Err(PluginError::NotFound(_))));
+    }
+
+    #[test]
+    fn test_load_rule_invalid_path() {
+        let mut host = PluginHost::new();
+        let result = host.load_rule("nonexistent_path.wasm", PluginOptions::default());
+        assert!(result.is_err());
+        assert!(host.loaded_rules().next().is_none());
+    }
+
+    #[test]
+    fn test_load_rule_bytes_invalid_bytes() {
+        let mut host = PluginHost::new();
+        let result = host.load_rule_bytes(b"invalid wasm bytes", PluginOptions::default());
+        assert!(result.is_err());
+        assert!(host.loaded_rules().next().is_none());
     }
 
     #[test]
