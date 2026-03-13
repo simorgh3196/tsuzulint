@@ -4527,6 +4527,7 @@ dependencies = [
  "insta",
  "jsonc-parser",
  "jsonschema",
+ "libc",
  "parking_lot",
  "pretty_assertions",
  "rayon",

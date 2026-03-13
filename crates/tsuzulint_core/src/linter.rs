@@ -525,18 +525,21 @@ mod tests {
         let linter = Linter::new(config).unwrap();
 
         let exact_file = temp_dir.path().join("exact.txt");
-        let file = fs::File::create(&exact_file).unwrap();
-        file.set_len(crate::file_linter::MAX_FILE_SIZE).unwrap();
+        // Write a valid UTF-8 payload of exactly MAX_FILE_SIZE bytes so that the
+        // boundary check is exercised deterministically without NUL-filled content.
+        let payload = "a".repeat(crate::file_linter::MAX_FILE_SIZE as usize);
+        fs::write(&exact_file, payload.as_bytes()).unwrap();
 
-        // Should not return size exceeds error
         let result = linter.lint_file(&exact_file);
-        if let Err(LinterError::File(msg)) = &result {
-            assert!(
-                !msg.contains("File size exceeds limit"),
-                "Should not fail on exact size"
-            );
-        }
-        // Result could be Ok or Err depending on parsing, but size check must pass.
+        // A file at exactly the limit must succeed; it must NOT produce a size error.
+        assert!(
+            !matches!(&result, Err(LinterError::File(msg)) if msg.contains("File size exceeds limit")),
+            "Exact-size file should not be rejected by the size check"
+        );
+        assert!(
+            result.is_ok(),
+            "lint_file should succeed for exact-size file"
+        );
     }
 
     #[test]
@@ -570,7 +573,7 @@ mod tests {
         let result = linter.lint_file(&non_existent_file);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("Failed to read metadata for"));
+        assert!(err.contains("Failed to open"));
     }
 
     #[test]
