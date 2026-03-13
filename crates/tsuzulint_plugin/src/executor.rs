@@ -34,6 +34,41 @@ pub struct LoadResult {
     pub manifest: RuleManifest,
 }
 
+/// Reads a WASM file from disk and validates its size limits.
+pub fn read_wasm_file_or_error(path: &std::path::Path) -> Result<Vec<u8>, crate::PluginError> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| crate::PluginError::load(format!("Failed to open file: {}", e)))?;
+
+    let metadata = file
+        .metadata()
+        .map_err(|e| crate::PluginError::load(format!("Failed to read file metadata: {}", e)))?;
+
+    if metadata.len() > crate::MAX_WASM_SIZE {
+        return Err(crate::PluginError::load(format!(
+            "WASM file size {} exceeds maximum allowed size of {} bytes",
+            metadata.len(),
+            crate::MAX_WASM_SIZE
+        )));
+    }
+
+    let mut wasm_bytes: Vec<u8> = Vec::new();
+    let bytes_read = (&mut file)
+        .take(crate::MAX_WASM_SIZE + 1)
+        .read_to_end(&mut wasm_bytes)
+        .map_err(|e| crate::PluginError::load(format!("Failed to read file: {}", e)))?;
+
+    if bytes_read > crate::MAX_WASM_SIZE as usize {
+        return Err(crate::PluginError::load(format!(
+            "WASM file size exceeds maximum allowed size of {} bytes",
+            crate::MAX_WASM_SIZE
+        )));
+    }
+
+    Ok(wasm_bytes)
+}
+
 /// Trait for WASM rule execution.
 ///
 /// This trait abstracts the underlying WASM runtime, allowing
@@ -73,35 +108,7 @@ pub trait RuleExecutor {
         path: &std::path::Path,
         options: PluginOptions,
     ) -> Result<LoadResult, PluginError> {
-        use std::io::Read;
-
-        let mut file = std::fs::File::open(path)
-            .map_err(|e| crate::PluginError::load(format!("Failed to open file: {}", e)))?;
-
-        let metadata = file.metadata().map_err(|e| {
-            crate::PluginError::load(format!("Failed to read file metadata: {}", e))
-        })?;
-
-        if metadata.len() > crate::MAX_WASM_SIZE {
-            return Err(crate::PluginError::load(format!(
-                "WASM file size {} exceeds maximum allowed size of {} bytes",
-                metadata.len(),
-                crate::MAX_WASM_SIZE
-            )));
-        }
-
-        let mut wasm_bytes = Vec::new();
-        let bytes_read = (&mut file)
-            .take(crate::MAX_WASM_SIZE + 1)
-            .read_to_end(&mut wasm_bytes)
-            .map_err(|e| crate::PluginError::load(format!("Failed to read file: {}", e)))?;
-
-        if bytes_read > crate::MAX_WASM_SIZE as usize {
-            return Err(crate::PluginError::load(format!(
-                "WASM file size exceeds maximum allowed size of {} bytes",
-                crate::MAX_WASM_SIZE
-            )));
-        }
+        let wasm_bytes = read_wasm_file_or_error(path)?;
 
         self.load(&wasm_bytes, options)
     }
@@ -206,10 +213,9 @@ mod tests {
     #[test]
     fn test_load_file_not_found() {
         let mut executor = DummyExecutor;
-        let result = executor.load_file(
-            std::path::Path::new("nonexistent_file.wasm"),
-            PluginOptions::default(),
-        );
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let missing_path = temp_dir.path().join("definitely-missing-rule.wasm");
+        let result = executor.load_file(&missing_path, PluginOptions::default());
         assert!(result.is_err());
         assert!(
             result

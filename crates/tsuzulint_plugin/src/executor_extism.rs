@@ -4,7 +4,7 @@
 //! which internally uses wasmtime for JIT compilation.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use extism::{Manifest, Plugin, PluginBuilder, Wasm};
@@ -29,14 +29,12 @@ const DEFAULT_FUEL_LIMIT: u64 = 1_000_000_000;
 #[derive(Clone)]
 enum RuleSource {
     Bytes { wasm: Arc<[u8]>, hash: String },
-    File { path: PathBuf, hash: String },
 }
 
 impl RuleSource {
     fn to_wasm(&self) -> Wasm {
         match self {
             RuleSource::Bytes { wasm, hash } => Wasm::data(wasm.to_vec()).with_hash(hash),
-            RuleSource::File { path, hash } => Wasm::file(path).with_hash(hash),
         }
     }
 }
@@ -191,46 +189,15 @@ impl RuleExecutor for ExtismExecutor {
         options: PluginOptions,
     ) -> Result<LoadResult, PluginError> {
         info!("Loading rule from file: {}", path.display());
-        use std::io::Read;
-
-        let mut file = std::fs::File::open(path)
-            .map_err(|e| crate::PluginError::load(format!("Failed to open file: {}", e)))?;
-
-        let metadata = file.metadata().map_err(|e| {
-            crate::PluginError::load(format!("Failed to read file metadata: {}", e))
-        })?;
-
-        if metadata.len() > crate::MAX_WASM_SIZE {
-            return Err(crate::PluginError::load(format!(
-                "WASM file size {} exceeds maximum allowed size of {} bytes",
-                metadata.len(),
-                crate::MAX_WASM_SIZE
-            )));
-        }
-
-        // Read the file to calculate the hash and keep bytes in memory
-        // to prevent TOCTOU attacks (file could change between check and load).
-        let mut wasm_bytes = Vec::new();
-        let mut wasm_bytes = Vec::new();
-        let bytes_read = (&mut file)
-            .take(crate::MAX_WASM_SIZE + 1)
-            .read_to_end(&mut wasm_bytes)
-            .map_err(|e| crate::PluginError::load(format!("Failed to read file: {}", e)))?;
-
-        if bytes_read > crate::MAX_WASM_SIZE as usize {
-            return Err(crate::PluginError::load(format!(
-                "WASM file size exceeds maximum allowed size of {} bytes",
-                crate::MAX_WASM_SIZE
-            )));
-        }
+        let wasm_bytes = crate::executor::read_wasm_file_or_error(path)?;
 
         let mut hasher = Sha256::new();
         hasher.update(&wasm_bytes);
         let hash = hex::encode(hasher.finalize());
 
         self.load_rule(
-            RuleSource::File {
-                path: path.to_path_buf(),
+            RuleSource::Bytes {
+                wasm: Arc::from(wasm_bytes),
                 hash,
             },
             options,
