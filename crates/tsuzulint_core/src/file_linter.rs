@@ -61,10 +61,12 @@ pub fn lint_file_internal(
         ))
     })?;
 
-    // Removed the redundant `!metadata.is_file()` check here to improve patch coverage.
-    // The initial `initial_metadata.is_file()` check prevents FIFOs from hanging `File::open`.
-    // If the file was swapped to a non-file after the check, `File::open` handles it or it acts
-    // like a file handle that we can securely read with bounded `.take()`.
+    if !metadata.is_file() {
+        return Err(LinterError::file(format!(
+            "Not a regular file: {}",
+            path.display()
+        )));
+    }
 
     if metadata.len() > MAX_FILE_SIZE {
         return Err(LinterError::file(format!(
@@ -79,10 +81,13 @@ pub fn lint_file_internal(
         .read_to_string(&mut content)
         .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
 
-    // Removing the redundant secondary size check on `content.len() > MAX_FILE_SIZE`.
-    // We already read using `.take(MAX_FILE_SIZE + 1)` which acts as a hard limit preventing OOM.
-    // If the file grew after `metadata.len() > MAX_FILE_SIZE`, `take` truncates it to `MAX_FILE_SIZE + 1` bytes safely.
-    // The explicit error formatting here isn't worth failing Codecov patch threshold for, as OOM is already prevented.
+    if content.len() as u64 > MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            MAX_FILE_SIZE,
+            path.display()
+        )));
+    }
 
     let content_hash = CacheManager::hash_content(&content);
     let rule_versions = super::rule_loader::get_rule_versions_from_host(host);

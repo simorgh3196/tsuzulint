@@ -520,6 +520,47 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_file_exact_size() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let exact_file = temp_dir.path().join("exact.txt");
+        let file = fs::File::create(&exact_file).unwrap();
+        file.set_len(crate::file_linter::MAX_FILE_SIZE).unwrap();
+
+        // Should not return size exceeds error
+        let result = linter.lint_file(&exact_file);
+        if let Err(LinterError::File(msg)) = &result {
+            assert!(
+                !msg.contains("File size exceeds limit"),
+                "Should not fail on exact size"
+            );
+        }
+        // Result could be Ok or Err depending on parsing, but size check must pass.
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_lint_file_symlink() {
+        let (config, temp_dir) = test_config();
+        let linter = Linter::new(config).unwrap();
+
+        let target_file = temp_dir.path().join("target.txt");
+        fs::write(&target_file, "content").unwrap();
+
+        let symlink_path = temp_dir.path().join("symlink.txt");
+        std::os::unix::fs::symlink(&target_file, &symlink_path).expect("Failed to create symlink");
+
+        // Symlinks resolving to normal files should work as long as they are normal files
+        let result = linter.lint_file(&symlink_path);
+        // It might be parsed cleanly
+        assert!(
+            result.is_ok(),
+            "Symlinks resolving to a normal file should be supported"
+        );
+    }
+
+    #[test]
     fn test_lint_file_not_found() {
         let (config, temp_dir) = test_config();
         let linter = Linter::new(config).unwrap();
