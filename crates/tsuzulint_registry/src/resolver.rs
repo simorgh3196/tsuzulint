@@ -393,6 +393,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_path_wasm_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // create an artificially large file exceeding 50MB
+        let wasm_file = std::fs::File::create(&wasm_path).unwrap();
+        wasm_file
+            .set_len(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .unwrap();
+
+        let manifest = json!({
+            "rule": {
+                "name": "local-rule",
+                "version": "1.0.0",
+            },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
+        let spec = PluginSpec::parse(&json!({
+            "path": manifest_path.to_str().unwrap(),
+            "as": "local-alias"
+        }))
+        .unwrap();
+
+        let result = resolver.resolve(&spec).await;
+
+        assert!(matches!(
+            result,
+            Err(ResolveError::DownloadError(DownloadError::IoError(ref e))) if e.to_string().contains("WASM file too large")
+        ));
+    }
+
+    #[tokio::test]
     async fn test_resolve_path_success() {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");

@@ -390,6 +390,31 @@ mod extra_tests {
     }
 
     #[test]
+    fn test_load_rule_manifest_wasm_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let wasm_file = File::create(&wasm_path).unwrap();
+        // create a WASM file that exceeds MAX_WASM_SIZE (50MB)
+        wasm_file.set_len(50 * 1024 * 1024 + 1).unwrap();
+
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        }"#.to_string();
+        std::fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("WASM file too large"));
+    }
+
+    #[test]
     fn test_load_rule_manifest_at_size_limit() {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
