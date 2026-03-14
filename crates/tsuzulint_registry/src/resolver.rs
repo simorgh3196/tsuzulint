@@ -40,7 +40,11 @@ fn read_wasm_file(path: &Path) -> std::io::Result<Vec<u8>> {
         return Err(std::io::Error::other("WASM file too large"));
     }
     let mut bytes = Vec::new();
-    if (&mut file).take(crate::downloader::DEFAULT_MAX_SIZE + 1).read_to_end(&mut bytes)? as u64 > crate::downloader::DEFAULT_MAX_SIZE {
+    if (&mut file)
+        .take(crate::downloader::DEFAULT_MAX_SIZE + 1)
+        .read_to_end(&mut bytes)? as u64
+        > crate::downloader::DEFAULT_MAX_SIZE
+    {
         return Err(std::io::Error::other("WASM file too large"));
     }
     Ok(bytes)
