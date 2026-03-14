@@ -143,7 +143,21 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
         )));
     }
 
-    let wasm_bytes = fs::read(&canonical_wasm_path).map_err(|e| {
+    let read_wasm = || -> std::io::Result<Vec<u8>> {
+        use std::io::Read;
+        let mut file = fs::File::open(&canonical_wasm_path)?;
+        const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
+        if file.metadata()?.len() > MAX_WASM_SIZE {
+            return Err(std::io::Error::other("WASM file too large"));
+        }
+        let mut buf = Vec::new();
+        if (&mut file).take(MAX_WASM_SIZE + 1).read_to_end(&mut buf)? as u64 > MAX_WASM_SIZE {
+            return Err(std::io::Error::other("WASM file too large"));
+        }
+        Ok(buf)
+    };
+
+    let wasm_bytes = read_wasm().map_err(|e| {
         LinterError::Config(format!(
             "Failed to read WASM file '{}': {}",
             canonical_wasm_path.display(),

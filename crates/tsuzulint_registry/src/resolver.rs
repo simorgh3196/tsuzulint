@@ -33,6 +33,19 @@ pub enum ResolveError {
     SecurityError(#[from] crate::security::SecurityError),
 }
 
+fn read_wasm_file(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    if file.metadata()?.len() > crate::downloader::DEFAULT_MAX_SIZE {
+        return Err(std::io::Error::other("WASM file too large"));
+    }
+    let mut bytes = Vec::new();
+    if (&mut file).take(crate::downloader::DEFAULT_MAX_SIZE + 1).read_to_end(&mut bytes)? as u64 > crate::downloader::DEFAULT_MAX_SIZE {
+        return Err(std::io::Error::other("WASM file too large"));
+    }
+    Ok(bytes)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedPlugin {
     pub wasm_path: PathBuf,
@@ -164,7 +177,7 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            match read_wasm_file(&cached.wasm_path) {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -233,7 +246,7 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let bytes = read_wasm_file(&wasm_path).map_err(DownloadError::IoError)?;
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
