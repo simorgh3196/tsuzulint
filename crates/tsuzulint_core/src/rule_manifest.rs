@@ -405,7 +405,8 @@ mod extra_tests {
                 "path": "rule.wasm",
                 "hash": "0000000000000000000000000000000000000000000000000000000000000000"
             }]
-        }"#.to_string();
+        }"#
+        .to_string();
         std::fs::write(&manifest_path, json).unwrap();
 
         let result = load_rule_manifest(&manifest_path);
