@@ -266,10 +266,8 @@ fn copy_plugin_files(
     let target_wasm = target_dir.join("rule.wasm");
     let target_manifest = target_dir.join("tsuzulint-rule.json");
 
-    std::fs::copy(wasm_path, &target_wasm).map_err(AddRuleError::CopyError)?;
-
     let read_wasm = || -> Result<Vec<u8>, std::io::Error> {
-        let mut file = std::fs::File::open(&target_wasm)?;
+        let mut file = std::fs::File::open(wasm_path)?;
         let metadata = file.metadata()?;
         let limit = 50 * 1024 * 1024; // 50MB limit
         if metadata.len() > limit {
@@ -285,6 +283,8 @@ fn copy_plugin_files(
     };
 
     let wasm_content = read_wasm().map_err(AddRuleError::WasmReadError)?;
+    std::fs::write(&target_wasm, &wasm_content).map_err(AddRuleError::CopyError)?;
+
     let sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
 
     manifest.wasm = vec![Wasm::File {
