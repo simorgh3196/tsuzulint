@@ -400,7 +400,9 @@ mod extra_tests {
 
         let wasm_file = File::create(&wasm_path).unwrap();
         // create a WASM file that exceeds MAX_WASM_SIZE (50MB)
-        wasm_file.set_len(50 * 1024 * 1024 + 1).unwrap();
+        wasm_file
+            .set_len(tsuzulint_manifest::MAX_WASM_SIZE + 1)
+            .unwrap();
 
         let json = r#"{
             "rule": { "name": "test", "version": "1.0.0" },
