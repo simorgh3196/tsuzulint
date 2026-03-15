@@ -52,5 +52,4 @@ pub use error::PluginError;
 pub use executor::{LoadResult, PluginOptions, RuleExecutor};
 pub use host::{PluginHost, PreparedLintRequest};
 pub use manifest::{Capability, IsolationLevel, KnownLanguage, RuleManifest};
-/// Maximum allowed WASM file size in bytes (50 MB).
-pub const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024;
+pub use tsuzulint_manifest::MAX_WASM_SIZE;

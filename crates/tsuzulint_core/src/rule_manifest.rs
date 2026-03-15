@@ -143,7 +143,24 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
         )));
     }
 
-    let wasm_bytes = fs::read(&canonical_wasm_path).map_err(|e| {
+    let read_wasm = || -> std::io::Result<Vec<u8>> {
+        use std::io::Read;
+        let mut file = fs::File::open(&canonical_wasm_path)?;
+        if file.metadata()?.len() > tsuzulint_manifest::MAX_WASM_SIZE {
+            return Err(std::io::Error::other("WASM file too large"));
+        }
+        let mut buf = Vec::new();
+        if (&mut file)
+            .take(tsuzulint_manifest::MAX_WASM_SIZE + 1)
+            .read_to_end(&mut buf)? as u64
+            > tsuzulint_manifest::MAX_WASM_SIZE
+        {
+            return Err(std::io::Error::other("WASM file too large"));
+        }
+        Ok(buf)
+    };
+
+    let wasm_bytes = read_wasm().map_err(|e| {
         LinterError::Config(format!(
             "Failed to read WASM file '{}': {}",
             canonical_wasm_path.display(),
@@ -373,6 +390,34 @@ mod extra_tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("is too large"));
+    }
+
+    #[test]
+    fn test_load_rule_manifest_wasm_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let wasm_file = File::create(&wasm_path).unwrap();
+        // create a WASM file that exceeds MAX_WASM_SIZE (50MB)
+        wasm_file
+            .set_len(tsuzulint_manifest::MAX_WASM_SIZE + 1)
+            .unwrap();
+
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        }"#
+        .to_string();
+        std::fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("WASM file too large"));
     }
 
     #[test]

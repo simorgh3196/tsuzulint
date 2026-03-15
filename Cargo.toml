@@ -81,7 +81,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "stream",
 ] }
 semver = "1.0"
-jsonschema = "0.45"
+jsonschema = { version = "0.45", default-features = false }
 sha2 = "0.10"
 unicode-segmentation = "1.12.0"
 

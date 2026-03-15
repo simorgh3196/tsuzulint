@@ -5,9 +5,6 @@ use crate::manifest::HashVerifier;
 use std::time::Duration;
 use thiserror::Error;
 
-/// Default maximum file size for WASM downloads (50 MB).
-pub const DEFAULT_MAX_SIZE: u64 = 50 * 1024 * 1024;
-
 /// Default request timeout (60 seconds).
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -48,7 +45,7 @@ pub struct WasmDownloader {
 impl WasmDownloader {
     /// Create a new WASM downloader with default settings.
     pub fn new() -> Result<Self, DownloadError> {
-        Self::create(DEFAULT_MAX_SIZE, DEFAULT_TIMEOUT, false)
+        Self::create(tsuzulint_manifest::MAX_WASM_SIZE, DEFAULT_TIMEOUT, false)
     }
 
     /// Create a new WASM downloader with a custom maximum file size.
@@ -372,8 +369,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_secure_download_builds_client_for_public_ip() -> Result<(), DownloadError> {
-        let downloader =
-            WasmDownloader::with_options(DEFAULT_MAX_SIZE, Duration::from_millis(100))?;
+        let downloader = WasmDownloader::with_options(
+            tsuzulint_manifest::MAX_WASM_SIZE,
+            Duration::from_millis(100),
+        )?;
 
         let url = "http://192.0.2.1/rule.wasm".to_string();
         let result = downloader.download(&url).await;

@@ -14,6 +14,9 @@ use thiserror::Error;
 /// Maximum length for rule names
 pub const MAX_RULE_NAME_LENGTH: usize = 64;
 
+/// Maximum allowed size for WASM plugin files (50 MB).
+pub const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024;
+
 /// Error type for manifest operations.
 #[derive(Debug, Error)]
 pub enum ManifestError {
