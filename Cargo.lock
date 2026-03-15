@@ -4621,6 +4621,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "tsuzulint_ast",
+ "tsuzulint_manifest",
  "tsuzulint_text",
  "wasmi",
  "wat",

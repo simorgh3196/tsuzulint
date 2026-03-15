@@ -9,6 +9,7 @@ description = "Plugin system for TsuzuLint natural language linter"
 
 [dependencies]
 tsuzulint_text = { workspace = true }
+tsuzulint_manifest = { workspace = true }
 rkyv = { workspace = true, optional = true, features = ["std"] }
 extism = { workspace = true, optional = true }
 extism-manifest = { workspace = true, optional = true }

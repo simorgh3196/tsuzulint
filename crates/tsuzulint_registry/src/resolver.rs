@@ -36,14 +36,14 @@ pub enum ResolveError {
 fn read_wasm_file(path: &Path) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
-    if file.metadata()?.len() > crate::downloader::DEFAULT_MAX_SIZE {
+    if file.metadata()?.len() > tsuzulint_manifest::MAX_WASM_SIZE {
         return Err(std::io::Error::other("WASM file too large"));
     }
     let mut bytes = Vec::new();
     if (&mut file)
-        .take(crate::downloader::DEFAULT_MAX_SIZE + 1)
+        .take(tsuzulint_manifest::MAX_WASM_SIZE + 1)
         .read_to_end(&mut bytes)? as u64
-        > crate::downloader::DEFAULT_MAX_SIZE
+        > tsuzulint_manifest::MAX_WASM_SIZE
     {
         return Err(std::io::Error::other("WASM file too large"));
     }
@@ -401,7 +401,7 @@ mod tests {
         // create an artificially large file exceeding 50MB
         let wasm_file = std::fs::File::create(&wasm_path).unwrap();
         wasm_file
-            .set_len(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .set_len(tsuzulint_manifest::MAX_WASM_SIZE + 1)
             .unwrap();
 
         let manifest = json!({

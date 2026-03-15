@@ -146,12 +146,15 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
     let read_wasm = || -> std::io::Result<Vec<u8>> {
         use std::io::Read;
         let mut file = fs::File::open(&canonical_wasm_path)?;
-        const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
-        if file.metadata()?.len() > MAX_WASM_SIZE {
+        if file.metadata()?.len() > tsuzulint_manifest::MAX_WASM_SIZE {
             return Err(std::io::Error::other("WASM file too large"));
         }
         let mut buf = Vec::new();
-        if (&mut file).take(MAX_WASM_SIZE + 1).read_to_end(&mut buf)? as u64 > MAX_WASM_SIZE {
+        if (&mut file)
+            .take(tsuzulint_manifest::MAX_WASM_SIZE + 1)
+            .read_to_end(&mut buf)? as u64
+            > tsuzulint_manifest::MAX_WASM_SIZE
+        {
             return Err(std::io::Error::other("WASM file too large"));
         }
         Ok(buf)
