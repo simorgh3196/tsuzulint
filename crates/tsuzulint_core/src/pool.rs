@@ -135,9 +135,7 @@ impl std::ops::Deref for PooledHost<'_> {
     fn deref(&self) -> &Self::Target {
         // Invariant: `host` is only taken in `Drop`, so it is always `Some` while
         // this value is accessible.
-        self.host
-            .as_ref()
-            .unwrap_or_else(|| unreachable!("host was already taken"))
+        self.host.as_ref().expect("host was already taken")
     }
 }
 
@@ -145,9 +143,7 @@ impl std::ops::DerefMut for PooledHost<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // Invariant: `host` is only taken in `Drop`, so it is always `Some` while
         // this value is accessible.
-        self.host
-            .as_mut()
-            .unwrap_or_else(|| unreachable!("host was already taken"))
+        self.host.as_mut().expect("host was already taken")
     }
 }
 
