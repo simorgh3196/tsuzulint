@@ -371,6 +371,67 @@ mod tests {
     }
 
     #[test]
+    fn test_load_rule_manifest_open_error() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        File::create(&manifest_path).unwrap();
+
+        let mut perms = std::fs::metadata(&manifest_path).unwrap().permissions();
+        perms.set_readonly(true);
+        // On Unix, we need to remove read permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o000);
+        }
+        std::fs::set_permissions(&manifest_path, perms).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to open"));
+    }
+
+    #[test]
+    fn test_load_rule_manifest_wasm_open_error() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+        File::create(&wasm_path).unwrap();
+
+        let json = format!(
+            r#"{{
+            "rule": {{
+                "name": "test-rule",
+                "version": "1.0.0",
+                "description": "Test rule",
+                "fixable": false
+            }},
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "1111111111111111111111111111111111111111111111111111111111111111"
+            }}]
+        }}"#
+        );
+        std::fs::write(&manifest_path, json).unwrap();
+
+        let mut perms = std::fs::metadata(&wasm_path).unwrap().permissions();
+        perms.set_readonly(true);
+        // On Unix, we need to remove read permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o000);
+        }
+        std::fs::set_permissions(&wasm_path, perms).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to open WASM file"));
+    }
+
+    #[test]
     fn test_load_rule_manifest_missing_wasm() {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
