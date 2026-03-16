@@ -399,20 +399,19 @@ mod tests {
         let wasm_path = dir.path().join("rule.wasm");
         File::create(&wasm_path).unwrap();
 
-        let json = format!(
-            r#"{{
-            "rule": {{
+        let json = r#"{
+            "rule": {
                 "name": "test-rule",
                 "version": "1.0.0",
                 "description": "Test rule",
                 "fixable": false
-            }},
-            "wasm": [{{
+            },
+            "wasm": [{
                 "path": "rule.wasm",
                 "hash": "1111111111111111111111111111111111111111111111111111111111111111"
-            }}]
-        }}"#
-        );
+            }]
+        }"#
+        .to_string();
         std::fs::write(&manifest_path, json).unwrap();
 
         let mut perms = std::fs::metadata(&wasm_path).unwrap().permissions();
@@ -454,20 +453,19 @@ mod tests {
         // create a directory instead of a file
         std::fs::create_dir(&wasm_path).unwrap();
 
-        let json = format!(
-            r#"{{
-            "rule": {{
+        let json = r#"{
+            "rule": {
                 "name": "test-rule",
                 "version": "1.0.0",
                 "description": "Test rule",
                 "fixable": false
-            }},
-            "wasm": [{{
+            },
+            "wasm": [{
                 "path": "rule.wasm",
                 "hash": "1111111111111111111111111111111111111111111111111111111111111111"
-            }}]
-        }}"#
-        );
+            }]
+        }"#
+        .to_string();
         std::fs::write(&manifest_path, json).unwrap();
 
         let result = load_rule_manifest(&manifest_path);
