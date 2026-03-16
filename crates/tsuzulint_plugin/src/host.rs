@@ -768,6 +768,61 @@ mod tests {
     }
 
     #[test]
+    fn test_unload_rule() {
+        use crate::IsolationLevel;
+        let mut host = PluginHost::new();
+        // Since we cannot easily load a real WASM plugin here without full fixtures,
+        // we'll populate the internal data structures directly to test unloading.
+        host.manifests.insert(
+            "my-rule".to_string(),
+            RuleManifest {
+                name: "my-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: Some("test".to_string()),
+                fixable: false,
+                node_types: vec![],
+                isolation_level: IsolationLevel::Global,
+                schema: None,
+                languages: vec![],
+                capabilities: vec![],
+            },
+        );
+        host.configs.insert("my-rule".to_string(), vec![0x80]);
+        host.aliases
+            .insert("my-rule-alias".to_string(), "my-rule".to_string());
+
+        // Test unloading by real name
+        host.unload_rule("my-rule");
+        assert!(!host.manifests.contains_key("my-rule"));
+        assert!(!host.configs.contains_key("my-rule"));
+
+        // Re-populate for alias testing
+        host.manifests.insert(
+            "my-rule".to_string(),
+            RuleManifest {
+                name: "my-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: Some("test".to_string()),
+                fixable: false,
+                node_types: vec![],
+                isolation_level: IsolationLevel::Global,
+                schema: None,
+                languages: vec![],
+                capabilities: vec![],
+            },
+        );
+        host.configs.insert("my-rule".to_string(), vec![0x80]);
+        host.aliases
+            .insert("my-rule-alias".to_string(), "my-rule".to_string());
+
+        // Test unloading by alias
+        host.unload_rule("my-rule-alias");
+        assert!(!host.manifests.contains_key("my-rule-alias"));
+        assert!(!host.configs.contains_key("my-rule-alias"));
+        assert!(!host.aliases.contains_key("my-rule-alias"));
+    }
+
+    #[test]
     fn test_convert_node_to_value_parsing() {
         // 1) Object-like string -> Value::Object
         let obj_str = r#"{"type":"Doc"}"#;
