@@ -526,13 +526,11 @@ impl PluginHost {
     pub fn unload_rule(&mut self, name: &str) -> bool {
         let real_name = self
             .aliases
-            .get(name)
-            .cloned()
+            .remove(name)
             .unwrap_or_else(|| name.to_string());
 
         self.manifests.remove(name);
         self.configs.remove(name);
-        self.aliases.remove(name);
 
         // Since rename_rule uses move semantics, unloading is safe.
         self.executor.unload(&real_name)
