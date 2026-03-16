@@ -432,6 +432,51 @@ mod tests {
     }
 
     #[test]
+    fn test_load_rule_manifest_read_error() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        // create a directory instead of a file
+        std::fs::create_dir(&manifest_path).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to read rule manifest"));
+    }
+
+    #[test]
+    fn test_load_rule_manifest_wasm_read_error() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // create a directory instead of a file
+        std::fs::create_dir(&wasm_path).unwrap();
+
+        let json = format!(
+            r#"{{
+            "rule": {{
+                "name": "test-rule",
+                "version": "1.0.0",
+                "description": "Test rule",
+                "fixable": false
+            }},
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "1111111111111111111111111111111111111111111111111111111111111111"
+            }}]
+        }}"#
+        );
+        std::fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Failed to read WASM file"));
+    }
+
+    #[test]
     fn test_load_rule_manifest_missing_wasm() {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
