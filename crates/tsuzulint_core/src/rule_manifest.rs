@@ -410,8 +410,7 @@ mod tests {
                 "path": "rule.wasm",
                 "hash": "1111111111111111111111111111111111111111111111111111111111111111"
             }]
-        }"#
-        .to_string();
+        }"#;
         std::fs::write(&manifest_path, json).unwrap();
 
         let mut perms = std::fs::metadata(&wasm_path).unwrap().permissions();
@@ -464,8 +463,7 @@ mod tests {
                 "path": "rule.wasm",
                 "hash": "1111111111111111111111111111111111111111111111111111111111111111"
             }]
-        }"#
-        .to_string();
+        }"#;
         std::fs::write(&manifest_path, json).unwrap();
 
         let result = load_rule_manifest(&manifest_path);
