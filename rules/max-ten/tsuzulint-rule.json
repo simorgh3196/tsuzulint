@@ -1,0 +1,52 @@
+{
+  "$schema": "https://raw.githubusercontent.com/simorgh3196/tsuzulint/main/schemas/v1/rule.json",
+  "rule": {
+    "name": "max-ten",
+    "version": "0.1.0",
+    "description": "Limit the number of Japanese commas (読点) in a single sentence",
+    "repository": "https://github.com/simorgh3196/tsuzulint",
+    "license": "MIT",
+    "keywords": [
+      "sentence",
+      "style",
+      "max-ten",
+      "comma"
+    ],
+    "fixable": false,
+    "node_types": [
+      "Str"
+    ],
+    "isolation_level": "block"
+  },
+  "wasm": [
+    {
+      "path": "../target/wasm32-wasip1/release/tsuzulint_rule_max_ten.wasm",
+      "hash": "ce8244e62435076ef8c725398a4af432145a26b18216c863dbac2f390ef0d348"
+    }
+  ],
+  "options": {
+    "type": "object",
+    "properties": {
+      "max": {
+        "type": "integer",
+        "default": 3,
+        "description": "Maximum number of commas allowed in a sentence"
+      },
+      "strict": {
+        "type": "boolean",
+        "default": false,
+        "description": "If false, commas sandwiched between nouns are ignored"
+      },
+      "touten": {
+        "type": "string",
+        "default": "、",
+        "description": "The comma character to count"
+      },
+      "kuten": {
+        "type": "string",
+        "default": "。",
+        "description": "The period character"
+      }
+    }
+  }
+}
