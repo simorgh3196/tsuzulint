@@ -30,11 +30,9 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
     })?;
 
     let metadata = file.metadata().map_err(|e| {
-        LinterError::Config(format!(
-            "Failed to read metadata for rule manifest '{}': {}",
-            manifest_path.display(),
-            e
-        ))
+        LinterError::Config(
+            format!("Failed to read metadata for rule manifest '{}': {}", manifest_path.display(), e)
+        )
     })?;
 
     if metadata.len() > MAX_MANIFEST_SIZE {
@@ -171,11 +169,9 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
     })?;
 
     let wasm_metadata = wasm_file.metadata().map_err(|e| {
-        LinterError::Config(format!(
-            "Failed to read metadata for WASM file '{}': {}",
-            canonical_wasm_path.display(),
-            e
-        ))
+        LinterError::Config(
+            format!("Failed to read metadata for WASM file '{}': {}", canonical_wasm_path.display(), e)
+        )
     })?;
 
     if wasm_metadata.len() > MAX_WASM_SIZE {
