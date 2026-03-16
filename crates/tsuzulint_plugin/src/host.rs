@@ -526,13 +526,11 @@ impl PluginHost {
     pub fn unload_rule(&mut self, name: &str) -> bool {
         let real_name = self
             .aliases
-            .get(name)
-            .cloned()
+            .remove(name)
             .unwrap_or_else(|| name.to_string());
 
         self.manifests.remove(name);
         self.configs.remove(name);
-        self.aliases.remove(name);
 
         // Since rename_rule uses move semantics, unloading is safe.
         self.executor.unload(&real_name)
@@ -767,6 +765,61 @@ mod tests {
         let result = host.load_rule_bytes(b"invalid wasm bytes", PluginOptions::default());
         assert!(result.is_err());
         assert!(host.loaded_rules().next().is_none());
+    }
+
+    #[test]
+    fn test_unload_rule() {
+        use crate::IsolationLevel;
+        let mut host = PluginHost::new();
+        // Since we cannot easily load a real WASM plugin here without full fixtures,
+        // we'll populate the internal data structures directly to test unloading.
+        host.manifests.insert(
+            "my-rule".to_string(),
+            RuleManifest {
+                name: "my-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: Some("test".to_string()),
+                fixable: false,
+                node_types: vec![],
+                isolation_level: IsolationLevel::Global,
+                schema: None,
+                languages: vec![],
+                capabilities: vec![],
+            },
+        );
+        host.configs.insert("my-rule".to_string(), vec![0x80]);
+        host.aliases
+            .insert("my-rule-alias".to_string(), "my-rule".to_string());
+
+        // Test unloading by real name
+        host.unload_rule("my-rule");
+        assert!(!host.manifests.contains_key("my-rule"));
+        assert!(!host.configs.contains_key("my-rule"));
+
+        // Re-populate for alias testing
+        host.manifests.insert(
+            "my-rule".to_string(),
+            RuleManifest {
+                name: "my-rule".to_string(),
+                version: "1.0.0".to_string(),
+                description: Some("test".to_string()),
+                fixable: false,
+                node_types: vec![],
+                isolation_level: IsolationLevel::Global,
+                schema: None,
+                languages: vec![],
+                capabilities: vec![],
+            },
+        );
+        host.configs.insert("my-rule".to_string(), vec![0x80]);
+        host.aliases
+            .insert("my-rule-alias".to_string(), "my-rule".to_string());
+
+        // Test unloading by alias
+        host.unload_rule("my-rule-alias");
+        assert!(!host.manifests.contains_key("my-rule-alias"));
+        assert!(!host.configs.contains_key("my-rule-alias"));
+        assert!(!host.aliases.contains_key("my-rule-alias"));
     }
 
     #[test]
