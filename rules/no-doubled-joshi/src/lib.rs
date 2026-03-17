@@ -35,8 +35,10 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use tsuzulint_rule_pdk::{
     Capability, Diagnostic, Fix, KnownLanguage, LintRequest, LintResponse, RuleManifest, Span,
-    TextSpan, Token, extract_node_text, is_node_type,
+    Token, extract_node_text, is_node_type,
 };
+#[cfg(test)]
+use tsuzulint_rule_pdk::TextSpan;
 
 const RULE_ID: &str = "no-doubled-joshi";
 const VERSION: &str = "1.0.0";
@@ -122,12 +124,10 @@ fn is_exception_particle(token: &Token) -> bool {
     let surface = token.surface.as_str();
     let subtype = token.pos_detail(1);
 
-    match (surface, subtype) {
-        ("の", Some("連体化")) => true,
-        ("を", Some("格助詞")) => true,
-        ("て", Some("接続助詞")) => true,
-        _ => false,
-    }
+    matches!(
+        (surface, subtype),
+        ("の", Some("連体化")) | ("を", Some("格助詞")) | ("て", Some("接続助詞"))
+    )
 }
 
 fn get_previous_word(_token: &Token, tokens: &[Token], token_index: usize) -> String {
@@ -206,6 +206,7 @@ fn concat_adjacent_particles(particles: Vec<ParticleInfo>) -> Vec<ParticleInfo> 
 /// 「か」が連続するが、意味的に問題ないため許容する。
 ///
 /// 3個以上の「か」がある場合、連続するペアを走査して「かどうか」パターンを探す。
+#[cfg(test)]
 fn is_ka_douka_pattern(particles: &[&ParticleInfo], all_tokens: &[Token]) -> bool {
     // 連続する「か」のペアを走査
     for i in 0..particles.len().saturating_sub(1) {
@@ -294,9 +295,11 @@ fn check_doubled_particles(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    let mut by_key: HashMap<String, Vec<&ParticleInfo>> = HashMap::new();
+    // OPTIMIZATION: Use &str for the HashMap key instead of cloning the String.
+    // This avoids a heap allocation for every particle analyzed.
+    let mut by_key: HashMap<&str, Vec<&ParticleInfo>> = HashMap::new();
     for p in particles {
-        by_key.entry(p.key.clone()).or_default().push(p);
+        by_key.entry(p.key.as_str()).or_default().push(p);
     }
 
     for (_key, matches) in by_key {
@@ -304,13 +307,12 @@ fn check_doubled_particles(
             continue;
         }
 
-        if !config.strict {
-            if matches
+        if !config.strict
+            && matches
                 .iter()
                 .all(|p| p.pos_subtype == Some("並立助詞".to_string()))
-            {
-                continue;
-            }
+        {
+            continue;
         }
 
         for i in 1..matches.len() {
@@ -515,7 +517,7 @@ mod tests {
 
     #[test]
     fn error_message_format() {
-        let particles = vec![
+        let particles = [
             ParticleInfo {
                 surface: "は".into(),
                 key: "は:助詞.係助詞".into(),
@@ -734,7 +736,7 @@ mod tests {
         assert_eq!(ka_particles.len(), 2);
 
         // 「かどうか」パターンを確認
-        let ka_refs: Vec<&ParticleInfo> = ka_particles.iter().map(|p| *p).collect();
+        let ka_refs: Vec<&ParticleInfo> = ka_particles.to_vec();
         assert!(is_ka_douka_pattern(&ka_refs, &tokens));
     }
 
@@ -766,7 +768,7 @@ mod tests {
         assert_eq!(ka_particles.len(), 3);
 
         // 「かどうか」パターンが検出されることを確認
-        let ka_refs: Vec<&ParticleInfo> = ka_particles.iter().map(|p| *p).collect();
+        let ka_refs: Vec<&ParticleInfo> = ka_particles.to_vec();
         assert!(
             is_ka_douka_pattern(&ka_refs, &tokens),
             "3個の「か」から「かどうか」パターンを検出すべき"
@@ -965,7 +967,7 @@ mod tests {
 
         let particles = extract_particles_from_tokens(&tokens, &config);
         let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
-        assert!(diagnostics.len() >= 1);
+        assert!(!diagnostics.is_empty());
     }
 
     #[test]

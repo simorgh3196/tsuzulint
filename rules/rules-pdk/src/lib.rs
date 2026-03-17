@@ -186,10 +186,12 @@ impl LintRequest {
 
     /// Returns tokens, preferring helpers.text_context if available.
     pub fn get_tokens(&self) -> &[Token] {
-        if let Some(ref helpers) = self.helpers {
-            if let Some(ref ctx) = helpers.text_context {
-                if !ctx.tokens.is_empty() {
-                    return &ctx.tokens;
+        if let Some(helpers) = &self.helpers {
+            let ctx_opt = &helpers.text_context;
+            if let Some(ctx) = ctx_opt {
+                let tokens = &ctx.tokens;
+                if !tokens.is_empty() {
+                    return tokens;
                 }
             }
         }
@@ -198,10 +200,12 @@ impl LintRequest {
 
     /// Returns sentences, preferring helpers.text_context if available.
     pub fn get_sentences(&self) -> &[TextSentence] {
-        if let Some(ref helpers) = self.helpers {
-            if let Some(ref ctx) = helpers.text_context {
-                if !ctx.sentences.is_empty() {
-                    return &ctx.sentences;
+        if let Some(helpers) = &self.helpers {
+            let ctx_opt = &helpers.text_context;
+            if let Some(ctx) = ctx_opt {
+                let sentences = &ctx.sentences;
+                if !sentences.is_empty() {
+                    return sentences;
                 }
             }
         }
@@ -786,10 +790,11 @@ pub fn get_node_type(node: &AstNode) -> &str {
 /// Gets the text content from the request, using helpers if available.
 ///
 /// Falls back to extracting from source using node range if helpers.text is None.
-pub fn get_text<'a>(request: &'a LintRequest) -> Option<&'a str> {
+pub fn get_text(request: &LintRequest) -> Option<&str> {
     // Try helpers.text first
-    if let Some(ref helpers) = request.helpers {
-        if let Some(ref text) = helpers.text {
+    if let Some(helpers) = &request.helpers {
+        let text_opt = &helpers.text;
+        if let Some(text) = text_opt {
             return Some(text.as_str());
         }
     }
