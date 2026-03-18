@@ -542,4 +542,26 @@ mod tests {
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
         }
     }
+
+    #[test]
+    fn apply_fixes_to_file_too_large() {
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let path = dir.path().join("oversized_file.txt");
+
+        // Create a file and set its length to exceed MAX_FILE_SIZE
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(crate::file_linter::MAX_FILE_SIZE + 1).unwrap();
+
+        let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
+
+        let result = apply_fixes_to_file(&path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(msg.contains("File size exceeds limit of"));
+            }
+            Ok(_) => panic!("Expected LinterError::File for oversized file, got Ok"),
+            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
+        }
+    }
 }
