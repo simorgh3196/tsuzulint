@@ -564,4 +564,22 @@ mod tests {
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
         }
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn apply_fixes_to_file_too_large_by_read() {
+        // /dev/zero has a metadata size of 0, but yields infinite bytes on read
+        let path = std::path::Path::new("/dev/zero");
+        let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
+
+        let result = apply_fixes_to_file(path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(msg.contains("File size exceeds limit of"));
+            }
+            Ok(_) => panic!("Expected LinterError::File for oversized read, got Ok"),
+            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
+        }
+    }
 }
