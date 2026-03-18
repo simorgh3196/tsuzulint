@@ -27,6 +27,7 @@ pub fn lint_file_internal(
     config_hash: &[u8; 32],
     cache: &Mutex<CacheManager>,
     enabled_rules: &HashSet<&str>,
+    rule_versions: &HashMap<String, String>,
     timings_enabled: bool,
 ) -> Result<LintResult, LinterError> {
     debug!("Linting {}", path.display());
@@ -94,13 +95,15 @@ pub fn lint_file_internal(
     }
 
     let content_hash = CacheManager::hash_content(&content);
-    let rule_versions = super::rule_loader::get_rule_versions_from_host(host);
 
+    // Optimization: rule_versions is passed in by reference rather than calling
+    // super::rule_loader::get_rule_versions_from_host(host) here to avoid
+    // an unnecessary HashMap allocation and insertions for every file being linted.
     {
         let cache_guard = cache
             .lock()
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
-        if cache_guard.is_valid(path, &content_hash, config_hash, &rule_versions)
+        if cache_guard.is_valid(path, &content_hash, config_hash, rule_versions)
             && let Some(entry) = cache_guard.get(path)
         {
             debug!("Using cached result for {}", path.display());
@@ -143,7 +146,7 @@ pub fn lint_file_internal(
         let cache_guard = cache
             .lock()
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
-        cache_guard.reconcile_blocks(path, &current_blocks, config_hash, &rule_versions)
+        cache_guard.reconcile_blocks(path, &current_blocks, config_hash, rule_versions)
     };
 
     let (global_rule_names, block_rule_names) = get_classified_rules(host, enabled_rules);
@@ -283,7 +286,7 @@ pub fn lint_file_internal(
         let entry = tsuzulint_cache::CacheEntry::new(
             content_hash,
             *config_hash,
-            rule_versions,
+            rule_versions.clone(),
             final_diagnostics.clone(),
             new_blocks,
         );

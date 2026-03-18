@@ -109,6 +109,7 @@ impl Linter {
 
         let enabled_rules_vec = self.config.enabled_rules();
         let enabled_rules: HashSet<&str> = enabled_rules_vec.iter().map(|(n, _)| *n).collect();
+        let rule_versions = crate::rule_loader::get_rule_versions_from_host(&host);
 
         lint_file_internal(
             path,
@@ -117,6 +118,7 @@ impl Linter {
             &self.config_hash,
             &self.cache,
             &enabled_rules,
+            &rule_versions,
             self.config.timings,
         )
     }
