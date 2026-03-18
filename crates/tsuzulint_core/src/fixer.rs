@@ -1,6 +1,7 @@
 //! Auto-fix functionality for applying diagnostic fixes.
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::Path;
 
 use tracing::{debug, warn};
@@ -138,8 +139,33 @@ pub fn apply_fixes_to_file(
     path: &Path,
     diagnostics: &[Diagnostic],
 ) -> Result<FixerResult, LinterError> {
-    let content = fs::read_to_string(path)
+    let mut file = File::open(path)
         .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
+
+    let metadata = file.metadata().map_err(|e| {
+        LinterError::file(format!("Failed to read metadata for {}: {}", path.display(), e))
+    })?;
+
+    if metadata.len() > crate::file_linter::MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            crate::file_linter::MAX_FILE_SIZE,
+            path.display()
+        )));
+    }
+
+    let mut content = String::with_capacity(metadata.len() as usize);
+    (&mut file).take(crate::file_linter::MAX_FILE_SIZE + 1)
+        .read_to_string(&mut content)
+        .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
+
+    if content.len() as u64 > crate::file_linter::MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            crate::file_linter::MAX_FILE_SIZE,
+            path.display()
+        )));
+    }
 
     let result = apply_fixes_to_content(&content, diagnostics);
 
