@@ -20,6 +20,7 @@ use crate::result::LintResult;
 
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
+#[allow(clippy::too_many_arguments)]
 pub fn lint_file_internal(
     path: &Path,
     host: &mut PluginHost,
