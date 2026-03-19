@@ -67,8 +67,8 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                             Ok(result) => {
                                 let rule_name = detail
                                     .r#as
-                                    .clone()
-                                    .unwrap_or_else(|| result.manifest.rule.name.clone());
+                                    .as_deref()
+                                    .unwrap_or(&result.manifest.rule.name);
                                 debug!(
                                     "Loading rule '{}' from manifest: {}",
                                     rule_name,
@@ -92,17 +92,16 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                                 };
                                 match host.load_rule_bytes(&result.wasm_bytes, options) {
                                     Ok(loaded_manifest) => {
-                                        let internal_name = loaded_manifest.name.clone();
                                         let plugin_manifest = convert_manifest(&result.manifest);
 
                                         if let Err(e) = host.rename_rule(
-                                            &internal_name,
-                                            &rule_name,
+                                            &loaded_manifest.name,
+                                            rule_name,
                                             Some(plugin_manifest),
                                         ) {
                                             warn!(
                                                 "Failed to register rule '{}' (loaded as '{}'): {}",
-                                                rule_name, internal_name, e
+                                                rule_name, loaded_manifest.name, e
                                             );
                                         }
                                     }
