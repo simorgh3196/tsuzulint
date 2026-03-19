@@ -1,5 +1,6 @@
 use extism_manifest::Wasm;
-use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use tsuzulint_manifest::{ExternalRuleManifest, HashVerifier, validate_manifest};
 
@@ -19,30 +20,47 @@ pub struct LoadRuleManifestResult {
 const MAX_MANIFEST_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
 
 pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult, LinterError> {
-    if manifest_path.exists() {
-        let metadata = fs::metadata(manifest_path).map_err(|e| {
+    let mut file = File::open(manifest_path).map_err(|e| {
+        LinterError::Config(format!(
+            "Failed to open rule manifest '{}': {}",
+            manifest_path.display(),
+            e
+        ))
+    })?;
+
+    let metadata = file.metadata().map_err(|e| {
+        LinterError::Config(format!(
+            "Failed to read metadata for rule manifest '{}': {}",
+            manifest_path.display(),
+            e
+        ))
+    })?;
+
+    if metadata.len() > MAX_MANIFEST_SIZE {
+        return Err(LinterError::Config(format!(
+            "Rule manifest '{}' is too large (exceeds 10MB limit)",
+            manifest_path.display()
+        )));
+    }
+
+    let mut content = String::with_capacity(metadata.len() as usize);
+    (&mut file)
+        .take(MAX_MANIFEST_SIZE + 1)
+        .read_to_string(&mut content)
+        .map_err(|e| {
             LinterError::Config(format!(
-                "Failed to read metadata for rule manifest '{}': {}",
+                "Failed to read rule manifest '{}': {}",
                 manifest_path.display(),
                 e
             ))
         })?;
 
-        if metadata.len() > MAX_MANIFEST_SIZE {
-            return Err(LinterError::Config(format!(
-                "Rule manifest '{}' is too large (exceeds 10MB limit)",
-                manifest_path.display()
-            )));
-        }
+    if content.len() as u64 > MAX_MANIFEST_SIZE {
+        return Err(LinterError::Config(format!(
+            "Rule manifest '{}' is too large (exceeds 10MB limit)",
+            manifest_path.display()
+        )));
     }
-
-    let content = fs::read_to_string(manifest_path).map_err(|e| {
-        LinterError::Config(format!(
-            "Failed to read rule manifest '{}': {}",
-            manifest_path.display(),
-            e
-        ))
-    })?;
 
     let manifest = validate_manifest(&content).map_err(|e| {
         LinterError::Config(format!(
@@ -143,13 +161,48 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
         )));
     }
 
-    let wasm_bytes = fs::read(&canonical_wasm_path).map_err(|e| {
+    let mut wasm_file = File::open(&canonical_wasm_path).map_err(|e| {
         LinterError::Config(format!(
-            "Failed to read WASM file '{}': {}",
+            "Failed to open WASM file '{}': {}",
             canonical_wasm_path.display(),
             e
         ))
     })?;
+
+    let wasm_metadata = wasm_file.metadata().map_err(|e| {
+        LinterError::Config(format!(
+            "Failed to read metadata for WASM file '{}': {}",
+            canonical_wasm_path.display(),
+            e
+        ))
+    })?;
+
+    const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
+    if wasm_metadata.len() > MAX_WASM_SIZE {
+        return Err(LinterError::Config(format!(
+            "WASM file '{}' is too large (exceeds 50MB limit)",
+            canonical_wasm_path.display()
+        )));
+    }
+
+    let mut wasm_bytes = Vec::with_capacity(wasm_metadata.len() as usize);
+    (&mut wasm_file)
+        .take(MAX_WASM_SIZE + 1)
+        .read_to_end(&mut wasm_bytes)
+        .map_err(|e| {
+            LinterError::Config(format!(
+                "Failed to read WASM file '{}': {}",
+                canonical_wasm_path.display(),
+                e
+            ))
+        })?;
+
+    if wasm_bytes.len() as u64 > MAX_WASM_SIZE {
+        return Err(LinterError::Config(format!(
+            "WASM file '{}' is too large (exceeds 50MB limit)",
+            canonical_wasm_path.display()
+        )));
+    }
 
     HashVerifier::verify(&wasm_bytes, &expected_hash).map_err(|e| {
         LinterError::Config(format!(
@@ -168,7 +221,7 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
+    use std::fs::{self, File};
     use std::io::Write;
     use tempfile::tempdir;
 
@@ -358,7 +411,7 @@ mod tests {
 #[cfg(test)]
 mod extra_tests {
     use super::*;
-    use std::fs::File;
+    use std::fs::{self, File};
     use tempfile::tempdir;
 
     #[test]
@@ -393,5 +446,78 @@ mod extra_tests {
             "Expected error not to be about size, but got: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn test_load_rule_manifest_wasm_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let json = format!(
+            r#"{{
+            "rule": {{
+                "name": "test-rule",
+                "version": "1.0.0"
+            }},
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "{}"
+            }}]
+        }}"#,
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        );
+        fs::write(&manifest_path, json).unwrap();
+
+        let wasm_file = File::create(&wasm_path).unwrap();
+        // create a file that's exactly MAX_WASM_SIZE + 1 bytes long
+        // 50 * 1024 * 1024 + 1 = 52428801
+        wasm_file.set_len(52428801).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("is too large (exceeds 50MB limit)") || err_msg.contains("Hash mismatch"),
+            "Expected error message about WASM size limit or hash, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_load_rule_manifest_wasm_at_size_limit() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let json = format!(
+            r#"{{
+            "rule": {{
+                "name": "test-rule",
+                "version": "1.0.0"
+            }},
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "{}"
+            }}]
+        }}"#,
+            "0000000000000000000000000000000000000000000000000000000000000000"
+        );
+        fs::write(&manifest_path, json).unwrap();
+
+        let wasm_file = File::create(&wasm_path).unwrap();
+        // create a file that's exactly MAX_WASM_SIZE bytes long
+        // 50 * 1024 * 1024 = 52428800
+        wasm_file.set_len(52428800).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            !err_msg.contains("is too large (exceeds 50MB limit)"),
+            "Expected error NOT to be about WASM size limit, got: {}",
+            err_msg
+        );
+        assert!(err_msg.contains("Integrity check failed") || err_msg.contains("Failed to read WASM file"));
     }
 }
