@@ -403,12 +403,20 @@ mod add_rule_tests {
 
     #[test]
     fn test_validate_wasm_path_valid() {
-        let file = NamedTempFile::new().unwrap();
-        let path = file.path().with_extension("wasm");
-        file.persist(&path).unwrap();
+        // Create file and drop handle so it's fully closed before we try to canonicalize it (matters on Windows)
+        let path = {
+            let file = NamedTempFile::new().unwrap();
+            let path = file.path().with_extension("wasm");
+            file.persist(&path).unwrap();
+            path
+        };
 
         let result = validate_wasm_path(&path);
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "validate_wasm_path failed: {:?}",
+            result.unwrap_err()
+        );
 
         std::fs::remove_file(&path).ok();
     }
