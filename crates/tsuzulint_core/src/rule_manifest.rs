@@ -478,7 +478,8 @@ mod extra_tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("is too large (exceeds 50MB limit)") || err_msg.contains("Hash mismatch"),
+            err_msg.contains("is too large (exceeds 50MB limit)")
+                || err_msg.contains("Hash mismatch"),
             "Expected error message about WASM size limit or hash, got: {}",
             err_msg
         );
@@ -518,6 +519,9 @@ mod extra_tests {
             "Expected error NOT to be about WASM size limit, got: {}",
             err_msg
         );
-        assert!(err_msg.contains("Integrity check failed") || err_msg.contains("Failed to read WASM file"));
+        assert!(
+            err_msg.contains("Integrity check failed")
+                || err_msg.contains("Failed to read WASM file")
+        );
     }
 }
