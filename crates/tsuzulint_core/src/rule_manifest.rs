@@ -363,15 +363,13 @@ mod tests {
         let file = File::create(&wasm_path).unwrap();
         file.set_len(MAX_WASM_SIZE + 1).unwrap();
 
-        let json = format!(
-            r#"{{
-            "rule": {{ "name": "test", "version": "1.0.0" }},
-            "wasm": [{{
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": [{
                 "path": "rule.wasm",
                 "hash": "0000000000000000000000000000000000000000000000000000000000000000"
-            }}]
-        }}"#
-        );
+            }]
+        }"#.to_string();
         std::fs::write(&manifest_path, json).unwrap();
 
         let result = load_rule_manifest(&manifest_path);
@@ -380,6 +378,24 @@ mod tests {
         assert!(
             err_msg.contains("is too large"),
             "Expected error about size, but got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_load_rule_manifest_invalid_utf8() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        // Write invalid UTF-8 bytes (0xFF is invalid in UTF-8)
+        std::fs::write(&manifest_path, &[0xFF, 0xFF, 0xFF]).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("contains invalid UTF-8"),
+            "Expected error about UTF-8, but got: {}",
             err_msg
         );
     }
