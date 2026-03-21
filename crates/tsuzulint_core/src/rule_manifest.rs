@@ -548,7 +548,6 @@ mod extra_tests {
     #[test]
     #[cfg(unix)]
     fn test_load_rule_manifest_fifo_too_large() {
-        use std::io::Write;
         use std::process::Command;
 
         let dir = tempdir().unwrap();
@@ -564,14 +563,8 @@ mod extra_tests {
         // Spawn a thread to write more than 10MB to the fifo
         let manifest_path_clone = manifest_path.clone();
         std::thread::spawn(move || {
-            if let Ok(mut f) = File::create(&manifest_path_clone) {
-                let chunk = vec![b'a'; 1024 * 1024];
-                for _ in 0..11 {
-                    if f.write_all(&chunk).is_err() {
-                        break;
-                    }
-                }
-            }
+            let chunk = vec![b'a'; 11 * 1024 * 1024];
+            let _ = std::fs::write(&manifest_path_clone, chunk);
         });
 
         let result = load_rule_manifest(&manifest_path);
@@ -587,7 +580,6 @@ mod extra_tests {
     #[test]
     #[cfg(unix)]
     fn test_load_rule_manifest_wasm_fifo_too_large() {
-        use std::io::Write;
         use std::process::Command;
 
         let dir = tempdir().unwrap();
@@ -622,14 +614,8 @@ mod extra_tests {
         // Spawn a thread to write more than 50MB to the fifo
         let wasm_path_clone = wasm_path.clone();
         std::thread::spawn(move || {
-            if let Ok(mut f) = File::create(&wasm_path_clone) {
-                let chunk = vec![0u8; 1024 * 1024];
-                for _ in 0..51 {
-                    if f.write_all(&chunk).is_err() {
-                        break;
-                    }
-                }
-            }
+            let chunk = vec![0u8; 51 * 1024 * 1024];
+            let _ = std::fs::write(&wasm_path_clone, chunk);
         });
 
         let result = load_rule_manifest(&manifest_path);
