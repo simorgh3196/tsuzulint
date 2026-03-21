@@ -307,7 +307,7 @@ mod tests {
                 "hash": "0000000000000000000000000000000000000000000000000000000000000000"
             }]
         }"#;
-        fs::write(&manifest_path, json).unwrap();
+        std::fs::write(&manifest_path, json).unwrap();
 
         let result = load_rule_manifest(&manifest_path);
         assert!(result.is_err());
@@ -331,7 +331,7 @@ mod tests {
                 "hash": "0000000000000000000000000000000000000000000000000000000000000000"
             }]
         }"#;
-        fs::write(&manifest_path, json).unwrap();
+        std::fs::write(&manifest_path, json).unwrap();
 
         let result = load_rule_manifest(&manifest_path);
         assert!(result.is_err());
@@ -344,15 +344,108 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Hard to construct a path traversal without '..' components which are already rejected earlier"]
     fn test_load_rule_manifest_outside_dir_fail() {
         let dir = tempdir().unwrap();
         let sub_dir = dir.path().join("sub");
         fs::create_dir(&sub_dir).unwrap();
 
-        let _manifest_path = sub_dir.join("tsuzulint-rule.json");
-        let _wasm_path = dir.path().join("outside.wasm");
-        File::create(&_wasm_path).unwrap();
+        let manifest_path = sub_dir.join("tsuzulint-rule.json");
+        let outside_wasm_path = dir.path().join("outside.wasm");
+        File::create(&outside_wasm_path).unwrap();
+
+        #[cfg(unix)]
+        {
+            // Use a symlink to bypass the '..' check but resolve outside the directory
+            std::os::unix::fs::symlink(&outside_wasm_path, sub_dir.join("symlink.wasm")).unwrap();
+            let json = r#"{
+                "rule": { "name": "test", "version": "1.0.0" },
+                "wasm": [{
+                    "path": "symlink.wasm",
+                    "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+                }]
+            }"#;
+            fs::write(&manifest_path, json).unwrap();
+
+            let result = load_rule_manifest(&manifest_path);
+            assert!(result.is_err());
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("resolves outside the manifest directory"),
+                "Error message was: {}",
+                err_msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_load_rule_manifest_url_wasm_fail() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": [{
+                "url": "https://example.com/rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        }"#;
+        std::fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("URL WASM source is not supported directly in core"),
+            "Error message was: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_load_rule_manifest_no_wasm_source_fail() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": []
+        }"#;
+        std::fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid rule manifest"),
+            "Error message was: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_load_rule_manifest_missing_hash_fail() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+        File::create(&wasm_path).unwrap();
+
+        // Providing a path without a hash
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": [{
+                "path": "rule.wasm"
+            }]
+        }"#;
+        std::fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Invalid rule manifest"),
+            "Error message was: {}",
+            err_msg
+        );
     }
 
     #[test]
@@ -624,6 +717,63 @@ mod extra_tests {
         assert!(
             err_msg.contains("exceeds 50MB limit"),
             "Expected error to be about WASM size limit from reading FIFO, but got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_permission_denied() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let file = File::create(&manifest_path).unwrap();
+        let mut perms = file.metadata().unwrap().permissions();
+        perms.set_mode(0o000); // No read permissions
+        std::fs::set_permissions(&manifest_path, perms).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to open rule manifest")
+                && err_msg.contains("Permission denied"),
+            "Error message was: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_wasm_permission_denied() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let file = File::create(&wasm_path).unwrap();
+        let mut perms = file.metadata().unwrap().permissions();
+        perms.set_mode(0o000); // No read permissions
+        std::fs::set_permissions(&wasm_path, perms).unwrap();
+
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        }"#;
+        std::fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to open WASM file") && err_msg.contains("Permission denied"),
+            "Error message was: {}",
             err_msg
         );
     }
