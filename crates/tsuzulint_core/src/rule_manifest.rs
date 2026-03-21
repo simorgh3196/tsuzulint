@@ -71,7 +71,7 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
         ))
     })?;
 
-    let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let manifest_dir = manifest_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
 
     let mut resolved_wasm = None;
     for w in &manifest.wasm {
@@ -349,12 +349,12 @@ mod tests {
         let sub_dir = dir.path().join("sub");
         fs::create_dir(&sub_dir).unwrap();
 
-        let manifest_path = sub_dir.join("tsuzulint-rule.json");
-        let outside_wasm_path = dir.path().join("outside.wasm");
-        File::create(&outside_wasm_path).unwrap();
-
         #[cfg(unix)]
         {
+            let manifest_path = sub_dir.join("tsuzulint-rule.json");
+            let outside_wasm_path = dir.path().join("outside.wasm");
+            File::create(&outside_wasm_path).unwrap();
+
             // Use a symlink to bypass the '..' check but resolve outside the directory
             std::os::unix::fs::symlink(&outside_wasm_path, sub_dir.join("symlink.wasm")).unwrap();
             let json = r#"{
@@ -364,7 +364,7 @@ mod tests {
                     "hash": "0000000000000000000000000000000000000000000000000000000000000000"
                 }]
             }"#;
-            fs::write(&manifest_path, json).unwrap();
+            std::fs::write(&manifest_path, json).unwrap();
 
             let result = load_rule_manifest(&manifest_path);
             assert!(result.is_err());
@@ -417,6 +417,37 @@ mod tests {
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("Invalid rule manifest"),
+            "Error message was: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_load_rule_manifest_no_parent_dir() {
+        let manifest_path = Path::new("tsuzulint-rule.json");
+        let wasm_path = Path::new("rule.wasm");
+        File::create(wasm_path).unwrap();
+
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        }"#;
+        std::fs::write(manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(manifest_path);
+
+        // Cleanup local artifacts
+        let _ = std::fs::remove_file(manifest_path);
+        let _ = std::fs::remove_file(wasm_path);
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // Just verify it doesn't fail on the `Path::new(".")` logic; it will fail on hash verification.
+        assert!(
+            err_msg.contains("Integrity check failed"),
             "Error message was: {}",
             err_msg
         );
