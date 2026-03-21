@@ -554,11 +554,12 @@ mod extra_tests {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
 
-        let status = Command::new("mkfifo").arg(&manifest_path).status();
+        let status = Command::new("mkfifo")
+            .arg(&manifest_path)
+            .status()
+            .expect("mkfifo command failed to execute");
 
-        if !status.is_ok_and(|s| s.success()) {
-            return; // Skip if mkfifo fails or is not available
-        }
+        assert!(status.success(), "mkfifo failed");
 
         // Spawn a thread to write more than 10MB to the fifo
         let manifest_path_clone = manifest_path.clone();
@@ -593,11 +594,12 @@ mod extra_tests {
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let wasm_path = dir.path().join("rule.wasm");
 
-        let status = Command::new("mkfifo").arg(&wasm_path).status();
+        let status = Command::new("mkfifo")
+            .arg(&wasm_path)
+            .status()
+            .expect("mkfifo command failed to execute");
 
-        if !status.is_ok_and(|s| s.success()) {
-            return; // Skip if mkfifo fails or is not available
-        }
+        assert!(status.success(), "mkfifo failed");
 
         let wasm_hash = "0".repeat(64);
         let json = format!(
