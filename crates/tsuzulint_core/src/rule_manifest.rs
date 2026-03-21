@@ -370,6 +370,38 @@ mod tests {
     }
 
     #[test]
+    fn test_load_rule_manifest_missing_wasm_file() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let json = r#"{
+            "rule": { "name": "test", "version": "1.0.0" },
+            "wasm": [{
+                "path": "missing.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        }"#;
+        fs::write(&manifest_path, json).unwrap();
+
+        // Let's create the file and delete it right before WASM opens it.
+        // Actually, the previous implementation just passed.
+        // But the previous implementation returned "WASM file not found at 'missing.wasm'".
+        // The check `!wasm_path.exists()` catches it, so we don't trigger "Failed to open WASM file".
+        // To trigger "Failed to open WASM file", we need a file that exists but fails to open (like a directory).
+
+        let wasm_dir = dir.path().join("missing.wasm");
+        fs::create_dir(&wasm_dir).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+
+        assert!(
+            err_str.contains("Failed to read WASM file") || err_str.contains("Failed to open WASM file") || err_str.contains("Is a directory") || err_str.contains("Permission denied"),
+            "Unexpected error message: {}", err_str
+        );
+    }
+
+    #[test]
     fn test_load_rule_manifest_missing_wasm() {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
@@ -482,6 +514,127 @@ mod extra_tests {
         assert!(
             err_msg.contains("exceeds 50MB limit"),
             "Expected error to be about WASM size limit, but got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_load_rule_manifest_io_error_reading_manifest() {
+        // We need a file that we can open, but fails when we try to read from it.
+        // A directory usually fails on read, but File::open might also fail.
+        // On Unix, File::open on a dir succeeds, but read fails with EISDIR.
+        let dir = tempdir().unwrap();
+        let manifest_dir_path = dir.path().join("tsuzulint-rule.json");
+        std::fs::create_dir(&manifest_dir_path).unwrap();
+
+        let result = load_rule_manifest(&manifest_dir_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+
+        // It should either fail at `File::open` (Windows/some Unix) or at `read_to_string` (other Unix).
+        // Either way, it covers error handling for these operations.
+        assert!(
+            err_msg.contains("Failed to open rule manifest") || err_msg.contains("Failed to read rule manifest"),
+            "Unexpected error message: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_fifo_too_large() {
+        use std::process::Command;
+        use std::io::Write;
+
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        let status = Command::new("mkfifo")
+            .arg(&manifest_path)
+            .status();
+
+        if !status.is_ok() || !status.unwrap().success() {
+            return; // Skip if mkfifo fails or is not available
+        }
+
+        // Spawn a thread to write more than 10MB to the fifo
+        let manifest_path_clone = manifest_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(mut f) = File::create(&manifest_path_clone) {
+                let chunk = vec![b'a'; 1024 * 1024];
+                for _ in 0..11 {
+                    if f.write_all(&chunk).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("exceeds 10MB limit"),
+            "Expected error to be about manifest size limit from reading FIFO, but got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_wasm_fifo_too_large() {
+        use std::process::Command;
+        use std::io::Write;
+
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let status = Command::new("mkfifo")
+            .arg(&wasm_path)
+            .status();
+
+        if !status.is_ok() || !status.unwrap().success() {
+            return; // Skip if mkfifo fails or is not available
+        }
+
+        let wasm_hash = "0".repeat(64);
+        let json = format!(
+            r#"{{
+            "rule": {{
+                "name": "test-rule",
+                "version": "1.0.0",
+                "description": "Test rule",
+                "fixable": false
+            }},
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "{}"
+            }}]
+        }}"#,
+            wasm_hash
+        );
+        std::fs::write(&manifest_path, json).unwrap();
+
+        // Spawn a thread to write more than 50MB to the fifo
+        let wasm_path_clone = wasm_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(mut f) = File::create(&wasm_path_clone) {
+                let chunk = vec![0u8; 1024 * 1024];
+                for _ in 0..51 {
+                    if f.write_all(&chunk).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("exceeds 50MB limit"),
+            "Expected error to be about WASM size limit from reading FIFO, but got: {}",
             err_msg
         );
     }
