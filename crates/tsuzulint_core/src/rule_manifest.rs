@@ -396,8 +396,12 @@ mod tests {
         let err_str = result.unwrap_err().to_string();
 
         assert!(
-            err_str.contains("Failed to read WASM file") || err_str.contains("Failed to open WASM file") || err_str.contains("Is a directory") || err_str.contains("Permission denied"),
-            "Unexpected error message: {}", err_str
+            err_str.contains("Failed to read WASM file")
+                || err_str.contains("Failed to open WASM file")
+                || err_str.contains("Is a directory")
+                || err_str.contains("Permission denied"),
+            "Unexpected error message: {}",
+            err_str
         );
     }
 
@@ -534,7 +538,8 @@ mod extra_tests {
         // It should either fail at `File::open` (Windows/some Unix) or at `read_to_string` (other Unix).
         // Either way, it covers error handling for these operations.
         assert!(
-            err_msg.contains("Failed to open rule manifest") || err_msg.contains("Failed to read rule manifest"),
+            err_msg.contains("Failed to open rule manifest")
+                || err_msg.contains("Failed to read rule manifest"),
             "Unexpected error message: {}",
             err_msg
         );
@@ -543,17 +548,15 @@ mod extra_tests {
     #[test]
     #[cfg(unix)]
     fn test_load_rule_manifest_fifo_too_large() {
-        use std::process::Command;
         use std::io::Write;
+        use std::process::Command;
 
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
 
-        let status = Command::new("mkfifo")
-            .arg(&manifest_path)
-            .status();
+        let status = Command::new("mkfifo").arg(&manifest_path).status();
 
-        if !status.is_ok() || !status.unwrap().success() {
+        if !status.is_ok_and(|s| s.success()) {
             return; // Skip if mkfifo fails or is not available
         }
 
@@ -583,18 +586,16 @@ mod extra_tests {
     #[test]
     #[cfg(unix)]
     fn test_load_rule_manifest_wasm_fifo_too_large() {
-        use std::process::Command;
         use std::io::Write;
+        use std::process::Command;
 
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
         let wasm_path = dir.path().join("rule.wasm");
 
-        let status = Command::new("mkfifo")
-            .arg(&wasm_path)
-            .status();
+        let status = Command::new("mkfifo").arg(&wasm_path).status();
 
-        if !status.is_ok() || !status.unwrap().success() {
+        if !status.is_ok_and(|s| s.success()) {
             return; // Skip if mkfifo fails or is not available
         }
 
