@@ -1,6 +1,6 @@
 //! Auto-fix functionality for applying diagnostic fixes.
 
-use std::fs::{self, File};
+use std::fs;
 use std::io::Read;
 use std::path::Path;
 
@@ -139,7 +139,10 @@ pub fn apply_fixes_to_file(
     path: &Path,
     diagnostics: &[Diagnostic],
 ) -> Result<FixerResult, LinterError> {
-    let mut file = File::open(path)
+    // Open with O_NONBLOCK so that opening a FIFO (or other special file)
+    // does not block. This eliminates the TOCTOU window between a metadata
+    // check and the actual open call.
+    let mut file = crate::file_linter::open_nonblocking(path)
         .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
 
     let metadata = file.metadata().map_err(|e| {
@@ -168,10 +171,30 @@ pub fn apply_fixes_to_file(
     }
 
     let mut content = String::with_capacity(metadata.len() as usize);
+    // Clear O_NONBLOCK so that subsequent reads block normally.
+    crate::file_linter::clear_nonblocking(&file).map_err(|e| {
+        LinterError::file(format!(
+            "Failed to clear O_NONBLOCK on {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
     (&mut file)
         .take(limit + 1)
         .read_to_string(&mut content)
-        .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
+        .map_err(|e| {
+            // EAGAIN / EWOULDBLOCK can theoretically appear if O_NONBLOCK was not
+            // successfully cleared; surface a clear error in that case.
+            #[cfg(unix)]
+            if e.raw_os_error() == Some(libc::EAGAIN) {
+                return LinterError::file(format!(
+                    "Failed to read {} (EAGAIN: O_NONBLOCK still set)",
+                    path.display()
+                ));
+            }
+            LinterError::file(format!("Failed to read {}: {}", path.display(), e))
+        })?;
 
     let result = apply_fixes_to_content(&content, diagnostics);
 
@@ -586,6 +609,32 @@ mod tests {
                     "Unexpected error message: {}",
                     msg
                 );
+            }
+            Ok(_) => panic!("Expected LinterError::File, got Ok"),
+            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn apply_fixes_to_file_rejects_special_files() {
+        use std::process::Command;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let fifo_path = temp_dir.path().join("test.fifo");
+        let status = Command::new("mkfifo")
+            .arg(&fifo_path)
+            .status()
+            .expect("mkfifo not available");
+        assert!(status.success(), "Failed to create FIFO");
+
+        let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
+
+        let result = apply_fixes_to_file(&fifo_path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(msg.contains("Not a regular file"), "Unexpected error message: {}", msg);
             }
             Ok(_) => panic!("Expected LinterError::File, got Ok"),
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
