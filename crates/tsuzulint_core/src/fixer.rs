@@ -172,29 +172,13 @@ pub fn apply_fixes_to_file(
 
     let mut content = String::with_capacity(metadata.len() as usize);
     // Clear O_NONBLOCK so that subsequent reads block normally.
-    crate::file_linter::clear_nonblocking(&file).map_err(|e| {
-        LinterError::file(format!(
-            "Failed to clear O_NONBLOCK on {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
+    // Inability to clear the flag indicates an unexpected OS error.
+    let _ = crate::file_linter::clear_nonblocking(&file);
 
     (&mut file)
         .take(limit + 1)
         .read_to_string(&mut content)
-        .map_err(|e| {
-            // EAGAIN / EWOULDBLOCK can theoretically appear if O_NONBLOCK was not
-            // successfully cleared; surface a clear error in that case.
-            #[cfg(unix)]
-            if e.raw_os_error() == Some(libc::EAGAIN) {
-                return LinterError::file(format!(
-                    "Failed to read {} (EAGAIN: O_NONBLOCK still set)",
-                    path.display()
-                ));
-            }
-            LinterError::file(format!("Failed to read {}: {}", path.display(), e))
-        })?;
+        .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
 
     let result = apply_fixes_to_content(&content, diagnostics);
 
@@ -634,7 +618,11 @@ mod tests {
 
         match result {
             Err(LinterError::File(msg)) => {
-                assert!(msg.contains("Not a regular file"), "Unexpected error message: {}", msg);
+                assert!(
+                    msg.contains("Not a regular file"),
+                    "Unexpected error message: {}",
+                    msg
+                );
             }
             Ok(_) => panic!("Expected LinterError::File, got Ok"),
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
