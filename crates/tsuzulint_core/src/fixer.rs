@@ -1,6 +1,7 @@
 //! Auto-fix functionality for applying diagnostic fixes.
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::Path;
 
 use tracing::{debug, warn};
@@ -138,8 +139,35 @@ pub fn apply_fixes_to_file(
     path: &Path,
     diagnostics: &[Diagnostic],
 ) -> Result<FixerResult, LinterError> {
-    let content = fs::read_to_string(path)
+    let mut file = File::open(path)
+        .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
+
+    let metadata = file.metadata().map_err(|e| {
+        LinterError::file(format!("Failed to read metadata for {}: {}", path.display(), e))
+    })?;
+
+    let limit = crate::file_linter::MAX_FILE_SIZE;
+
+    if metadata.len() > limit {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            limit,
+            path.display()
+        )));
+    }
+
+    let mut content = String::with_capacity(metadata.len() as usize);
+    (&mut file).take(limit + 1)
+        .read_to_string(&mut content)
         .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
+
+    if content.len() as u64 > limit {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            limit,
+            path.display()
+        )));
+    }
 
     let result = apply_fixes_to_content(&content, diagnostics);
 
@@ -503,7 +531,34 @@ mod tests {
 
         match result {
             Err(LinterError::File(msg)) => {
-                assert!(msg.contains("Failed to read"));
+                assert!(msg.contains("Failed to open"));
+            }
+            Ok(_) => panic!("Expected LinterError::File, got Ok"),
+            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn apply_fixes_to_file_too_large() {
+        use tempfile::NamedTempFile;
+
+        let file = NamedTempFile::new().expect("Failed to create temp file");
+
+        let path = file.into_temp_path();
+
+        let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
+
+        // Set file size to MAX_FILE_SIZE + 1
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(crate::file_linter::MAX_FILE_SIZE + 1)
+            .unwrap();
+
+        let result = apply_fixes_to_file(&path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(msg.contains("File size exceeds limit"));
             }
             Ok(_) => panic!("Expected LinterError::File, got Ok"),
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
