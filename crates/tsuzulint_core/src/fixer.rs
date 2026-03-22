@@ -143,8 +143,19 @@ pub fn apply_fixes_to_file(
         .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
 
     let metadata = file.metadata().map_err(|e| {
-        LinterError::file(format!("Failed to read metadata for {}: {}", path.display(), e))
+        LinterError::file(format!(
+            "Failed to read metadata for {}: {}",
+            path.display(),
+            e
+        ))
     })?;
+
+    if !metadata.is_file() {
+        return Err(LinterError::file(format!(
+            "Not a regular file: {}",
+            path.display()
+        )));
+    }
 
     let limit = crate::file_linter::MAX_FILE_SIZE;
 
@@ -157,17 +168,10 @@ pub fn apply_fixes_to_file(
     }
 
     let mut content = String::with_capacity(metadata.len() as usize);
-    (&mut file).take(limit + 1)
+    (&mut file)
+        .take(limit + 1)
         .read_to_string(&mut content)
         .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
-
-    if content.len() as u64 > limit {
-        return Err(LinterError::file(format!(
-            "File size exceeds limit of {} bytes: {}",
-            limit,
-            path.display()
-        )));
-    }
 
     let result = apply_fixes_to_content(&content, diagnostics);
 
@@ -559,6 +563,29 @@ mod tests {
         match result {
             Err(LinterError::File(msg)) => {
                 assert!(msg.contains("File size exceeds limit"));
+            }
+            Ok(_) => panic!("Expected LinterError::File, got Ok"),
+            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn apply_fixes_to_file_not_a_file() {
+        // Pass a directory instead of a regular file
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let path = dir.path();
+
+        let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
+
+        let result = apply_fixes_to_file(path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(
+                    msg.contains("Not a regular file") || msg.contains("Failed to open"),
+                    "Unexpected error message: {}",
+                    msg
+                );
             }
             Ok(_) => panic!("Expected LinterError::File, got Ok"),
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
