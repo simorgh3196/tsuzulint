@@ -296,6 +296,63 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_wasm_fifo_size_limit() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // Create a FIFO inside the directory to trick the `file.metadata().len()` check
+        // because a FIFO has a size of 0.
+        let status = std::process::Command::new("mkfifo")
+            .arg(&wasm_path)
+            .status();
+
+        if status.is_err() || !status.unwrap().success() {
+            // mkfifo might not be available, skip test gracefully
+            return;
+        }
+
+        let json = format!(
+            r#"{{
+            "rule": {{ "name": "test", "version": "1.0.0" }},
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "{}"
+            }}]
+        }}"#,
+            "0".repeat(64)
+        );
+        fs::write(&manifest_path, json).unwrap();
+
+        // Spawn a background thread to feed data to the FIFO
+        let wasm_path_clone = wasm_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(mut file) = std::fs::File::create(&wasm_path_clone) {
+                // Write slightly more than the limit to trigger the post-read check
+                let chunk = vec![0u8; 1024 * 1024]; // 1MB chunk
+                let limit = tsuzulint_plugin::MAX_WASM_SIZE as usize + 1024;
+                let mut written = 0;
+                while written < limit {
+                    if file.write_all(&chunk).is_err() {
+                        break;
+                    }
+                    written += chunk.len();
+                }
+            }
+        });
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("is too large") || err_msg.contains("exceeds"),
+            "Expected error about WASM size limit from post-read check, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
     fn test_load_rule_manifest_absolute_path_fail() {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
