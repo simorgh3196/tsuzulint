@@ -73,7 +73,7 @@ impl ExtismExecutor {
     }
 
     /// Configures the manifest with security limits and options.
-    fn configure_manifest(&self, mut manifest: Manifest, options: &PluginOptions) -> Manifest {
+    fn configure_manifest(&self, mut manifest: Manifest, options: PluginOptions) -> Manifest {
         // Set execution timeout
         manifest.timeout_ms = options.timeout_ms.or(Some(self.timeout_ms));
 
@@ -85,13 +85,13 @@ impl ExtismExecutor {
         };
 
         // Set allowed network hosts
-        manifest.allowed_hosts = options.allowed_hosts.clone().or(Some(vec![]));
+        manifest.allowed_hosts = options.allowed_hosts.or(Some(vec![]));
 
         // Set allowed file system paths
-        manifest.allowed_paths = options.allowed_paths.clone().or(Some(BTreeMap::new()));
+        manifest.allowed_paths = options.allowed_paths.or(Some(BTreeMap::new()));
 
         // Set configuration variables
-        manifest.config = options.config.clone();
+        manifest.config = options.config;
 
         manifest
     }
@@ -99,7 +99,7 @@ impl ExtismExecutor {
     fn build_plugin(
         &self,
         source: &RuleSource,
-        options: &PluginOptions,
+        options: PluginOptions,
     ) -> Result<Plugin, PluginError> {
         let wasm = source.to_wasm();
         let manifest = Manifest::new([wasm]);
@@ -132,7 +132,7 @@ impl ExtismExecutor {
         source: RuleSource,
         options: PluginOptions,
     ) -> Result<LoadResult, PluginError> {
-        let mut plugin = self.build_plugin(&source, &options)?;
+        let mut plugin = self.build_plugin(&source, options)?;
         let rule_manifest = Self::fetch_manifest(&mut plugin)?;
 
         debug!(
