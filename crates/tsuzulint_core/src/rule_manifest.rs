@@ -370,6 +370,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_dev_zero() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        symlink("/dev/zero", &manifest_path).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("is too large") || err_msg.contains("Failed to read"),
+            "Expected error about size limit or read fail, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
     fn test_load_rule_manifest_missing_wasm() {
         let dir = tempdir().unwrap();
         let manifest_path = dir.path().join("tsuzulint-rule.json");
@@ -388,6 +406,44 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("WASM file not found")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_wasm_dev_zero() {
+        // The dev zero path evaluates outside our manifest dir using canonicalize if we symlink directly,
+        // so instead we create a massive file but mimic a small metadata size via custom bounds/files.
+        // Actually, just reading from /dev/zero symlink failed the starts_with canonical_manifest_dir check.
+        // We'll just verify the `read_to_end` map_err branch via directory reading.
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // Make the wasm_path a directory. This will bypass metadata size checks but fail when read.
+        std::fs::create_dir(&wasm_path).unwrap();
+
+        let json = format!(
+            r#"{{
+            "rule": {{ "name": "test", "version": "1.0.0" }},
+            "wasm": [{{
+                "path": "rule.wasm",
+                "hash": "{}"
+            }}]
+        }}"#,
+            "0".repeat(64)
+        );
+        fs::write(&manifest_path, json).unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to read WASM file")
+                || err_msg.contains("Is a directory")
+                || err_msg.contains("Failed to open"),
+            "Expected read error, got: {}",
+            err_msg
         );
     }
 
@@ -415,7 +471,11 @@ mod tests {
         let result = load_rule_manifest(&manifest_path);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("is too large"), "Expected error about WASM size, but got: {}", err_msg);
+        assert!(
+            err_msg.contains("is too large"),
+            "Expected error about WASM size, but got: {}",
+            err_msg
+        );
     }
 
     #[test]
