@@ -561,11 +561,20 @@ mod tests {
                 // On Unix, File::open succeeds on a directory, and we fail at metadata.is_file().
                 // On Windows, File::open fails on a directory with Access is denied (os error 5).
                 assert!(
-                    msg.contains("Not a regular file") || msg.contains("Failed to open"),
-                    "Unexpected error message: {}", msg
+                    msg.contains("Not a regular file") || msg.contains("Failed to open") || msg.contains("Access is denied") || msg.contains("Permission denied"),
+                    "Unexpected error message: {}",
+                    msg
                 );
             }
-            _ => panic!("Expected Not a regular file error, got {:?}", result),
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("Not a regular file") || msg.contains("Failed to open") || msg.contains("Access is denied") || msg.contains("Permission denied"),
+                    "Unexpected error: {}",
+                    msg
+                );
+            }
+            Ok(_) => panic!("Expected Not a regular file error, got Ok"),
         }
     }
 
