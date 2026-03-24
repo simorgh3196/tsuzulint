@@ -558,7 +558,12 @@ mod tests {
 
         match result {
             Err(LinterError::File(msg)) => {
-                assert!(msg.contains("Not a regular file"));
+                // On Unix, File::open succeeds on a directory, and we fail at metadata.is_file().
+                // On Windows, File::open fails on a directory with Access is denied (os error 5).
+                assert!(
+                    msg.contains("Not a regular file") || msg.contains("Failed to open"),
+                    "Unexpected error message: {}", msg
+                );
             }
             _ => panic!("Expected Not a regular file error, got {:?}", result),
         }
