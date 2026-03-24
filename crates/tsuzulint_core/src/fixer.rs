@@ -547,4 +547,82 @@ mod tests {
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
         }
     }
+
+    #[test]
+    fn apply_fixes_to_file_not_a_file() {
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let path = dir.path(); // directory path, not a file
+
+        let diagnostics = vec![];
+        let result = apply_fixes_to_file(path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(msg.contains("Not a regular file"));
+            }
+            _ => panic!("Expected Not a regular file error, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn apply_fixes_to_file_too_large_metadata() {
+        use tempfile::NamedTempFile;
+        let file = NamedTempFile::new().expect("Failed to create temp file");
+        // Set file size to MAX_FILE_SIZE + 1
+        file.as_file()
+            .set_len(crate::file_linter::MAX_FILE_SIZE + 1)
+            .expect("Failed to set len");
+        let path = file.into_temp_path();
+
+        let diagnostics = vec![];
+        let result = apply_fixes_to_file(&path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(msg.contains("exceeds limit"));
+            }
+            _ => panic!("Expected file size exceeds limit error, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn apply_fixes_to_file_too_large_content() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary file
+        let mut file = NamedTempFile::new().expect("Failed to create temp file");
+
+        // Write exactly MAX_FILE_SIZE + 1 bytes to the file
+        // To avoid huge allocations and slow test execution, we could mock the length or use the
+        // file_linter::tests mocking approach, but since this tests the bounds read logic:
+        let chunk_size = 1024 * 1024; // 1 MB chunks
+        let chunks = (crate::file_linter::MAX_FILE_SIZE / chunk_size as u64) as usize;
+        let remainder = (crate::file_linter::MAX_FILE_SIZE % chunk_size as u64) as usize;
+
+        let data = vec![0u8; chunk_size];
+        for _ in 0..chunks {
+            file.write_all(&data).expect("Failed to write chunk");
+        }
+        if remainder > 0 {
+            file.write_all(&data[..remainder]).expect("Failed to write remainder");
+        }
+        // Write one extra byte
+        file.write_all(&[0u8]).expect("Failed to write extra byte");
+
+        // We explicitly flush the data to disk so we know it has actually grown.
+        file.flush().expect("Failed to flush file");
+
+        let path = file.into_temp_path();
+
+        let diagnostics = vec![];
+        let result = apply_fixes_to_file(&path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(msg.contains("exceeds limit"));
+            }
+            _ => panic!("Expected file size exceeds limit error, got {:?}", result),
+        }
+    }
 }
