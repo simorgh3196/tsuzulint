@@ -1,6 +1,7 @@
 //! Auto-fix functionality for applying diagnostic fixes.
 
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 
 use tracing::{debug, warn};
@@ -138,7 +139,7 @@ pub fn apply_fixes_to_file(
     path: &Path,
     diagnostics: &[Diagnostic],
 ) -> Result<FixerResult, LinterError> {
-    let mut file = fs::File::open(path)
+    let mut file = crate::file_linter::open_nonblocking(path)
         .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
 
     let metadata = file.metadata().map_err(|e| {
@@ -164,8 +165,15 @@ pub fn apply_fixes_to_file(
         )));
     }
 
+    crate::file_linter::clear_nonblocking(&file).map_err(|e| {
+        LinterError::file(format!(
+            "Failed to clear non-blocking for {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
     let mut content = String::with_capacity(metadata.len() as usize);
-    use std::io::Read;
     (&mut file)
         .take(crate::file_linter::MAX_FILE_SIZE + 1)
         .read_to_string(&mut content)
@@ -607,7 +615,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn apply_fixes_to_file_too_large_content() {
+    fn apply_fixes_to_file_too_large_actual_data() {
         use std::io::Write;
         use std::process::Command;
 
