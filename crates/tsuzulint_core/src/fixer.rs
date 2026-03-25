@@ -142,9 +142,13 @@ pub fn apply_fixes_to_file(
     let mut file = File::open(path)
         .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
 
-    let metadata = file
-        .metadata()
-        .map_err(|e| LinterError::file(format!("Failed to read metadata for {}: {}", path.display(), e)))?;
+    let metadata = file.metadata().map_err(|e| {
+        LinterError::file(format!(
+            "Failed to read metadata for {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
 
     if metadata.len() > crate::file_linter::MAX_FILE_SIZE {
         return Err(LinterError::file(format!(
@@ -158,7 +162,9 @@ pub fn apply_fixes_to_file(
     (&mut file)
         .take(crate::file_linter::MAX_FILE_SIZE + 1)
         .read_to_string(&mut content)
-        .map_err(|e| LinterError::file(format!("Failed to read content {}: {}", path.display(), e)))?;
+        .map_err(|e| {
+            LinterError::file(format!("Failed to read content {}: {}", path.display(), e))
+        })?;
 
     if content.len() as u64 > crate::file_linter::MAX_FILE_SIZE {
         return Err(LinterError::file(format!(
@@ -545,7 +551,8 @@ mod tests {
         let mut file = NamedTempFile::new().expect("Failed to create temp file");
         // Write MAX_FILE_SIZE + 1 bytes
         let large_content = vec![b'A'; crate::file_linter::MAX_FILE_SIZE as usize + 1];
-        file.write_all(&large_content).expect("Failed to write to temp file");
+        file.write_all(&large_content)
+            .expect("Failed to write to temp file");
 
         let path = file.into_temp_path();
         let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
