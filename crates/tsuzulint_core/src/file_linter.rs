@@ -20,30 +20,31 @@ use crate::result::LintResult;
 
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-#[allow(clippy::too_many_arguments)]
-pub fn lint_file_internal(
-    path: &Path,
-    host: &mut PluginHost,
-    tokenizer: &Arc<Tokenizer>,
-    config_hash: &[u8; 32],
-    cache: &Mutex<CacheManager>,
-    enabled_rules: &HashSet<&str>,
-    rule_versions: &HashMap<String, String>,
-    timings_enabled: bool,
-) -> Result<LintResult, LinterError> {
-    debug!("Linting {}", path.display());
+pub struct LintContext<'a> {
+    pub path: &'a Path,
+    pub host: &'a mut PluginHost,
+    pub tokenizer: &'a Arc<Tokenizer>,
+    pub config_hash: &'a [u8; 32],
+    pub cache: &'a Mutex<CacheManager>,
+    pub enabled_rules: &'a HashSet<&'a str>,
+    pub rule_versions: &'a HashMap<String, String>,
+    pub timings_enabled: bool,
+}
+
+pub fn lint_file_internal(ctx: &mut LintContext) -> Result<LintResult, LinterError> {
+    debug!("Linting {}", ctx.path.display());
 
     // Open with O_NONBLOCK so that opening a FIFO (or other special file)
     // does not block. This eliminates the TOCTOU window between a metadata
     // check and the actual open call.
-    let file = open_nonblocking(path)
-        .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
+    let file = open_nonblocking(ctx.path)
+        .map_err(|e| LinterError::file(format!("Failed to open {}: {}", ctx.path.display(), e)))?;
 
     // Verify the opened fd refers to a regular file (TOCTOU-safe, uses fstat).
     let metadata = file.metadata().map_err(|e| {
         LinterError::file(format!(
             "Failed to read metadata for {}: {}",
-            path.display(),
+            ctx.path.display(),
             e
         ))
     })?;
@@ -51,7 +52,7 @@ pub fn lint_file_internal(
     if !metadata.is_file() {
         return Err(LinterError::file(format!(
             "Not a regular file: {}",
-            path.display()
+            ctx.path.display()
         )));
     }
 
@@ -59,7 +60,7 @@ pub fn lint_file_internal(
         return Err(LinterError::file(format!(
             "File size exceeds limit of {} bytes: {}",
             MAX_FILE_SIZE,
-            path.display()
+            ctx.path.display()
         )));
     }
 
@@ -68,7 +69,7 @@ pub fn lint_file_internal(
     clear_nonblocking(&file).map_err(|e| {
         LinterError::file(format!(
             "Failed to clear O_NONBLOCK on {}: {}",
-            path.display(),
+            ctx.path.display(),
             e
         ))
     })?;
@@ -81,41 +82,41 @@ pub fn lint_file_internal(
             if e.raw_os_error() == Some(libc::EAGAIN) {
                 return LinterError::file(format!(
                     "Failed to read {} (EAGAIN: O_NONBLOCK still set)",
-                    path.display()
+                    ctx.path.display()
                 ));
             }
-            LinterError::file(format!("Failed to read {}: {}", path.display(), e))
+            LinterError::file(format!("Failed to read {}: {}", ctx.path.display(), e))
         })?;
 
     if content.len() as u64 > MAX_FILE_SIZE {
         return Err(LinterError::file(format!(
             "File size exceeds limit of {} bytes: {}",
             MAX_FILE_SIZE,
-            path.display()
+            ctx.path.display()
         )));
     }
 
     let content_hash = CacheManager::hash_content(&content);
 
     // Optimization: rule_versions is passed in by reference rather than calling
-    // super::rule_loader::get_rule_versions_from_host(host) here to avoid
+    // super::rule_loader::get_rule_versions_from_host(ctx.host) here to avoid
     // an unnecessary HashMap allocation and insertions for every file being linted.
     {
         let cache_guard = cache
             .lock()
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
-        if cache_guard.is_valid(path, &content_hash, config_hash, rule_versions)
-            && let Some(entry) = cache_guard.get(path)
+        if cache_guard.is_valid(path, &content_hash, ctx.config_hash, rule_versions)
+            && let Some(entry) = cache_guard.get(ctx.path)
         {
-            debug!("Using cached result for {}", path.display());
+            debug!("Using cached result for {}", ctx.path.display());
             return Ok(LintResult::cached(
-                path.to_path_buf(),
+                ctx.path.to_path_buf(),
                 entry.diagnostics.clone(),
             ));
         }
     }
 
-    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let extension = ctx.path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let parser = select_parser(extension);
 
     let arena = AstArena::new();
@@ -125,8 +126,8 @@ pub fn lint_file_internal(
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
-    let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), host, enabled_rules);
-    let needs_sentences = any_rule_needs_sentences(host.loaded_rules(), host, enabled_rules);
+    let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), host, ctx.enabled_rules);
+    let needs_sentences = any_rule_needs_sentences(host.loaded_rules(), host, ctx.enabled_rules);
 
     let tokens = if needs_morphology {
         tokenizer
@@ -147,10 +148,10 @@ pub fn lint_file_internal(
         let cache_guard = cache
             .lock()
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
-        cache_guard.reconcile_blocks(path, &current_blocks, config_hash, rule_versions)
+        cache_guard.reconcile_blocks(path, &current_blocks, ctx.config_hash, rule_versions)
     };
 
-    let (global_rule_names, block_rule_names) = get_classified_rules(host, enabled_rules);
+    let (global_rule_names, block_rule_names) = get_classified_rules(ctx.host, ctx.enabled_rules);
 
     let mut global_diagnostics = Vec::new();
     let mut block_diagnostics = Vec::new();
@@ -167,18 +168,24 @@ pub fn lint_file_internal(
                     &content,
                     &tokens,
                     &sentences,
-                    path.to_str(),
+                    ctx.path.to_str(),
                 ) {
                     Ok(diags) => global_diagnostics.extend(diags),
                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                 }
-                if timings_enabled {
+                if ctx.timings_enabled {
                     *timings.entry(rule.to_string()).or_insert(Duration::ZERO) += start.elapsed();
                 }
             } else {
                 let ast_raw = to_raw_value(&ast, "AST")?;
                 let request_bytes = host
-                    .prepare_lint_request(&ast_raw, &content, &tokens, &sentences, path.to_str())
+                    .prepare_lint_request(
+                        &ast_raw,
+                        &content,
+                        &tokens,
+                        &sentences,
+                        ctx.path.to_str(),
+                    )
                     .map_err(|e| {
                         LinterError::Internal(format!("Failed to prepare lint request: {}", e))
                     })?;
@@ -189,7 +196,7 @@ pub fn lint_file_internal(
                         Ok(diags) => global_diagnostics.extend(diags),
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
-                    if timings_enabled {
+                    if ctx.timings_enabled {
                         *timings.entry(rule.to_string()).or_insert(Duration::ZERO) +=
                             start.elapsed();
                     }
@@ -212,12 +219,12 @@ pub fn lint_file_internal(
                                 &content,
                                 &tokens,
                                 &sentences,
-                                path.to_str(),
+                                ctx.path.to_str(),
                             ) {
                                 Ok(diags) => block_diagnostics.extend(diags),
                                 Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                             }
-                            if timings_enabled {
+                            if ctx.timings_enabled {
                                 *timings.entry(rule.to_string()).or_insert(Duration::ZERO) +=
                                     start.elapsed();
                             }
@@ -228,7 +235,7 @@ pub fn lint_file_internal(
                                 &content,
                                 &tokens,
                                 &sentences,
-                                path.to_str(),
+                                ctx.path.to_str(),
                             ) {
                                 Ok(request_bytes) => {
                                     for rule in &block_rule_names {
@@ -237,7 +244,7 @@ pub fn lint_file_internal(
                                             Ok(diags) => block_diagnostics.extend(diags),
                                             Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                         }
-                                        if timings_enabled {
+                                        if ctx.timings_enabled {
                                             *timings
                                                 .entry(rule.to_string())
                                                 .or_insert(Duration::ZERO) += start.elapsed();
@@ -286,8 +293,8 @@ pub fn lint_file_internal(
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
         let entry = tsuzulint_cache::CacheEntry::new(
             content_hash,
-            *config_hash,
-            rule_versions.clone(),
+            *ctx.config_hash,
+            ctx.rule_versions.clone(),
             final_diagnostics.clone(),
             new_blocks,
         );

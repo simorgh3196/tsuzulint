@@ -9,7 +9,7 @@ use tsuzulint_text::Tokenizer;
 
 use crate::config::LinterConfig;
 use crate::error::LinterError;
-use crate::file_linter::lint_file_internal;
+use crate::file_linter::{LintContext, lint_file_internal};
 use crate::result::LintResult;
 use crate::rule_loader::create_plugin_host;
 
