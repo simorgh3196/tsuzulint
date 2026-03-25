@@ -230,7 +230,7 @@ mod tests {
 
         // Write a valid manifest JSON
         // The simple_rule exports "test-rule" internally. If we specify 'as', it gets renamed.
-        // We set the manifest rule name to "my-dummy-rule" which will be the fallback name
+        // We set the manifest rule name to "test-rule" which will be the fallback name
         let manifest_json = serde_json::json!({
             "rule": {
                 "name": "test-rule",
