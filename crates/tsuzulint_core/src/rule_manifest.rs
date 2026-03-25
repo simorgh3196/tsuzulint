@@ -1,4 +1,5 @@
 use extism_manifest::Wasm;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use tsuzulint_manifest::{ExternalRuleManifest, HashVerifier, validate_manifest};
 
@@ -42,7 +43,6 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
     }
 
     let mut content = String::with_capacity(metadata.len() as usize);
-    use std::io::Read;
     (&mut file)
         .take(MAX_MANIFEST_SIZE + 1)
         .read_to_string(&mut content)
@@ -129,14 +129,6 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
 
     let wasm_path = manifest_dir.join(wasm_relative);
 
-    if !wasm_path.exists() {
-        return Err(LinterError::Config(format!(
-            "WASM file not found at '{}' (referenced from '{}')",
-            wasm_path.display(),
-            manifest_path.display()
-        )));
-    }
-
     let canonical_manifest_dir = manifest_dir.canonicalize().map_err(|e| {
         LinterError::Config(format!(
             "Failed to canonicalize manifest directory '{}': {}",
@@ -144,12 +136,21 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
             e
         ))
     })?;
+
     let canonical_wasm_path = wasm_path.canonicalize().map_err(|e| {
-        LinterError::Config(format!(
-            "Failed to canonicalize WASM path '{}': {}",
-            wasm_path.display(),
-            e
-        ))
+        if e.kind() == std::io::ErrorKind::NotFound {
+            LinterError::Config(format!(
+                "WASM file not found at '{}' (referenced from '{}')",
+                wasm_path.display(),
+                manifest_path.display()
+            ))
+        } else {
+            LinterError::Config(format!(
+                "Failed to canonicalize WASM path '{}': {}",
+                wasm_path.display(),
+                e
+            ))
+        }
     })?;
 
     if !canonical_wasm_path.starts_with(&canonical_manifest_dir) {
