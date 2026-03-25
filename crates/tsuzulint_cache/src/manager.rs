@@ -153,7 +153,7 @@ impl CacheManager {
 
         // Map of hash -> Vec<BlockCacheEntry> from cache
         // We use a Vec because multiple blocks might have same content (and thus same hash)
-        let mut cached_blocks_map: HashMap<BlockHash, Vec<&BlockCacheEntry>> = HashMap::new();
+        let mut cached_blocks_map: HashMap<BlockHash, Vec<&BlockCacheEntry>> = HashMap::with_capacity(cached_entry.blocks.len());
         for block in &cached_entry.blocks {
             cached_blocks_map.entry(block.hash).or_default().push(block);
         }
@@ -255,7 +255,7 @@ impl CacheManager {
             )));
         }
 
-        let mut content = Vec::new();
+        let mut content = Vec::with_capacity(metadata.len() as usize);
         file.take(MAX_CACHE_SIZE + 1).read_to_end(&mut content)?;
 
         if content.len() as u64 > MAX_CACHE_SIZE {
