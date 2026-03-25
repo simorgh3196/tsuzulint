@@ -25,7 +25,7 @@ use crate::config::LinterConfig;
 use crate::error::LinterError;
 use crate::file_finder::FileFinder;
 use crate::file_linter::lint_content as lint_content_internal;
-use crate::file_linter::{LintContext, lint_file_internal};
+use crate::file_linter::lint_file_internal;
 use crate::parallel_linter::lint_files as lint_files_parallel;
 use crate::result::LintResult;
 use crate::rule_loader::{create_plugin_host, load_configured_rules};
