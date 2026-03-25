@@ -612,4 +612,27 @@ mod tests {
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
         }
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_fixes_to_file_read_fails() {
+        // Create a directory. On Unix, `File::open` on a directory succeeds,
+        // but `read_to_string` fails with "Is a directory", testing the `read_to_string().map_err` path.
+        use tempfile::tempdir;
+        let dir = tempdir().expect("Failed to create temp dir");
+        let path = dir.path().to_path_buf();
+        let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
+
+        let result = apply_fixes_to_file(&path, &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                // It might fail at "Failed to open" or "Failed to read content" depending on the OS logic,
+                // but on Unix `File::open` of a directory usually works, and reading it fails.
+                assert!(msg.contains("Failed to read content") || msg.contains("Failed to open"));
+            }
+            Ok(_) => panic!("Expected LinterError::File, got Ok"),
+            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
+        }
+    }
 }

@@ -1,0 +1,26 @@
+--- crates/tsuzulint_core/src/fixer.rs
++++ crates/tsuzulint_core/src/fixer.rs
+@@ -608,4 +608,21 @@
+         }
+     }
++
++    #[cfg(unix)]
++    #[test]
++    fn apply_fixes_to_file_read_fails() {
++        use tempfile::tempdir;
++        let dir = tempdir().expect("Failed to create temp dir");
++        // Try to read a directory, which fails `read_to_string` on many systems
++        let path = dir.path().to_path_buf();
++        let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
++
++        let result = apply_fixes_to_file(&path, &diagnostics);
++
++        match result {
++            Err(LinterError::File(msg)) => {
++                assert!(msg.contains("Failed to read content") || msg.contains("Failed to open"));
++            }
++            Ok(_) => panic!("Expected LinterError::File, got Ok"),
++            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
++        }
++    }
+ }
