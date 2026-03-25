@@ -153,7 +153,8 @@ impl CacheManager {
 
         // Map of hash -> Vec<BlockCacheEntry> from cache
         // We use a Vec because multiple blocks might have same content (and thus same hash)
-        let mut cached_blocks_map: HashMap<BlockHash, Vec<&BlockCacheEntry>> = HashMap::with_capacity(cached_entry.blocks.len());
+        let mut cached_blocks_map: HashMap<BlockHash, Vec<&BlockCacheEntry>> =
+            HashMap::with_capacity(cached_entry.blocks.len());
         for block in &cached_entry.blocks {
             cached_blocks_map.entry(block.hash).or_default().push(block);
         }
