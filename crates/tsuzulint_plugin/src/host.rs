@@ -529,8 +529,8 @@ impl PluginHost {
             .remove(name)
             .unwrap_or_else(|| name.to_string());
 
-        self.manifests.remove(name);
-        self.configs.remove(name);
+        self.manifests.remove(&real_name);
+        self.configs.remove(&real_name);
 
         // Since rename_rule uses move semantics, unloading is safe.
         self.executor.unload(&real_name)
@@ -817,8 +817,8 @@ mod tests {
 
         // Test unloading by alias
         host.unload_rule("my-rule-alias");
-        assert!(!host.manifests.contains_key("my-rule-alias"));
-        assert!(!host.configs.contains_key("my-rule-alias"));
+        assert!(!host.manifests.contains_key("my-rule"));
+        assert!(!host.configs.contains_key("my-rule"));
         assert!(!host.aliases.contains_key("my-rule-alias"));
     }
 
