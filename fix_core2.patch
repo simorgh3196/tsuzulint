@@ -1,0 +1,21 @@
+--- crates/tsuzulint_core/src/rule_loader.rs
++++ crates/tsuzulint_core/src/rule_loader.rs
+@@ -48,7 +48,9 @@
+         Some(path) => {
+             debug!("Loading plugin '{}' from {}", name, path.display());
+-            if let Err(e) = host.load_rule(&path, PluginOptions::default()) {
++            let mut options = PluginOptions::default();
++            options.wasmtime_cache_dir = Some(std::path::PathBuf::from(config.cache.path()).join("wasmtime"));
++            if let Err(e) = host.load_rule(&path, options) {
+                 warn!("Failed to load plugin '{}': {}", name, e);
+             }
+         }
+@@ -87,7 +89,7 @@
+                                         .as_ref()
+                                         .and_then(|m| m.max_http_response_bytes),
+                                     timeout_ms: result.manifest.timeout_ms,
+-                                    wasmtime_cache_dir: None, // Will use default cache behavior if caching is enabled globally later
++                                    wasmtime_cache_dir: Some(std::path::PathBuf::from(config.cache.path()).join("wasmtime")),
+                                 };
+                                 match host.load_rule_bytes(&result.wasm_bytes, options) {
+                                     Ok(loaded_manifest) => {

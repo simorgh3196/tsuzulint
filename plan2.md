@@ -1,0 +1,4 @@
+1. Review `extism` library documentation specifically on `with_cache_config` vs `with_cache_disabled`.
+2. Find out if `extism::PluginBuilder` creates a default cache if neither are called. Wasmtime defaults to caching in some systems, but the comment says "// Fetch Wasmtime JIT cache configuration if available", meaning it might just expect to use `with_cache_config`. Wait, Wasmtime's config is a file path to `wasmtime-cache.toml`, not a directory!
+3. I need to make the change so it actually improves the performance by default or adds a proper config flag that can be set. But actually, `extism::PluginBuilder` has `with_cache_config` but it expects a config path. Wait, maybe there's a default?
+4. I should check how we can provide a default or if there's another library feature that is simpler to implement. Wait, I'm the Scholar.
