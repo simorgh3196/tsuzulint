@@ -42,3 +42,4 @@ pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 insta = { workspace = true }
 tempfile = { workspace = true }
+nix = { version = "0.31.2", features = ["fs"] }
