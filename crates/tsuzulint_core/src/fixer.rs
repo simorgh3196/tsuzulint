@@ -134,6 +134,12 @@ pub(crate) fn filter_overlapping_fixes(mut fixes: Vec<&Fix>) -> Vec<&Fix> {
     result
 }
 
+fn bounded_read_to_string<R: Read>(reader: &mut R, max: usize) -> Result<String, std::io::Error> {
+    let mut content = String::new();
+    reader.take((max + 1) as u64).read_to_string(&mut content)?;
+    Ok(content)
+}
+
 /// Applies fixes to a file and writes the result.
 pub fn apply_fixes_to_file(
     path: &Path,
@@ -173,10 +179,7 @@ pub fn apply_fixes_to_file(
         ))
     })?;
 
-    let mut content = String::with_capacity(metadata.len() as usize);
-    (&mut file)
-        .take(crate::file_linter::MAX_FILE_SIZE + 1)
-        .read_to_string(&mut content)
+    let content = bounded_read_to_string(&mut file, crate::file_linter::MAX_FILE_SIZE as usize)
         .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
 
     if content.len() as u64 > crate::file_linter::MAX_FILE_SIZE {
@@ -678,5 +681,14 @@ mod tests {
             }
             _ => panic!("Expected error, got {:?}", result),
         }
+    }
+
+    #[test]
+    fn test_bounded_read_to_string() {
+        use std::io::Cursor;
+        let data = vec![b"a"[0]; 1024];
+        let mut cursor = Cursor::new(data);
+        let result = super::bounded_read_to_string(&mut cursor, 500).unwrap();
+        assert_eq!(result.len(), 501);
     }
 }
