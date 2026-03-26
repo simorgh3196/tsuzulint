@@ -489,6 +489,7 @@ fn test_load_rule_manifest_wasm_too_large() {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod missing_coverage_tests {
     use super::*;
     use std::fs::File;
