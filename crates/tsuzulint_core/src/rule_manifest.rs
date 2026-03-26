@@ -487,3 +487,172 @@ fn test_load_rule_manifest_wasm_too_large() {
     let err_msg = result.unwrap_err().to_string();
     assert!(err_msg.contains("is too large"));
 }
+
+#[cfg(test)]
+mod missing_coverage_tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_read_error_fifo() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        // Create a FIFO so it can be opened, but blocks on read (we'll just drop it or let it fail)
+        // Wait, if it blocks, the test hangs. Let's create a file with no read permissions instead.
+        File::create(&manifest_path).unwrap();
+        let mut perms = std::fs::metadata(&manifest_path).unwrap().permissions();
+        perms.set_readonly(true); // this makes it read-only, not unreadable.
+
+        // Let's use a directory as the manifest path. File::open on a directory returns an error on most OSs.
+        // Actually File::open(dir) might work on Unix but read will fail.
+        let dir_path = dir.path().join("manifest_dir.json");
+        std::fs::create_dir(&dir_path).unwrap();
+
+        let result = load_rule_manifest(&dir_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // It should either fail to open or fail to read
+        assert!(
+            err_msg.contains("Failed to open rule manifest")
+                || err_msg.contains("Failed to read rule manifest")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_wasm_read_error() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_dir = dir.path().join("rule.wasm");
+        std::fs::create_dir(&wasm_dir).unwrap(); // directory instead of file
+
+        let wasm_hash = "0000000000000000000000000000000000000000000000000000000000000000";
+        let json = format!(
+            r#"{{
+                "rule": {{
+                    "name": "test-rule",
+                    "version": "1.0.0",
+                    "description": "Test rule",
+                    "fixable": false
+                }},
+                "wasm": [{{
+                    "path": "rule.wasm",
+                    "hash": "{}"
+                }}]
+            }}"#,
+            wasm_hash
+        );
+        File::create(&manifest_path)
+            .unwrap()
+            .write_all(json.as_bytes())
+            .unwrap();
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to open WASM file")
+                || err_msg.contains("Failed to read WASM file")
+                || err_msg.contains("Failed to read metadata for WASM file")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_read_limit_bypass() {
+        use std::thread;
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+
+        // Create a FIFO which has 0 size according to metadata, but we can write > MAX_MANIFEST_SIZE bytes into it.
+        unsafe {
+            libc::mkfifo(
+                std::ffi::CString::new(manifest_path.to_str().unwrap())
+                    .unwrap()
+                    .as_ptr(),
+                0o666,
+            )
+        };
+
+        let path_clone = manifest_path.clone();
+        let handle = thread::spawn(move || {
+            if let Ok(mut file) = File::create(&path_clone) {
+                // Write MAX_MANIFEST_SIZE + 10 bytes
+                let data = vec![0u8; (MAX_MANIFEST_SIZE + 10) as usize];
+                let _ = file.write_all(&data);
+            }
+        });
+
+        let result = load_rule_manifest(&manifest_path);
+        // It should read MAX_MANIFEST_SIZE + 1 and then fail the bytes_read check
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("is too large"));
+
+        let _ = handle.join();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_load_rule_manifest_wasm_limit_bypass() {
+        use std::thread;
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let wasm_hash = "0000000000000000000000000000000000000000000000000000000000000000";
+        let json = format!(
+            r#"{{
+                "rule": {{
+                    "name": "test-rule",
+                    "version": "1.0.0",
+                    "description": "Test rule",
+                    "fixable": false
+                }},
+                "wasm": [{{
+                    "path": "rule.wasm",
+                    "hash": "{}"
+                }}]
+            }}"#,
+            wasm_hash
+        );
+        File::create(&manifest_path)
+            .unwrap()
+            .write_all(json.as_bytes())
+            .unwrap();
+
+        // Create a FIFO for WASM
+        unsafe {
+            libc::mkfifo(
+                std::ffi::CString::new(wasm_path.to_str().unwrap())
+                    .unwrap()
+                    .as_ptr(),
+                0o666,
+            )
+        };
+
+        let path_clone = wasm_path.clone();
+        let handle = thread::spawn(move || {
+            if let Ok(mut file) = File::create(&path_clone) {
+                // Write MAX_WASM_SIZE + 10 bytes
+                let data = vec![0u8; (tsuzulint_plugin::MAX_WASM_SIZE + 10) as usize];
+                let _ = file.write_all(&data);
+            }
+        });
+
+        let result = load_rule_manifest(&manifest_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("is too large"),
+            "Expected size error but got: {}",
+            err_msg
+        );
+
+        let _ = handle.join();
+    }
+}
