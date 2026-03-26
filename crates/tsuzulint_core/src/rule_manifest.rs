@@ -1,5 +1,4 @@
 use extism_manifest::Wasm;
-use std::fs;
 use std::path::{Path, PathBuf};
 use tsuzulint_manifest::{ExternalRuleManifest, HashVerifier, validate_manifest};
 
@@ -222,6 +221,7 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
