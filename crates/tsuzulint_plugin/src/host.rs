@@ -529,6 +529,8 @@ impl PluginHost {
             .remove(name)
             .unwrap_or_else(|| name.to_string());
 
+        self.aliases.retain(|_, v| v != &real_name);
+
         self.manifests.remove(&real_name);
         self.configs.remove(&real_name);
 
@@ -768,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unload_rule() {
+    fn test_unload_rule_by_real_name_removes_aliases() {
         use crate::IsolationLevel;
         let mut host = PluginHost::new();
         // Since we cannot easily load a real WASM plugin here without full fixtures,
@@ -795,8 +797,13 @@ mod tests {
         host.unload_rule("my-rule");
         assert!(!host.manifests.contains_key("my-rule"));
         assert!(!host.configs.contains_key("my-rule"));
+        assert!(!host.aliases.contains_key("my-rule-alias"));
+    }
 
-        // Re-populate for alias testing
+    #[test]
+    fn test_unload_rule_by_alias_removes_backing_entries() {
+        use crate::IsolationLevel;
+        let mut host = PluginHost::new();
         host.manifests.insert(
             "my-rule".to_string(),
             RuleManifest {
