@@ -24,7 +24,11 @@ fn read_wasm_file(path: &Path) -> Result<Vec<u8>, std::io::Error> {
     if metadata.len() > MAX_WASM_SIZE {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("WASM file too large: {} bytes exceeds maximum of {} bytes", metadata.len(), MAX_WASM_SIZE)
+            format!(
+                "WASM file too large: {} bytes exceeds maximum of {} bytes",
+                metadata.len(),
+                MAX_WASM_SIZE
+            ),
         ));
     }
 
@@ -36,7 +40,10 @@ fn read_wasm_file(path: &Path) -> Result<Vec<u8>, std::io::Error> {
     if buffer.len() as u64 > MAX_WASM_SIZE {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("WASM file too large: exceeds maximum of {} bytes", MAX_WASM_SIZE)
+            format!(
+                "WASM file too large: exceeds maximum of {} bytes",
+                MAX_WASM_SIZE
+            ),
         ));
     }
 
@@ -760,6 +767,60 @@ mod tests {
 
         let wasm_bytes = read_wasm_file(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
+    }
+
+    #[test]
+    fn test_read_wasm_file_metadata_too_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("too_large.wasm");
+        let file = std::fs::File::create(&path).unwrap();
+
+        // Mock a file larger than 50MB using set_len
+        file.set_len(50 * 1024 * 1024 + 1).unwrap();
+
+        let result = read_wasm_file(&path);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds maximum of 52428800 bytes")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_wasm_file_content_too_large() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fifo_too_large.wasm");
+
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRWXU).unwrap();
+
+        let path_clone = path.clone();
+        std::thread::spawn(move || {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path_clone)
+                .unwrap();
+            let chunk = vec![0u8; 1024 * 1024];
+            for _ in 0..50 {
+                file.write_all(&chunk).unwrap();
+            }
+            file.write_all(&[0u8; 1]).unwrap();
+        });
+
+        let result = read_wasm_file(&path);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds maximum of 52428800 bytes")
+        );
     }
 
     #[tokio::test]
