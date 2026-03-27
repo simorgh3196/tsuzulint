@@ -23,9 +23,14 @@ pub fn create_plugin_host(
         let dynamic = dynamic_rules.lock().map_err(|_| {
             crate::error::LinterError::Internal("Dynamic rules mutex poisoned".to_string())
         })?;
+        let mut base_options = PluginOptions::default();
+        if config.cache.is_enabled() {
+            base_options.wasmtime_cache_dir =
+                Some(std::path::PathBuf::from(config.cache.path()).join("wasmtime"));
+        }
         for path in dynamic.iter() {
             debug!("Loading dynamic plugin from {}", path.display());
-            if let Err(e) = host.load_rule(path, PluginOptions::default()) {
+            if let Err(e) = host.load_rule(path, base_options.clone()) {
                 warn!("Failed to load dynamic plugin '{}': {}", path.display(), e);
             }
         }
@@ -35,13 +40,19 @@ pub fn create_plugin_host(
 }
 
 pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
+    let mut default_opts = PluginOptions::default();
+    if config.cache.is_enabled() {
+        default_opts.wasmtime_cache_dir =
+            Some(std::path::PathBuf::from(config.cache.path()).join("wasmtime"));
+    }
+
     let load_plugin = |name: &str, host: &mut PluginHost| match PluginResolver::resolve(
         name,
         config.base_dir.as_deref(),
     ) {
         Some(path) => {
             debug!("Loading plugin '{}' from {}", name, path.display());
-            if let Err(e) = host.load_rule(&path, PluginOptions::default()) {
+            if let Err(e) = host.load_rule(&path, default_opts.clone()) {
                 warn!("Failed to load plugin '{}': {}", name, e);
             }
         }
@@ -87,6 +98,14 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                                         .as_ref()
                                         .and_then(|m| m.max_http_response_bytes),
                                     timeout_ms: result.manifest.timeout_ms,
+                                    wasmtime_cache_dir: if config.cache.is_enabled() {
+                                        Some(
+                                            std::path::PathBuf::from(config.cache.path())
+                                                .join("wasmtime"),
+                                        )
+                                    } else {
+                                        None
+                                    },
                                 };
                                 match host.load_rule_bytes(&result.wasm_bytes, options) {
                                     Ok(loaded_manifest) => {

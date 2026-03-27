@@ -23,6 +23,8 @@ pub struct PluginOptions {
     pub memory_max_http_response_bytes: Option<u64>,
     /// Execution timeout in milliseconds.
     pub timeout_ms: Option<u64>,
+    /// Wasmtime compilation cache directory path. If `None`, caching is disabled or uses default.
+    pub wasmtime_cache_dir: Option<PathBuf>,
 }
 
 /// Result from loading a WASM rule.

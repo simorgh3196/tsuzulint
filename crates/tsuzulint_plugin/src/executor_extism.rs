@@ -103,10 +103,18 @@ impl ExtismExecutor {
     ) -> Result<Plugin, PluginError> {
         let wasm = source.to_wasm();
         let manifest = Manifest::new([wasm]);
+
+        let cache_dir = options.wasmtime_cache_dir.clone();
         let manifest = self.configure_manifest(manifest, options);
 
         // Fetch Wasmtime JIT cache configuration if available
         let mut builder = PluginBuilder::new(manifest).with_wasi(true);
+
+        // 📚 Source: https://docs.rs/extism/1.13.0/extism/struct.PluginBuilder.html#method.with_cache_config
+        // 💡 Insight: Skipping expensive JIT compilation on subsequent executions.
+        if let Some(dir) = cache_dir {
+            builder = builder.with_cache_config(dir);
+        }
 
         if let Some(limit) = self.fuel_limit {
             builder = builder.with_fuel_limit(limit);
