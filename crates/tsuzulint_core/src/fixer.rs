@@ -673,6 +673,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::permissions_set_readonly_false)]
     fn apply_fixes_to_file_write_error() {
         use std::io::Write;
         let mut file = tempfile::NamedTempFile::new().unwrap();
