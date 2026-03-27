@@ -645,6 +645,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn apply_fixes_to_file_inner_proc_file() {
+        // /proc/version is a regular file with reported size 0, but reading it yields data.
+        let path = Path::new("/proc/version");
+        if path.exists() {
+            // max_size = 5. metadata.len() == 0 <= 5. (passes check_file_metadata)
+            // But content.len() will be > 5. (fails check_limit(content.len()))
+            let res = super::apply_fixes_to_file_inner(path, &[], 5);
+            assert!(res.is_err());
+            assert!(res.unwrap_err().to_string().contains("exceeds limit"));
+        }
+    }
+
+    #[test]
     fn test_check_file_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
