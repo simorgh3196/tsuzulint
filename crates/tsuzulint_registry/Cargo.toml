@@ -25,6 +25,9 @@ dirs = "6.0.0"
 url = "2.5.8"
 # semver.workspace = true
 
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.31.2", features = ["fs"] }
+
 [dev-dependencies]
 wiremock.workspace = true
 proptest = "1.10"
