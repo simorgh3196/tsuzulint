@@ -75,6 +75,7 @@ impl PreparedLintRequest {
     }
 }
 
+/// Converts a serializable node into a JSON value, handling raw JSON strings.
 fn convert_node_to_value<T: Serialize>(node: &T) -> Result<serde_json::Value, PluginError> {
     // Convert node to serde_json::Value for proper MsgPack serialization
     let node_value = serde_json::to_value(node)
@@ -308,6 +309,19 @@ impl PluginHost {
     ///
     /// This is an optimized version of `run_rule` that avoids repeated
     /// deserialization of tokens and sentences when running multiple rules.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Rule name or alias
+    /// * `node` - The AST node
+    /// * `source` - The source text
+    /// * `tokens` - Pre-deserialized tokens
+    /// * `sentences` - Pre-deserialized sentences
+    /// * `file_path` - Optional file path
+    ///
+    /// # Returns
+    ///
+    /// Diagnostics reported by the rule.
     pub fn run_rule_with_parts<T: Serialize>(
         &mut self,
         name: &str,
@@ -365,6 +379,18 @@ impl PluginHost {
     ///
     /// Note: This does not include rule-specific config. Use `run_rule_with_parts`
     /// for per-rule config support.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - The AST node
+    /// * `source` - The source text
+    /// * `tokens` - Pre-deserialized tokens
+    /// * `sentences` - Pre-deserialized sentences
+    /// * `file_path` - Optional file path
+    ///
+    /// # Returns
+    ///
+    /// A prepared request ready for `run_rule_with_prepared`.
     pub fn prepare_lint_request<T: Serialize>(
         &self,
         node: &T,
@@ -394,6 +420,15 @@ impl PluginHost {
     ///
     /// Note: This does not include rule-specific config. Use `run_rule_with_parts`
     /// for per-rule config support.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Rule name or alias
+    /// * `request` - The pre-prepared request
+    ///
+    /// # Returns
+    ///
+    /// Diagnostics reported by the rule.
     pub fn run_rule_with_prepared(
         &mut self,
         name: &str,
@@ -450,6 +485,18 @@ impl PluginHost {
     }
 
     /// Runs all loaded rules on a node with pre-deserialized analysis data.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - The AST node
+    /// * `source` - The source text
+    /// * `tokens` - Pre-deserialized tokens
+    /// * `sentences` - Pre-deserialized sentences
+    /// * `file_path` - Optional file path
+    ///
+    /// # Returns
+    ///
+    /// All diagnostics from all rules.
     pub fn run_all_rules_with_parts<T: Serialize>(
         &mut self,
         node: &T,
@@ -522,7 +569,15 @@ impl PluginHost {
         Ok(all_diagnostics)
     }
 
-    /// Unloads a rule.
+    /// Unloads a rule and removes its associated configurations and aliases.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Rule name or alias to unload
+    ///
+    /// # Returns
+    ///
+    /// `true` if the rule was found and unloaded, `false` otherwise.
     pub fn unload_rule(&mut self, name: &str) -> bool {
         let real_name = self
             .aliases
@@ -538,7 +593,7 @@ impl PluginHost {
         self.executor.unload(&real_name)
     }
 
-    /// Unloads all rules.
+    /// Unloads all rules and clears all configurations and aliases.
     pub fn unload_all(&mut self) {
         self.manifests.clear();
         self.configs.clear();
