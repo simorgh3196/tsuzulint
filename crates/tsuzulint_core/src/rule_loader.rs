@@ -65,10 +65,8 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                     {
                         match rule_manifest::load_rule_manifest(&manifest_path) {
                             Ok(result) => {
-                                let rule_name = detail
-                                    .r#as
-                                    .clone()
-                                    .unwrap_or_else(|| result.manifest.rule.name.clone());
+                                let rule_name =
+                                    detail.r#as.as_deref().unwrap_or(&result.manifest.rule.name);
                                 debug!(
                                     "Loading rule '{}' from manifest: {}",
                                     rule_name,
@@ -92,17 +90,16 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                                 };
                                 match host.load_rule_bytes(&result.wasm_bytes, options) {
                                     Ok(loaded_manifest) => {
-                                        let internal_name = loaded_manifest.name.clone();
                                         let plugin_manifest = convert_manifest(&result.manifest);
 
                                         if let Err(e) = host.rename_rule(
-                                            &internal_name,
-                                            &rule_name,
+                                            &loaded_manifest.name,
+                                            rule_name,
                                             Some(plugin_manifest),
                                         ) {
                                             warn!(
                                                 "Failed to register rule '{}' (loaded as '{}'): {}",
-                                                rule_name, internal_name, e
+                                                rule_name, loaded_manifest.name, e
                                             );
                                         }
                                     }
@@ -208,5 +205,96 @@ mod tests {
         let host = PluginHost::new();
         let versions = get_rule_versions_from_host(&host);
         assert!(versions.is_empty());
+    }
+
+    #[test]
+    fn test_load_configured_rules_with_manifest() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        // Build simple_rule WASM to get a valid WASM binary
+        let Some(wasm_real_path) = crate::test_utils::build_simple_rule_wasm() else {
+            println!("Skipping test_load_configured_rules_with_manifest: WASM build failed");
+            return;
+        };
+
+        let wasm_bytes = fs::read(&wasm_real_path).unwrap();
+
+        let temp_dir = tempdir().unwrap();
+        let manifest_path = temp_dir.path().join("manifest.json");
+        let wasm_path = temp_dir.path().join("dummy.wasm");
+
+        fs::write(&wasm_path, &wasm_bytes).unwrap();
+
+        let hash = tsuzulint_manifest::HashVerifier::compute(&wasm_bytes);
+
+        // Write a valid manifest JSON
+        // The simple_rule exports "test-rule" internally. If we specify 'as', it gets renamed.
+        // We set the manifest rule name to "test-rule" which will be the fallback name
+        let manifest_json = serde_json::json!({
+            "rule": {
+                "name": "test-rule",
+                "version": "1.0.0",
+                "description": "A dummy rule",
+                "fixable": false,
+                "node_types": [],
+                "isolation_level": "global",
+                "capabilities": [],
+                "languages": []
+            },
+            "wasm": [{
+                "path": "dummy.wasm",
+                "hash": hash
+            }]
+        });
+        fs::write(
+            &manifest_path,
+            serde_json::to_string(&manifest_json).unwrap(),
+        )
+        .unwrap();
+
+        // Create a config referencing this manifest without 'as'
+        let mut config1 = LinterConfig::new();
+        config1.base_dir = Some(temp_dir.path().to_path_buf());
+        config1.rules.push(RuleDefinition::Detail(
+            crate::config::RuleDefinitionDetail {
+                path: Some("manifest.json".to_string()),
+                r#as: None,
+                github: None,
+                server_url: None,
+                url: None,
+            },
+        ));
+
+        let mut host1 = PluginHost::new();
+        load_configured_rules(&config1, &mut host1);
+
+        // test-rule should be loaded
+        let versions = get_rule_versions_from_host(&host1);
+        assert_eq!(versions.get("test-rule").map(|s| s.as_str()), Some("1.0.0"));
+
+        // Create a config referencing this manifest with 'as'
+        let mut config2 = LinterConfig::new();
+        config2.base_dir = Some(temp_dir.path().to_path_buf());
+        config2.rules.push(RuleDefinition::Detail(
+            crate::config::RuleDefinitionDetail {
+                path: Some("manifest.json".to_string()),
+                r#as: Some("aliased-rule".to_string()),
+                github: None,
+                server_url: None,
+                url: None,
+            },
+        ));
+
+        let mut host2 = PluginHost::new();
+        load_configured_rules(&config2, &mut host2);
+
+        // aliased-rule should be loaded instead
+        let versions2 = get_rule_versions_from_host(&host2);
+        assert_eq!(
+            versions2.get("aliased-rule").map(|s| s.as_str()),
+            Some("1.0.0")
+        );
+        assert!(!versions2.contains_key("test-rule"));
     }
 }
