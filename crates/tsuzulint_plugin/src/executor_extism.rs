@@ -118,7 +118,21 @@ impl ExtismExecutor {
         // Ensure cache directory exists, ignore if it already does
         let _ = std::fs::create_dir_all(&cache_dir);
 
-        builder = builder.with_cache_config(&cache_dir);
+        let cache_config = cache_dir.join("config.toml");
+        let data_dir = cache_dir.join("data");
+        let _ = std::fs::create_dir_all(&data_dir);
+
+        if !cache_config.exists() {
+            let _ = std::fs::write(
+                &cache_config,
+                format!(
+                    "[cache]\ndirectory = \"{}\"\n",
+                    data_dir.display().to_string().replace("\\", "\\\\")
+                ),
+            );
+        }
+
+        builder = builder.with_cache_config(&cache_config);
 
         if let Some(limit) = self.fuel_limit {
             builder = builder.with_fuel_limit(limit);
