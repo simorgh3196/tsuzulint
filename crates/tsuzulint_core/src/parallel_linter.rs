@@ -55,17 +55,18 @@ pub fn lint_files(
                     }
                 };
 
-                lint_file_internal(
+                let mut ctx = crate::file_linter::LintContext {
                     path,
-                    file_host,
+                    host: file_host,
                     tokenizer,
                     config_hash,
                     cache,
-                    &enabled_rules,
+                    enabled_rules: &enabled_rules,
                     rule_versions,
                     timings_enabled,
-                )
-                .map_err(|e| (path.clone(), e))
+                };
+
+                lint_file_internal(&mut ctx).map_err(|e| (path.clone(), e))
             },
         )
         .collect();

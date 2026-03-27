@@ -111,16 +111,18 @@ impl Linter {
         let enabled_rules: HashSet<&str> = enabled_rules_vec.iter().map(|(n, _)| *n).collect();
         let rule_versions = crate::rule_loader::get_rule_versions_from_host(&host);
 
-        lint_file_internal(
+        let mut ctx = crate::file_linter::LintContext {
             path,
-            &mut host,
-            &self.tokenizer,
-            &self.config_hash,
-            &self.cache,
-            &enabled_rules,
-            &rule_versions,
-            self.config.timings,
-        )
+            host: &mut host,
+            tokenizer: &self.tokenizer,
+            config_hash: &self.config_hash,
+            cache: &self.cache,
+            enabled_rules: &enabled_rules,
+            rule_versions: &rule_versions,
+            timings_enabled: self.config.timings,
+        };
+
+        lint_file_internal(&mut ctx)
     }
 
     pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
