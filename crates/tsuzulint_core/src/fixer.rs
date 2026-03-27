@@ -168,11 +168,21 @@ fn apply_fixes_to_file_inner(
     diagnostics: &[Diagnostic],
     max_size: u64,
 ) -> Result<FixerResult, LinterError> {
+    debug!(
+        "Auto-fix routine attempting to open file: {}",
+        path.display()
+    );
     let mut file = handle_io(fs::File::open(path), path, "Failed to open")?;
+
+    debug!(
+        "Validating file metadata size limits for: {}",
+        path.display()
+    );
     let metadata = handle_io(file.metadata(), path, "Failed to read metadata for")?;
 
     check_file_metadata(&metadata, max_size, path)?;
 
+    debug!("Reading content buffer for: {}", path.display());
     let mut content = String::with_capacity(metadata.len() as usize);
     use std::io::Read;
     handle_io(
@@ -180,8 +190,14 @@ fn apply_fixes_to_file_inner(
         path,
         "Failed to read",
     )?;
+
+    debug!("Verifying final read buffer limits for: {}", path.display());
     check_limit(content.len() as u64, max_size, path)?;
 
+    debug!(
+        "Applying diagnostic fixes into file buffer: {}",
+        path.display()
+    );
     Ok(apply_fixes_to_content(&content, diagnostics))
 }
 
