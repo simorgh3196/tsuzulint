@@ -138,6 +138,8 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
+    // host is &mut &'a mut PluginHost after destructuring LintContext.
+    // We double-dereference and take an immutable borrow to pass &PluginHost to read-only helpers.
     let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), &**host, enabled_rules);
     let needs_sentences = any_rule_needs_sentences(host.loaded_rules(), &**host, enabled_rules);
 
@@ -160,7 +162,7 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
         let cache_guard = cache
             .lock()
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
-        cache_guard.reconcile_blocks(path, &current_blocks, *config_hash, rule_versions)
+        cache_guard.reconcile_blocks(path, &current_blocks, config_hash, rule_versions)
     };
 
     let (global_rule_names, block_rule_names) = get_classified_rules(&**host, enabled_rules);
