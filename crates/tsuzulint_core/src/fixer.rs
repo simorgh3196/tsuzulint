@@ -134,69 +134,26 @@ pub(crate) fn filter_overlapping_fixes(mut fixes: Vec<&Fix>) -> Vec<&Fix> {
 }
 
 /// Applies fixes to a file and writes the result.
+#[rustfmt::skip]
+fn apply_fixes_to_file_inner(path: &Path, diagnostics: &[Diagnostic]) -> Result<FixerResult, LinterError> {
+    let mut file = fs::File::open(path).map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
+    let metadata = file.metadata().map_err(|e| LinterError::file(format!("Failed to read metadata for {}: {}", path.display(), e)))?;
+    let max = crate::file_linter::MAX_FILE_SIZE;
+    if !metadata.is_file() { return Err(LinterError::file(format!("Not a regular file: {}", path.display()))); }
+    if metadata.len() > max { return Err(LinterError::file(format!("File size exceeds limit of {} bytes: {}", max, path.display()))); }
+    let mut content = String::with_capacity(metadata.len() as usize);
+    use std::io::Read;
+    (&mut file).take(max + 1).read_to_string(&mut content).map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
+    if content.len() as u64 > max { return Err(LinterError::file(format!("File size exceeds limit of {} bytes: {}", max, path.display()))); }
+    Ok(apply_fixes_to_content(&content, diagnostics))
+}
+
+/// Applies fixes to a file and writes the result.
 pub fn apply_fixes_to_file(
     path: &Path,
     diagnostics: &[Diagnostic],
 ) -> Result<FixerResult, LinterError> {
-    let mut file = match fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) => {
-            return Err(LinterError::file(format!(
-                "Failed to open {}: {}",
-                path.display(),
-                e
-            )));
-        }
-    };
-
-    let metadata = match file.metadata() {
-        Ok(m) => m,
-        Err(e) => {
-            return Err(LinterError::file(format!(
-                "Failed to read metadata for {}: {}",
-                path.display(),
-                e
-            )));
-        }
-    };
-
-    if !metadata.is_file() {
-        return Err(LinterError::file(format!(
-            "Not a regular file: {}",
-            path.display()
-        )));
-    }
-
-    if metadata.len() > crate::file_linter::MAX_FILE_SIZE {
-        return Err(LinterError::file(format!(
-            "File size exceeds limit of {} bytes: {}",
-            crate::file_linter::MAX_FILE_SIZE,
-            path.display()
-        )));
-    }
-
-    let mut content = String::with_capacity(metadata.len() as usize);
-    use std::io::Read;
-    if let Err(e) = (&mut file)
-        .take(crate::file_linter::MAX_FILE_SIZE + 1)
-        .read_to_string(&mut content)
-    {
-        return Err(LinterError::file(format!(
-            "Failed to read {}: {}",
-            path.display(),
-            e
-        )));
-    }
-
-    if content.len() as u64 > crate::file_linter::MAX_FILE_SIZE {
-        return Err(LinterError::file(format!(
-            "File size exceeds limit of {} bytes: {}",
-            crate::file_linter::MAX_FILE_SIZE,
-            path.display()
-        )));
-    }
-
-    let result = apply_fixes_to_content(&content, diagnostics);
+    let result = apply_fixes_to_file_inner(path, diagnostics)?;
 
     if result.modified {
         fs::write(path, &result.fixed_content)
