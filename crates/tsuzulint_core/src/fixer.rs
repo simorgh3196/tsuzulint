@@ -659,6 +659,20 @@ mod tests {
     }
 
     #[test]
+    fn apply_fixes_to_file_invalid_utf8() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        // Write invalid UTF-8 byte sequence to ensure read_to_string natively fails across
+        // platforms to satisfy line coverage drops matching against unreached mapping wrappers.
+        file.write_all(&[0xFF, 0xFF, 0xFF, 0xFF]).unwrap();
+        let path = file.into_temp_path();
+
+        let res = super::apply_fixes_to_file(&path, &[]);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Failed to read"));
+    }
+
+    #[test]
     fn test_check_file_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
