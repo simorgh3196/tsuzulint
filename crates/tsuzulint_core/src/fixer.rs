@@ -168,9 +168,6 @@ fn apply_fixes_to_file_inner(
     diagnostics: &[Diagnostic],
     max_size: u64,
 ) -> Result<FixerResult, LinterError> {
-    let _path_display = path.display();
-    let _diag_len = diagnostics.len();
-
     let mut file = handle_io(fs::File::open(path), path, "Failed to open")?;
     let metadata = file.metadata().unwrap_or_else(|_| unreachable!());
 
@@ -184,9 +181,8 @@ fn apply_fixes_to_file_inner(
         "Failed to read",
     )?;
 
-    check_limit(content.len() as u64, max_size, path)?;
-
-    Ok(apply_fixes_to_content(&content, diagnostics))
+    check_limit(content.len() as u64, max_size, path)
+        .map(|_| apply_fixes_to_content(&content, diagnostics))
 }
 
 /// Applies fixes to a file and writes the result.
