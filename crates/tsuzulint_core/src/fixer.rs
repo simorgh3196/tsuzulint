@@ -1,7 +1,6 @@
 //! Auto-fix functionality for applying diagnostic fixes.
 
 use std::fs;
-use std::io::Read;
 use std::path::Path;
 
 use tracing::{debug, warn};
@@ -87,22 +86,6 @@ pub fn apply_fixes_to_content(content: &str, diagnostics: &[Diagnostic]) -> Fixe
     FixerResult::new(applied, result, applied > 0)
 }
 
-fn bounded_read_to_string<R: Read>(reader: &mut R, max: usize) -> Result<String, LinterError> {
-    let mut content = String::new();
-    reader
-        .take((max + 1) as u64)
-        .read_to_string(&mut content)
-        .map_err(|e| LinterError::file(e.to_string()))?;
-
-    if content.len() > max {
-        return Err(LinterError::file(format!(
-            "File size exceeds limit of {} bytes",
-            max
-        )));
-    }
-    Ok(content)
-}
-
 /// Filters out overlapping fixes, keeping the one that starts later.
 ///
 /// This function sorts the fixes by start position in descending order
@@ -150,21 +133,29 @@ pub(crate) fn filter_overlapping_fixes(mut fixes: Vec<&Fix>) -> Vec<&Fix> {
     result
 }
 
-/// Applies fixes to a file and writes the result.
-pub fn apply_fixes_to_file(
+fn handle_io<T>(res: std::io::Result<T>, path: &Path, msg: &str) -> Result<T, LinterError> {
+    res.map_err(|e| LinterError::file(format!("{} {}: {}", msg, path.display(), e)))
+}
+
+fn check_limit(size: u64, limit: u64, path: &Path) -> Result<(), LinterError> {
+    if size > limit {
+        Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            limit,
+            path.display()
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn apply_fixes_to_file_inner(
     path: &Path,
     diagnostics: &[Diagnostic],
+    max_size: u64,
 ) -> Result<FixerResult, LinterError> {
-    let mut file = fs::File::open(path)
-        .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
-
-    let metadata = file.metadata().map_err(|e| {
-        LinterError::file(format!(
-            "Failed to read metadata for {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
+    let mut file = handle_io(fs::File::open(path), path, "Failed to open")?;
+    let metadata = handle_io(file.metadata(), path, "Failed to read metadata for")?;
 
     if !metadata.is_file() {
         return Err(LinterError::file(format!(
@@ -172,27 +163,26 @@ pub fn apply_fixes_to_file(
             path.display()
         )));
     }
+    check_limit(metadata.len(), max_size, path)?;
 
-    if metadata.len() > crate::file_linter::MAX_FILE_SIZE {
-        return Err(LinterError::file(format!(
-            "File size exceeds limit of {} bytes: {}",
-            crate::file_linter::MAX_FILE_SIZE,
-            path.display()
-        )));
-    }
+    let mut content = String::with_capacity(metadata.len() as usize);
+    use std::io::Read;
+    handle_io(
+        (&mut file).take(max_size + 1).read_to_string(&mut content),
+        path,
+        "Failed to read",
+    )?;
+    check_limit(content.len() as u64, max_size, path)?;
 
-    let content = bounded_read_to_string(&mut file, crate::file_linter::MAX_FILE_SIZE as usize)
-        .map_err(|e| {
-            let mut err_msg = e.to_string();
-            if !err_msg.contains("exceeds limit") {
-                err_msg = format!("Failed to read {}: {}", path.display(), err_msg);
-            } else {
-                err_msg = format!("{}: {}", err_msg, path.display());
-            }
-            LinterError::file(err_msg)
-        })?;
+    Ok(apply_fixes_to_content(&content, diagnostics))
+}
 
-    let result = apply_fixes_to_content(&content, diagnostics);
+/// Applies fixes to a file and writes the result.
+pub fn apply_fixes_to_file(
+    path: &Path,
+    diagnostics: &[Diagnostic],
+) -> Result<FixerResult, LinterError> {
+    let result = apply_fixes_to_file_inner(path, diagnostics, crate::file_linter::MAX_FILE_SIZE)?;
 
     if result.modified {
         fs::write(path, &result.fixed_content)
@@ -574,14 +564,10 @@ mod tests {
                 // On Unix, File::open succeeds on a directory, and we fail at metadata.is_file().
                 // On Windows, File::open fails on a directory with Access is denied (os error 5).
                 assert!(
-                    [
-                        "Not a regular file",
-                        "Failed to open",
-                        "Access is denied",
-                        "Permission denied"
-                    ]
-                    .iter()
-                    .any(|s| msg.contains(s)),
+                    msg.contains("Not a regular file")
+                        || msg.contains("Failed to open")
+                        || msg.contains("Access is denied")
+                        || msg.contains("Permission denied"),
                     "Unexpected error message: {}",
                     msg
                 );
@@ -589,14 +575,10 @@ mod tests {
             Err(e) => {
                 let msg = e.to_string();
                 assert!(
-                    [
-                        "Not a regular file",
-                        "Failed to open",
-                        "Access is denied",
-                        "Permission denied"
-                    ]
-                    .iter()
-                    .any(|s| msg.contains(s)),
+                    msg.contains("Not a regular file")
+                        || msg.contains("Failed to open")
+                        || msg.contains("Access is denied")
+                        || msg.contains("Permission denied"),
                     "Unexpected error: {}",
                     msg
                 );
@@ -627,76 +609,30 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
-    fn apply_fixes_to_file_too_large_actual_data() {
+    fn apply_fixes_to_file_inner_too_large_content() {
         use std::io::Write;
-        use std::process::Command;
-
-        let dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let fifo_path = dir.path().join("fifo");
-
-        // Create a FIFO to simulate a non-regular file.
-        // A FIFO will cause metadata.is_file() to return false.
-        let status = Command::new("mkfifo")
-            .arg(&fifo_path)
-            .status()
-            .expect("Failed to execute mkfifo");
-        assert!(status.success(), "mkfifo command failed");
-
-        // Write MAX_FILE_SIZE + 1 bytes to the FIFO in a background thread.
-        let fifo_path_clone = fifo_path.clone();
-        std::thread::spawn(move || {
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .open(fifo_path_clone)
-                .expect("Failed to open FIFO for writing");
-            let chunk = vec![0u8; 1024 * 1024]; // 1MB
-            let chunks = (crate::file_linter::MAX_FILE_SIZE / 1024 / 1024) as usize;
-            for _ in 0..chunks {
-                file.write_all(&chunk).expect("Failed to write to FIFO");
-            }
-            let remainder = (crate::file_linter::MAX_FILE_SIZE % (1024 * 1024)) as usize;
-            if remainder > 0 {
-                file.write_all(&vec![0u8; remainder])
-                    .expect("Failed to write remainder");
-            }
-            file.write_all(&[0u8]).expect("Failed to write extra byte");
-        });
-
-        let diagnostics = vec![];
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        let result = apply_fixes_to_file(&fifo_path, &diagnostics);
-
-        match result {
-            Err(LinterError::File(msg)) => {
-                // FIFO is NOT a regular file, so it will return "Not a regular file".
-                assert!(
-                    msg.contains("Not a regular file") || msg.contains("exceeds limit"),
-                    "Got msg: {}",
-                    msg
-                );
-            }
-            _ => panic!("Expected error, got {:?}", result),
-        }
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"123456").unwrap();
+        let path = file.into_temp_path();
+        // Since we pass max_size=5, it hits metadata check immediately
+        let res = super::apply_fixes_to_file_inner(&path, &[], 5);
+        assert!(res.unwrap_err().to_string().contains("exceeds limit"));
     }
 
     #[test]
-    fn test_bounded_read_to_string_success() {
-        use std::io::Cursor;
-        let data = vec![b'a'; 1024];
-        let mut cursor = Cursor::new(data);
-        let result = super::bounded_read_to_string(&mut cursor, 1024).unwrap();
-        assert_eq!(result.len(), 1024);
+    fn test_handle_io() {
+        let err = std::io::Error::new(std::io::ErrorKind::NotFound, "not found");
+        let res: Result<(), _> = super::handle_io(Err(err), Path::new("test.txt"), "Failed");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Failed"));
+
+        let ok: Result<(), _> = super::handle_io(Ok(()), Path::new("test.txt"), "Failed");
+        assert!(ok.is_ok());
     }
 
     #[test]
-    fn test_bounded_read_to_string_exceeds_limit() {
-        use std::io::Cursor;
-        let data = vec![b'a'; 1025];
-        let mut cursor = Cursor::new(data);
-        let result = super::bounded_read_to_string(&mut cursor, 1024);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("exceeds limit"));
+    fn test_check_limit() {
+        assert!(super::check_limit(10, 5, Path::new("test.txt")).is_err());
+        assert!(super::check_limit(5, 10, Path::new("test.txt")).is_ok());
     }
 }
