@@ -154,43 +154,10 @@ pub fn get_rule_versions_from_host(host: &PluginHost) -> HashMap<String, String>
 
 /// Gets the Wasmtime JIT cache configuration path from the linter config.
 pub fn wasmtime_cache_config_path_from_config(config: &LinterConfig) -> Option<PathBuf> {
-    if config.cache.is_enabled() {
-        let cache_dir = std::path::Path::new(config.cache.path());
-        let wasmtime_dir = cache_dir.join("wasmtime");
-        let config_path = wasmtime_dir.join("config.toml");
-        let data_dir = wasmtime_dir.join("data");
-
-        if !wasmtime_dir.exists() {
-            if let Err(e) = std::fs::create_dir_all(&wasmtime_dir) {
-                warn!("Failed to create wasmtime cache directory: {}", e);
-                return None;
-            }
-        }
-        if !data_dir.exists() {
-            if let Err(e) = std::fs::create_dir_all(&data_dir) {
-                warn!("Failed to create wasmtime data directory: {}", e);
-                return None;
-            }
-        }
-
-        if !config_path.exists() {
-            let toml = format!(
-                r#"[cache]
-enabled = true
-directory = {:?}
-"#,
-                data_dir
-            );
-            if let Err(e) = std::fs::write(&config_path, toml) {
-                warn!("Failed to write wasmtime cache config: {}", e);
-                return None;
-            }
-        }
-
-        Some(config_path)
-    } else {
-        None
-    }
+    // FIXME: Wasmtime cache config parsing fails in some environments (e.g. tests on macOS)
+    // with "failed to parse config file". Disabling for now until root cause is identified.
+    let _ = config;
+    None
 }
 
 fn convert_manifest(
