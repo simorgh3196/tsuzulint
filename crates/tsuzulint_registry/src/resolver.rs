@@ -12,6 +12,36 @@ use thiserror::Error;
 pub use crate::fetcher::PluginSource;
 pub use crate::spec::{ParseError, PluginSpec};
 use extism_manifest::Wasm;
+use std::io::Read;
+
+fn read_wasm_file(path: &Path) -> Result<Vec<u8>, std::io::Error> {
+    // 50 MB maximum WASM size (consistent with tsuzulint_plugin::MAX_WASM_SIZE)
+    const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024;
+
+    let mut file = std::fs::File::open(path)?;
+    let metadata = file.metadata()?;
+
+    if metadata.len() > MAX_WASM_SIZE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("WASM file too large: {} bytes exceeds maximum of {} bytes", metadata.len(), MAX_WASM_SIZE)
+        ));
+    }
+
+    let mut buffer: Vec<u8> = Vec::with_capacity(metadata.len() as usize);
+    (&mut file)
+        .take(MAX_WASM_SIZE + 1)
+        .read_to_end(&mut buffer)?;
+
+    if buffer.len() as u64 > MAX_WASM_SIZE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("WASM file too large: exceeds maximum of {} bytes", MAX_WASM_SIZE)
+        ));
+    }
+
+    Ok(buffer)
+}
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -164,7 +194,7 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            match read_wasm_file(&cached.wasm_path) {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -233,7 +263,7 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let bytes = read_wasm_file(&wasm_path).map_err(DownloadError::IoError)?;
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -319,7 +349,7 @@ mod tests {
 
         assert_eq!(resolved.alias, "test-rule");
         assert_eq!(resolved.manifest.rule.name, "test-rule");
-        assert_eq!(std::fs::read(&resolved.wasm_path).unwrap(), wasm_content);
+        assert_eq!(read_wasm_file(&resolved.wasm_path).unwrap(), wasm_content);
     }
 
     #[tokio::test]
@@ -372,7 +402,7 @@ mod tests {
 
         assert_eq!(resolved.alias, "test-alias");
         assert_eq!(resolved.manifest.rule.name, "test-rule");
-        assert_eq!(std::fs::read(&resolved.wasm_path).unwrap(), wasm_content);
+        assert_eq!(read_wasm_file(&resolved.wasm_path).unwrap(), wasm_content);
     }
 
     #[tokio::test]
@@ -728,7 +758,7 @@ mod tests {
             .await
             .expect("Second resolve failed");
 
-        let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
+        let wasm_bytes = read_wasm_file(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
     }
 
@@ -791,7 +821,7 @@ mod tests {
             .expect("Second resolve failed");
 
         assert!(resolved2.wasm_path.exists());
-        let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
+        let wasm_bytes = read_wasm_file(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
     }
 }
