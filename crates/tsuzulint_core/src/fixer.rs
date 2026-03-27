@@ -169,9 +169,7 @@ fn apply_fixes_to_file_inner(
     max_size: u64,
 ) -> Result<FixerResult, LinterError> {
     let mut file = handle_io(fs::File::open(path), path, "Failed to open")?;
-    let metadata = file
-        .metadata()
-        .unwrap_or_else(|e| unreachable!("Failed to read metadata for {}: {}", path.display(), e));
+    let metadata = file.metadata().unwrap_or_else(|_| unreachable!());
 
     check_file_metadata(&metadata, max_size, path)?;
 
