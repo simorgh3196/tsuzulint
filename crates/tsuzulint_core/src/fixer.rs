@@ -149,6 +149,20 @@ fn check_limit(size: u64, limit: u64, path: &Path) -> Result<(), LinterError> {
     }
 }
 
+fn check_file_metadata(
+    metadata: &fs::Metadata,
+    max_size: u64,
+    path: &Path,
+) -> Result<(), LinterError> {
+    if !metadata.is_file() {
+        return Err(LinterError::file(format!(
+            "Not a regular file: {}",
+            path.display()
+        )));
+    }
+    check_limit(metadata.len(), max_size, path)
+}
+
 fn apply_fixes_to_file_inner(
     path: &Path,
     diagnostics: &[Diagnostic],
@@ -157,13 +171,7 @@ fn apply_fixes_to_file_inner(
     let mut file = handle_io(fs::File::open(path), path, "Failed to open")?;
     let metadata = handle_io(file.metadata(), path, "Failed to read metadata for")?;
 
-    if !metadata.is_file() {
-        return Err(LinterError::file(format!(
-            "Not a regular file: {}",
-            path.display()
-        )));
-    }
-    check_limit(metadata.len(), max_size, path)?;
+    check_file_metadata(&metadata, max_size, path)?;
 
     let mut content = String::with_capacity(metadata.len() as usize);
     use std::io::Read;
@@ -634,5 +642,21 @@ mod tests {
     fn test_check_limit() {
         assert!(super::check_limit(10, 5, Path::new("test.txt")).is_err());
         assert!(super::check_limit(5, 10, Path::new("test.txt")).is_ok());
+    }
+
+    #[test]
+    fn test_check_file_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        // fs::metadata works on directories on Windows even if File::open doesn't.
+        let dir_meta = std::fs::metadata(path).unwrap();
+        let res = super::check_file_metadata(&dir_meta, 100, path);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Not a regular file"));
+
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let file_path = file.path();
+        let file_meta = std::fs::metadata(file_path).unwrap();
+        assert!(super::check_file_metadata(&file_meta, 100, file_path).is_ok());
     }
 }
