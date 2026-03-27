@@ -385,7 +385,7 @@ fn select_parser(extension: &str) -> FileParser {
 /// before performing blocking reads (use [`clear_nonblocking`]).
 ///
 /// On non-Unix platforms this is a plain `fs::File::open`.
-pub(crate) fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
@@ -403,7 +403,7 @@ pub(crate) fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
 /// Clears the `O_NONBLOCK` flag on an open file descriptor so that subsequent
 /// reads block normally.  This is a no-op on non-Unix platforms.
 #[cfg(unix)]
-pub(crate) fn clear_nonblocking(file: &std::fs::File) -> std::io::Result<()> {
+fn clear_nonblocking(file: &std::fs::File) -> std::io::Result<()> {
     use std::os::unix::io::AsRawFd as _;
     let fd = file.as_raw_fd();
     // SAFETY: `fd` is a valid, open file descriptor owned by `file`.
@@ -420,7 +420,7 @@ pub(crate) fn clear_nonblocking(file: &std::fs::File) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-pub(crate) fn clear_nonblocking(_file: &std::fs::File) -> std::io::Result<()> {
+fn clear_nonblocking(_file: &std::fs::File) -> std::io::Result<()> {
     Ok(())
 }
 
