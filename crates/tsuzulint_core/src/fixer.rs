@@ -673,6 +673,33 @@ mod tests {
     }
 
     #[test]
+    fn apply_fixes_to_file_write_error() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"Hello World").unwrap();
+        let path = file.path().to_path_buf();
+        let diagnostics = vec![
+            Diagnostic::new("test-rule", "test", Span::new(0, 5))
+                .with_fix(Fix::new(Span::new(0, 5), "Hi")),
+        ];
+
+        // Make file read-only to intentionally trigger fs::write failure.
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let res = super::apply_fixes_to_file(&path, &diagnostics);
+
+        // Restore permissions so tempfile can clean up the file
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(false);
+        let _ = std::fs::set_permissions(&path, perms);
+
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Failed to write"));
+    }
+
+    #[test]
     fn test_check_file_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
