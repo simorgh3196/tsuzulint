@@ -138,22 +138,45 @@ pub fn apply_fixes_to_file(
     path: &Path,
     diagnostics: &[Diagnostic],
 ) -> Result<FixerResult, LinterError> {
-    let mut file = fs::File::open(path).map_err(|e| LinterError::file(format!("Failed to open {}: {e}", path.display())))?;
-    let metadata = file.metadata().map_err(|e| LinterError::file(format!("Failed to read metadata for {}: {e}", path.display())))?;
-    let max_size = crate::file_linter::MAX_FILE_SIZE;
+    let mut file = fs::File::open(path)
+        .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
+
+    let metadata = file.metadata().map_err(|e| {
+        LinterError::file(format!(
+            "Failed to read metadata for {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
 
     if !metadata.is_file() {
-        return Err(LinterError::file(format!("Not a regular file: {}", path.display())));
-    } else if metadata.len() > max_size {
-        return Err(LinterError::file(format!("File size exceeds limit of {max_size} bytes: {}", path.display())));
+        return Err(LinterError::file(format!(
+            "Not a regular file: {}",
+            path.display()
+        )));
+    }
+
+    if metadata.len() > crate::file_linter::MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            crate::file_linter::MAX_FILE_SIZE,
+            path.display()
+        )));
     }
 
     let mut content = String::with_capacity(metadata.len() as usize);
     use std::io::Read;
-    (&mut file).take(max_size + 1).read_to_string(&mut content).map_err(|e| LinterError::file(format!("Failed to read {}: {e}", path.display())))?;
+    (&mut file)
+        .take(crate::file_linter::MAX_FILE_SIZE + 1)
+        .read_to_string(&mut content)
+        .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
 
-    if content.len() as u64 > max_size {
-        return Err(LinterError::file(format!("File size exceeds limit of {max_size} bytes: {}", path.display())));
+    if content.len() as u64 > crate::file_linter::MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            crate::file_linter::MAX_FILE_SIZE,
+            path.display()
+        )));
     }
 
     let result = apply_fixes_to_content(&content, diagnostics);
