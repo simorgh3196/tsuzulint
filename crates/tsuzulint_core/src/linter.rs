@@ -87,7 +87,10 @@ impl Linter {
                 .plugin_host
                 .lock()
                 .map_err(|_| LinterError::Internal("Plugin host mutex poisoned".to_string()))?;
-            host.load_rule(&path_buf, tsuzulint_plugin::PluginOptions::default())?;
+            let mut options = tsuzulint_plugin::PluginOptions::default();
+            options.wasmtime_cache_config_path =
+                crate::rule_loader::wasmtime_cache_config_path_from_config(&self.config);
+            host.load_rule(&path_buf, options)?;
         }
 
         {

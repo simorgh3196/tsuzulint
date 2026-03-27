@@ -1,6 +1,7 @@
 //! Rule loading and plugin host initialization.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tracing::{debug, warn};
 use tsuzulint_plugin::PluginHost;
@@ -24,10 +25,8 @@ pub fn create_plugin_host(
             crate::error::LinterError::Internal("Dynamic rules mutex poisoned".to_string())
         })?;
         let mut base_options = PluginOptions::default();
-        if config.cache.is_enabled() {
-            base_options.wasmtime_cache_dir =
-                Some(std::path::PathBuf::from(config.cache.path()).join("wasmtime"));
-        }
+        base_options.wasmtime_cache_config_path = wasmtime_cache_config_path_from_config(config);
+
         for path in dynamic.iter() {
             debug!("Loading dynamic plugin from {}", path.display());
             if let Err(e) = host.load_rule(path, base_options.clone()) {
@@ -41,10 +40,7 @@ pub fn create_plugin_host(
 
 pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
     let mut default_opts = PluginOptions::default();
-    if config.cache.is_enabled() {
-        default_opts.wasmtime_cache_dir =
-            Some(std::path::PathBuf::from(config.cache.path()).join("wasmtime"));
-    }
+    default_opts.wasmtime_cache_config_path = wasmtime_cache_config_path_from_config(config);
 
     let load_plugin = |name: &str, host: &mut PluginHost| match PluginResolver::resolve(
         name,
@@ -100,14 +96,9 @@ pub fn load_configured_rules(config: &LinterConfig, host: &mut PluginHost) {
                                         .as_ref()
                                         .and_then(|m| m.max_http_response_bytes),
                                     timeout_ms: result.manifest.timeout_ms,
-                                    wasmtime_cache_dir: if config.cache.is_enabled() {
-                                        Some(
-                                            std::path::PathBuf::from(config.cache.path())
-                                                .join("wasmtime"),
-                                        )
-                                    } else {
-                                        None
-                                    },
+                                    wasmtime_cache_config_path: wasmtime_cache_config_path_from_config(
+                                        config,
+                                    ),
                                 };
                                 match host.load_rule_bytes(&result.wasm_bytes, options) {
                                     Ok(loaded_manifest) => {
@@ -159,6 +150,47 @@ pub fn get_rule_versions_from_host(host: &PluginHost) -> HashMap<String, String>
     }
 
     versions
+}
+
+/// Gets the Wasmtime JIT cache configuration path from the linter config.
+pub fn wasmtime_cache_config_path_from_config(config: &LinterConfig) -> Option<PathBuf> {
+    if config.cache.is_enabled() {
+        let cache_dir = std::path::Path::new(config.cache.path());
+        let wasmtime_dir = cache_dir.join("wasmtime");
+        let config_path = wasmtime_dir.join("config.toml");
+        let data_dir = wasmtime_dir.join("data");
+
+        if !wasmtime_dir.exists() {
+            if let Err(e) = std::fs::create_dir_all(&wasmtime_dir) {
+                warn!("Failed to create wasmtime cache directory: {}", e);
+                return None;
+            }
+        }
+        if !data_dir.exists() {
+            if let Err(e) = std::fs::create_dir_all(&data_dir) {
+                warn!("Failed to create wasmtime data directory: {}", e);
+                return None;
+            }
+        }
+
+        if !config_path.exists() {
+            let toml = format!(
+                r#"[cache]
+enabled = true
+directory = {:?}
+"#,
+                data_dir
+            );
+            if let Err(e) = std::fs::write(&config_path, toml) {
+                warn!("Failed to write wasmtime cache config: {}", e);
+                return None;
+            }
+        }
+
+        Some(config_path)
+    } else {
+        None
+    }
 }
 
 fn convert_manifest(

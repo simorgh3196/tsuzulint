@@ -110,8 +110,8 @@ impl ExtismExecutor {
 
         // 📚 Source: https://docs.rs/extism/1.13.0/extism/struct.PluginBuilder.html#method.with_cache_config
         // 💡 Insight: Skipping expensive JIT compilation on subsequent executions.
-        if let Some(cache_dir) = &options.wasmtime_cache_dir {
-            builder = builder.with_cache_config(cache_dir);
+        if let Some(cache_config) = &options.wasmtime_cache_config_path {
+            builder = builder.with_cache_config(cache_config);
         }
 
         if let Some(limit) = self.fuel_limit {
