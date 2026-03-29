@@ -65,6 +65,11 @@ impl CacheManager {
         blake3::hash(content.as_bytes()).into()
     }
 
+    /// Computes the BLAKE3 hash of raw bytes.
+    pub fn hash_bytes(bytes: &[u8]) -> BlockHash {
+        blake3::hash(bytes).into()
+    }
+
     /// Gets a cached entry for a file.
     pub fn get(&self, path: &Path) -> Option<&CacheEntry> {
         if !self.enabled {
