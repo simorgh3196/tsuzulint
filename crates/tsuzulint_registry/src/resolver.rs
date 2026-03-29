@@ -13,6 +13,9 @@ pub use crate::fetcher::PluginSource;
 pub use crate::spec::{ParseError, PluginSpec};
 use extism_manifest::Wasm;
 
+/// Maximum allowed size for WASM files (50 MB).
+pub const MAX_WASM_SIZE: u64 = 50 * 1024 * 1024;
+
 #[derive(Debug, Error)]
 pub enum ResolveError {
     #[error("Parse error: {0}")]
@@ -164,7 +167,7 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            match read_wasm_file(&cached.wasm_path) {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -233,7 +236,7 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let bytes = read_wasm_file(&wasm_path).map_err(DownloadError::IoError)?;
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -250,6 +253,35 @@ impl PluginResolver {
             alias,
         })
     }
+}
+
+/// Securely reads a WASM file with size limits to prevent OOM/TOCTOU vulnerabilities.
+fn read_wasm_file(path: &Path) -> Result<Vec<u8>, std::io::Error> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let metadata = file.metadata()?;
+
+    if metadata.len() > MAX_WASM_SIZE {
+        return Err(std::io::Error::other(format!(
+            "WASM file too large: exceeds limit of {} bytes",
+            MAX_WASM_SIZE
+        )));
+    }
+
+    let mut content = Vec::new();
+    let bytes_read = (&mut file)
+        .take(MAX_WASM_SIZE + 1)
+        .read_to_end(&mut content)?;
+
+    if bytes_read as u64 > MAX_WASM_SIZE {
+        return Err(std::io::Error::other(format!(
+            "WASM file too large: exceeds limit of {} bytes",
+            MAX_WASM_SIZE
+        )));
+    }
+
+    Ok(content)
 }
 
 #[cfg(test)]
@@ -793,5 +825,55 @@ mod tests {
         assert!(resolved2.wasm_path.exists());
         let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
+    }
+
+    #[test]
+    fn test_read_wasm_file_size_limit_metadata() {
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        let file = std::fs::File::create(&wasm_path).unwrap();
+
+        file.set_len(MAX_WASM_SIZE + 1).unwrap();
+        drop(file);
+
+        let result = read_wasm_file(&wasm_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("WASM file too large"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_wasm_file_size_limit_content() {
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // Create a FIFO inside the directory to trick the `file.metadata().len()` check
+        // because a FIFO has a size of 0.
+        let status = std::process::Command::new("mkfifo")
+            .arg(&wasm_path)
+            .status();
+
+        if status.is_err() || !status.unwrap().success() {
+            // mkfifo might not be available, skip test gracefully
+            return;
+        }
+
+        // Spawn a background thread to feed data to the FIFO
+        let wasm_path_clone = wasm_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(mut file) = std::fs::File::create(&wasm_path_clone) {
+                // Write slightly more than the limit to trigger the post-read check
+                let limit = MAX_WASM_SIZE as usize + 1024;
+                let buffer = vec![0u8; limit];
+                use std::io::Write;
+                let _ = file.write_all(&buffer);
+            }
+        });
+
+        let result = read_wasm_file(&wasm_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("WASM file too large"));
     }
 }
