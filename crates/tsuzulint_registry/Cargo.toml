@@ -29,3 +29,6 @@ url = "2.5.8"
 wiremock.workspace = true
 proptest = "1.10"
 tempfile.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

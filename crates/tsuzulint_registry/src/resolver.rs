@@ -41,6 +41,39 @@ pub struct ResolvedPlugin {
     pub alias: String,
 }
 
+/// Securely reads a file into memory with a size limit to prevent OOM vulnerabilities.
+fn read_file_securely(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let metadata = file.metadata()?;
+
+    if metadata.len() > crate::downloader::DEFAULT_MAX_SIZE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "File size exceeds maximum allowed size of {} bytes",
+                crate::downloader::DEFAULT_MAX_SIZE
+            ),
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let bytes_read = (&mut file)
+        .take(crate::downloader::DEFAULT_MAX_SIZE + 1)
+        .read_to_end(&mut bytes)?;
+
+    if bytes_read as u64 > crate::downloader::DEFAULT_MAX_SIZE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "File size exceeds maximum allowed size of {} bytes",
+                crate::downloader::DEFAULT_MAX_SIZE
+            ),
+        ));
+    }
+    Ok(bytes)
+}
+
 pub struct PluginResolver {
     fetcher: ManifestFetcher,
     cache: PluginCache,
@@ -164,7 +197,7 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            match read_file_securely(&cached.wasm_path) {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -233,7 +266,7 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let bytes = read_file_securely(&wasm_path).map_err(DownloadError::IoError)?;
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -319,7 +352,68 @@ mod tests {
 
         assert_eq!(resolved.alias, "test-rule");
         assert_eq!(resolved.manifest.rule.name, "test-rule");
-        assert_eq!(std::fs::read(&resolved.wasm_path).unwrap(), wasm_content);
+        assert_eq!(
+            read_file_securely(&resolved.wasm_path).unwrap(),
+            wasm_content
+        );
+    }
+
+    #[test]
+    fn test_read_file_securely_metadata_too_large() {
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        let file = std::fs::File::create(&wasm_path).unwrap();
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .unwrap();
+
+        let result = read_file_securely(&wasm_path);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("File size exceeds")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_file_securely_content_too_large() {
+        let dir = tempdir().unwrap();
+        let fifo_path = dir.path().join("rule.wasm");
+
+        let c_path = std::ffi::CString::new(fifo_path.to_str().unwrap()).unwrap();
+        unsafe {
+            let _ = libc::mkfifo(c_path.as_ptr(), 0o644);
+        }
+
+        let handle = std::thread::spawn(move || {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&fifo_path)
+                .unwrap();
+            let chunk = vec![0u8; 1024 * 1024];
+            let limit = crate::downloader::DEFAULT_MAX_SIZE as usize + 1024;
+            let mut written = 0;
+            while written < limit {
+                use std::io::Write;
+                if file.write_all(&chunk).is_err() {
+                    break;
+                }
+                written += chunk.len();
+            }
+        });
+
+        let result = read_file_securely(&dir.path().join("rule.wasm"));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("File size exceeds")
+        );
+
+        let _ = handle.join();
     }
 
     #[tokio::test]
@@ -372,7 +466,10 @@ mod tests {
 
         assert_eq!(resolved.alias, "test-alias");
         assert_eq!(resolved.manifest.rule.name, "test-rule");
-        assert_eq!(std::fs::read(&resolved.wasm_path).unwrap(), wasm_content);
+        assert_eq!(
+            read_file_securely(&resolved.wasm_path).unwrap(),
+            wasm_content
+        );
     }
 
     #[tokio::test]
@@ -728,7 +825,7 @@ mod tests {
             .await
             .expect("Second resolve failed");
 
-        let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
+        let wasm_bytes = read_file_securely(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
     }
 
@@ -791,7 +888,7 @@ mod tests {
             .expect("Second resolve failed");
 
         assert!(resolved2.wasm_path.exists());
-        let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
+        let wasm_bytes = read_file_securely(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
     }
 }
