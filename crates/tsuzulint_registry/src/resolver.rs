@@ -352,7 +352,68 @@ mod tests {
 
         assert_eq!(resolved.alias, "test-rule");
         assert_eq!(resolved.manifest.rule.name, "test-rule");
-        assert_eq!(read_file_securely(&resolved.wasm_path).unwrap(), wasm_content);
+        assert_eq!(
+            read_file_securely(&resolved.wasm_path).unwrap(),
+            wasm_content
+        );
+    }
+
+    #[test]
+    fn test_read_file_securely_metadata_too_large() {
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+        let file = std::fs::File::create(&wasm_path).unwrap();
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .unwrap();
+
+        let result = read_file_securely(&wasm_path);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("File size exceeds")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_file_securely_content_too_large() {
+        let dir = tempdir().unwrap();
+        let fifo_path = dir.path().join("rule.wasm");
+
+        let c_path = std::ffi::CString::new(fifo_path.to_str().unwrap()).unwrap();
+        unsafe {
+            let _ = libc::mkfifo(c_path.as_ptr(), 0o644);
+        }
+
+        let handle = std::thread::spawn(move || {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&fifo_path)
+                .unwrap();
+            let chunk = vec![0u8; 1024 * 1024];
+            let limit = crate::downloader::DEFAULT_MAX_SIZE as usize + 1024;
+            let mut written = 0;
+            while written < limit {
+                use std::io::Write;
+                if file.write_all(&chunk).is_err() {
+                    break;
+                }
+                written += chunk.len();
+            }
+        });
+
+        let result = read_file_securely(&dir.path().join("rule.wasm"));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("File size exceeds")
+        );
+
+        let _ = handle.join();
     }
 
     #[tokio::test]
@@ -405,7 +466,10 @@ mod tests {
 
         assert_eq!(resolved.alias, "test-alias");
         assert_eq!(resolved.manifest.rule.name, "test-rule");
-        assert_eq!(read_file_securely(&resolved.wasm_path).unwrap(), wasm_content);
+        assert_eq!(
+            read_file_securely(&resolved.wasm_path).unwrap(),
+            wasm_content
+        );
     }
 
     #[tokio::test]

@@ -4633,6 +4633,7 @@ dependencies = [
  "dirs",
  "extism-manifest",
  "futures-util",
+ "libc",
  "miette",
  "proptest",
  "reqwest 0.12.28",
