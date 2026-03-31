@@ -198,9 +198,8 @@ impl PluginHost {
         let real_name = self
             .aliases
             .get(old_name)
-            .map(String::as_str)
-            .unwrap_or(old_name)
-            .to_string();
+            .cloned()
+            .unwrap_or_else(|| old_name.to_string());
 
         if !self.manifests.contains_key(old_name) && old_name == real_name {
             // Check if real_name is loaded?
@@ -528,9 +527,8 @@ impl PluginHost {
         let real_name = self
             .aliases
             .get(name)
-            .map(String::as_str)
-            .unwrap_or(name)
-            .to_string();
+            .cloned()
+            .unwrap_or_else(|| name.to_string());
 
         self.manifests.remove(name);
         self.configs.remove(name);
