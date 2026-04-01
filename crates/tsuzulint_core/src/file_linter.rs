@@ -523,6 +523,19 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    #[cfg(unix)]
+    fn test_clear_nonblocking() {
+        use std::os::unix::io::AsFd;
+        let file = tempfile::NamedTempFile::new().unwrap().into_file();
+        let fd = file.as_fd();
+        rustix::fs::fcntl_setfl(fd, rustix::fs::OFlags::NONBLOCK).unwrap();
+        super::clear_nonblocking(&file).unwrap();
+        let flags = rustix::fs::fcntl_getfl(fd).unwrap();
+        assert!(!flags.contains(rustix::fs::OFlags::NONBLOCK));
+    }
+
     use super::*;
     use tsuzulint_ast::Span;
     use tsuzulint_plugin::Diagnostic;
