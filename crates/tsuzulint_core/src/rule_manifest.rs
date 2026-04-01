@@ -69,7 +69,7 @@ pub fn load_rule_manifest(manifest_path: &Path) -> Result<LoadRuleManifestResult
         ))
     })?;
 
-    let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let manifest_dir = manifest_path.parent().unwrap_or(Path::new("."));
 
     let mut resolved_wasm = None;
     for w in &manifest.wasm {
