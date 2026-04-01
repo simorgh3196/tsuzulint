@@ -76,7 +76,7 @@ pub fn lint_file_internal(
             // EAGAIN / EWOULDBLOCK can theoretically appear if O_NONBLOCK was not
             // successfully cleared; surface a clear error in that case.
             #[cfg(unix)]
-            if e.raw_os_error() == Some(libc::EAGAIN) {
+            if e.raw_os_error() == Some(rustix::io::Errno::AGAIN.raw_os_error()) {
                 return LinterError::file(format!(
                     "Failed to read {} (EAGAIN: O_NONBLOCK still set)",
                     path.display()
@@ -391,7 +391,7 @@ fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
         use std::os::unix::fs::OpenOptionsExt as _;
         std::fs::OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NONBLOCK)
+            .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
             .open(path)
     }
     #[cfg(not(unix))]
@@ -404,18 +404,13 @@ fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
 /// reads block normally.  This is a no-op on non-Unix platforms.
 #[cfg(unix)]
 fn clear_nonblocking(file: &std::fs::File) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd as _;
-    let fd = file.as_raw_fd();
-    // SAFETY: `fd` is a valid, open file descriptor owned by `file`.
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags == -1 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let new_flags = flags & !libc::O_NONBLOCK;
-    // SAFETY: same fd, setting valid flags.
-    if unsafe { libc::fcntl(fd, libc::F_SETFL, new_flags) } == -1 {
-        return Err(std::io::Error::last_os_error());
-    }
+    use std::os::unix::io::AsFd;
+    // Safe, high-level abstraction using rustix instead of unsafe libc FFI.
+    let borrowed_fd = file.as_fd();
+    let mut flags = rustix::fs::fcntl_getfl(borrowed_fd)?;
+    flags.remove(rustix::fs::OFlags::NONBLOCK);
+    rustix::fs::fcntl_setfl(borrowed_fd, flags)?;
+
     Ok(())
 }
 
