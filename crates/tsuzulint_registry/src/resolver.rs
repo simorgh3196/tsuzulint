@@ -6,6 +6,7 @@ use crate::error::FetchError;
 use crate::fetcher::ManifestFetcher;
 use crate::manifest::{ExternalRuleManifest, HashVerifier, IntegrityError};
 use crate::security::validate_local_wasm_path;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -72,6 +73,31 @@ impl PluginResolver {
     pub fn with_downloader(mut self, downloader: WasmDownloader) -> Self {
         self.downloader = downloader;
         self
+    }
+
+    fn read_wasm_bounded(path: &Path) -> std::io::Result<Vec<u8>> {
+        let mut file = std::fs::File::open(path)?;
+        let metadata = file.metadata()?;
+        if metadata.len() > crate::downloader::DEFAULT_MAX_SIZE {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("File too large: {}", metadata.len()),
+            ));
+        }
+
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        (&mut file)
+            .take(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .read_to_end(&mut bytes)?;
+
+        if bytes.len() as u64 > crate::downloader::DEFAULT_MAX_SIZE {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "File too large",
+            ));
+        }
+
+        Ok(bytes)
     }
 
     pub async fn resolve(&self, spec: &PluginSpec) -> Result<ResolvedPlugin, ResolveError> {
@@ -164,7 +190,7 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            match Self::read_wasm_bounded(&cached.wasm_path) {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -233,7 +259,7 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let bytes = Self::read_wasm_bounded(&wasm_path).map_err(DownloadError::IoError)?;
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -267,6 +293,57 @@ mod tests {
             "server_url": server_url
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn test_read_wasm_bounded_metadata_too_large() {
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let file = std::fs::File::create(&wasm_path).unwrap();
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .unwrap();
+
+        let result = PluginResolver::read_wasm_bounded(&wasm_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("File too large"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_wasm_bounded_fifo_size_limit() {
+        use std::io::Write;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let status = std::process::Command::new("mkfifo")
+            .arg(&wasm_path)
+            .status();
+
+        if status.is_err() || !status.unwrap().success() {
+            return; // mkfifo might not be available
+        }
+
+        let wasm_path_clone = wasm_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(mut file) = std::fs::File::create(&wasm_path_clone) {
+                let chunk = vec![0u8; 1024 * 1024]; // 1MB chunk
+                let limit = crate::downloader::DEFAULT_MAX_SIZE as usize + 1024;
+                let mut written = 0;
+                while written < limit {
+                    if file.write_all(&chunk).is_err() {
+                        break;
+                    }
+                    written += chunk.len();
+                }
+            }
+        });
+
+        let result = PluginResolver::read_wasm_bounded(&wasm_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("File too large"));
     }
 
     #[tokio::test]
