@@ -295,6 +295,57 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn test_read_wasm_bounded_metadata_too_large() {
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let file = std::fs::File::create(&wasm_path).unwrap();
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .unwrap();
+
+        let result = PluginResolver::read_wasm_bounded(&wasm_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("File too large"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_wasm_bounded_fifo_size_limit() {
+        use std::io::Write;
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let status = std::process::Command::new("mkfifo")
+            .arg(&wasm_path)
+            .status();
+
+        if status.is_err() || !status.unwrap().success() {
+            return; // mkfifo might not be available
+        }
+
+        let wasm_path_clone = wasm_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(mut file) = std::fs::File::create(&wasm_path_clone) {
+                let chunk = vec![0u8; 1024 * 1024]; // 1MB chunk
+                let limit = crate::downloader::DEFAULT_MAX_SIZE as usize + 1024;
+                let mut written = 0;
+                while written < limit {
+                    if file.write_all(&chunk).is_err() {
+                        break;
+                    }
+                    written += chunk.len();
+                }
+            }
+        });
+
+        let result = PluginResolver::read_wasm_bounded(&wasm_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("File too large"));
+    }
+
     #[tokio::test]
     async fn test_resolve_github_success() {
         let mock_server = MockServer::start().await;
