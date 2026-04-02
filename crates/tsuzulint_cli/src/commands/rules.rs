@@ -271,7 +271,7 @@ pub fn run_add_rule(path: &Path, alias: Option<&str>, config_path: Option<PathBu
         let alias_str = alias.map(str::to_string).unwrap_or_else(|| {
             wasm_path
                 .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
+                .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "unnamed-rule".to_string())
         });
         warn!(
