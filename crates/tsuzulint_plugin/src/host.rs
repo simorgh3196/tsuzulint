@@ -634,7 +634,7 @@ mod tests {
         assert_eq!(guest_request.source, source);
         assert_eq!(guest_request.tokens, tokens);
         assert_eq!(guest_request.sentences, sentences);
-        assert_eq!(guest_request.file_path, file_path.map(|s| s.to_string()));
+        assert_eq!(guest_request.file_path, file_path.map(String::from));
         assert_eq!(guest_request.node, node_data);
         assert_eq!(guest_request.helpers, None);
     }
