@@ -233,7 +233,29 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let mut file = std::fs::File::open(&wasm_path).map_err(DownloadError::IoError)?;
+
+        let metadata = file.metadata().map_err(DownloadError::IoError)?;
+        if metadata.len() > crate::downloader::DEFAULT_MAX_SIZE {
+            return Err(ResolveError::DownloadError(DownloadError::TooLarge {
+                size: metadata.len(),
+                max: crate::downloader::DEFAULT_MAX_SIZE,
+            }));
+        }
+
+        use std::io::Read;
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        (&mut file)
+            .take(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .read_to_end(&mut bytes)
+            .map_err(DownloadError::IoError)?;
+
+        if bytes.len() as u64 > crate::downloader::DEFAULT_MAX_SIZE {
+            return Err(ResolveError::DownloadError(DownloadError::TooLarge {
+                size: bytes.len() as u64,
+                max: crate::downloader::DEFAULT_MAX_SIZE,
+            }));
+        }
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -730,6 +752,125 @@ mod tests {
 
         let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_wasm_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let file = std::fs::File::create(&wasm_path).unwrap();
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1).unwrap();
+
+        let manifest = json!({
+            "rule": {
+                "name": "local-rule",
+                "version": "1.0.0",
+            },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0".repeat(64)
+            }]
+        });
+
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let downloader = WasmDownloader::new()
+            .expect("Failed to create downloader")
+            .allow_local(true);
+
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .expect("Failed to create resolver")
+            .with_downloader(downloader)
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
+
+        let spec = PluginSpec::parse(&json!({
+            "path": manifest_path.to_str().unwrap(),
+            "as": "test-alias"
+        }))
+        .unwrap();
+
+        let result = resolver.resolve(&spec).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("File too large"),
+            "Expected error about WASM size, but got: {}",
+            err_msg
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_resolve_path_wasm_too_large_fifo() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // Create a FIFO so metadata().len() is 0, but reading it produces data
+        nix::unistd::mkfifo(&wasm_path, nix::sys::stat::Mode::S_IRWXU).unwrap();
+
+        let manifest = json!({
+            "rule": {
+                "name": "local-rule",
+                "version": "1.0.0",
+            },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0".repeat(64)
+            }]
+        });
+
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let fetcher = ManifestFetcher::new().allow_local(true);
+        let downloader = WasmDownloader::new()
+            .expect("Failed to create downloader")
+            .allow_local(true);
+
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::with_fetcher(fetcher)
+            .expect("Failed to create resolver")
+            .with_downloader(downloader)
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
+
+        let spec = PluginSpec::parse(&json!({
+            "path": manifest_path.to_str().unwrap(),
+            "as": "test-alias"
+        }))
+        .unwrap();
+
+        // Spawn a background thread to feed data to the FIFO
+        let wasm_path_clone = wasm_path.clone();
+        std::thread::spawn(move || {
+            use std::io::Write;
+            if let Ok(mut file) = std::fs::File::create(&wasm_path_clone) {
+                // Write slightly more than the limit to trigger the post-read check
+                let chunk = vec![0u8; 1024 * 1024]; // 1MB chunk
+                let limit = crate::downloader::DEFAULT_MAX_SIZE as usize + 1024;
+                let mut written = 0;
+                while written < limit {
+                    if file.write_all(&chunk).is_err() {
+                        break;
+                    }
+                    written += chunk.len();
+                }
+            }
+        });
+
+        let result = resolver.resolve(&spec).await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("File too large"),
+            "Expected error about WASM size limit from post-read check, got: {}",
+            err_msg
+        );
     }
 
     #[tokio::test]
