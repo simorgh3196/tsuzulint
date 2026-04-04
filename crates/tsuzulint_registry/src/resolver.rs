@@ -761,7 +761,8 @@ mod tests {
         let wasm_path = dir.path().join("rule.wasm");
 
         let file = std::fs::File::create(&wasm_path).unwrap();
-        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1).unwrap();
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .unwrap();
 
         let manifest = json!({
             "rule": {
