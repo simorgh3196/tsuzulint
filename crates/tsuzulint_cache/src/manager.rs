@@ -61,8 +61,8 @@ impl CacheManager {
     }
 
     /// Computes the BLAKE3 hash of content.
-    pub fn hash_content(content: &str) -> BlockHash {
-        blake3::hash(content.as_bytes()).into()
+    pub fn hash_content<T: AsRef<[u8]>>(content: T) -> BlockHash {
+        blake3::hash(content.as_ref()).into()
     }
 
     /// Gets a cached entry for a file.
