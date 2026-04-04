@@ -396,7 +396,7 @@ impl<'a> LintContext<'a> {
             }
             NodeType::Link | NodeType::Image => {
                 let url = node.url().unwrap_or("").to_string();
-                let title = node.title().map(|s| s.to_string());
+                let title = node.title().map(String::from);
                 structure.links.push(LinkInfo {
                     url,
                     title,
@@ -405,7 +405,7 @@ impl<'a> LintContext<'a> {
                 });
             }
             NodeType::CodeBlock => {
-                let lang = node.lang().map(|s| s.to_string());
+                let lang = node.lang().map(String::from);
                 structure.code_blocks.push(CodeBlockInfo {
                     lang,
                     span: node.span,
