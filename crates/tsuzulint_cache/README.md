@@ -157,7 +157,7 @@ use std::collections::HashMap;
 let mut manager = CacheManager::new(".cache/tsuzulint")?;
 
 // Calculate content hash
-let content_hash = CacheManager::hash_content("source text");
+let content_hash = CacheManager::hash_content(b"source text");
 
 // Check cache
 if let Some(entry) = manager.get("path/to/file.md") {

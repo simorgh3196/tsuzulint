@@ -61,8 +61,8 @@ impl CacheManager {
     }
 
     /// Computes the BLAKE3 hash of content.
-    pub fn hash_content(content: &str) -> BlockHash {
-        blake3::hash(content.as_bytes()).into()
+    pub fn hash_content(content: &[u8]) -> BlockHash {
+        blake3::hash(content).into()
     }
 
     /// Gets a cached entry for a file.
@@ -392,9 +392,9 @@ mod tests {
 
     #[test]
     fn test_hash_content() {
-        let hash1 = CacheManager::hash_content("hello");
-        let hash2 = CacheManager::hash_content("hello");
-        let hash3 = CacheManager::hash_content("world");
+        let hash1 = CacheManager::hash_content(b"hello");
+        let hash2 = CacheManager::hash_content(b"hello");
+        let hash3 = CacheManager::hash_content(b"world");
 
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn test_hash_content_empty() {
-        let hash = CacheManager::hash_content("");
+        let hash = CacheManager::hash_content(b"");
         // Empty string should still produce a valid hash
         assert_eq!(hash.len(), 32);
         assert_ne!(hash, [0; 32]);
@@ -518,9 +518,9 @@ mod tests {
 
     #[test]
     fn test_hash_content_unicode() {
-        let hash1 = CacheManager::hash_content("日本語");
-        let hash2 = CacheManager::hash_content("日本語");
-        let hash3 = CacheManager::hash_content("中文");
+        let hash1 = CacheManager::hash_content("日本語".as_bytes());
+        let hash2 = CacheManager::hash_content("日本語".as_bytes());
+        let hash3 = CacheManager::hash_content("中文".as_bytes());
 
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
