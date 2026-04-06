@@ -47,7 +47,10 @@ fn read_wasm_bounded(path: &Path) -> Result<Vec<u8>, DownloadError> {
     let metadata = file.metadata().map_err(DownloadError::IoError)?;
 
     if metadata.len() > crate::downloader::DEFAULT_MAX_SIZE {
-        return Err(DownloadError::TooLarge { size: metadata.len(), max: crate::downloader::DEFAULT_MAX_SIZE });
+        return Err(DownloadError::TooLarge {
+            size: metadata.len(),
+            max: crate::downloader::DEFAULT_MAX_SIZE,
+        });
     }
 
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
@@ -57,7 +60,10 @@ fn read_wasm_bounded(path: &Path) -> Result<Vec<u8>, DownloadError> {
         .map_err(DownloadError::IoError)?;
 
     if bytes.len() as u64 > crate::downloader::DEFAULT_MAX_SIZE {
-        return Err(DownloadError::TooLarge { size: bytes.len() as u64, max: crate::downloader::DEFAULT_MAX_SIZE });
+        return Err(DownloadError::TooLarge {
+            size: bytes.len() as u64,
+            max: crate::downloader::DEFAULT_MAX_SIZE,
+        });
     }
 
     Ok(bytes)
@@ -444,7 +450,8 @@ mod tests {
         let wasm_path = dir.path().join("rule.wasm");
 
         let file = std::fs::File::create(&wasm_path).unwrap();
-        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1).unwrap();
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1)
+            .unwrap();
 
         let manifest = json!({
             "rule": {
