@@ -6,6 +6,7 @@ use crate::error::FetchError;
 use crate::fetcher::ManifestFetcher;
 use crate::manifest::{ExternalRuleManifest, HashVerifier, IntegrityError};
 use crate::security::validate_local_wasm_path;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -39,6 +40,27 @@ pub struct ResolvedPlugin {
     pub manifest_path: PathBuf,
     pub manifest: ExternalRuleManifest,
     pub alias: String,
+}
+
+fn read_wasm_bounded(path: &Path) -> Result<Vec<u8>, DownloadError> {
+    let mut file = std::fs::File::open(path).map_err(DownloadError::IoError)?;
+    let metadata = file.metadata().map_err(DownloadError::IoError)?;
+
+    if metadata.len() > crate::downloader::DEFAULT_MAX_SIZE {
+        return Err(DownloadError::TooLarge { size: metadata.len(), max: crate::downloader::DEFAULT_MAX_SIZE });
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    (&mut file)
+        .take(crate::downloader::DEFAULT_MAX_SIZE + 1)
+        .read_to_end(&mut bytes)
+        .map_err(DownloadError::IoError)?;
+
+    if bytes.len() as u64 > crate::downloader::DEFAULT_MAX_SIZE {
+        return Err(DownloadError::TooLarge { size: bytes.len() as u64, max: crate::downloader::DEFAULT_MAX_SIZE });
+    }
+
+    Ok(bytes)
 }
 
 pub struct PluginResolver {
@@ -164,7 +186,7 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            match read_wasm_bounded(&cached.wasm_path) {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -233,7 +255,7 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let bytes = read_wasm_bounded(&wasm_path)?;
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -413,6 +435,44 @@ mod tests {
             wasm_path.canonicalize().unwrap()
         );
         assert_eq!(resolved.alias, "local-alias");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_wasm_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let file = std::fs::File::create(&wasm_path).unwrap();
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 1).unwrap();
+
+        let manifest = json!({
+            "rule": {
+                "name": "local-rule",
+                "version": "1.0.0",
+            },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
+        let spec = PluginSpec::parse(&json!({
+            "path": manifest_path.to_str().unwrap(),
+            "as": "local-alias"
+        }))
+        .unwrap();
+
+        let result = resolver.resolve(&spec).await;
+        assert!(matches!(
+            result,
+            Err(ResolveError::DownloadError(DownloadError::TooLarge { .. }))
+        ));
     }
 
     #[tokio::test]
