@@ -82,7 +82,7 @@ pub fn validate_local_wasm_path(
 ) -> Result<PathBuf, SecurityError> {
     if wasm_relative.is_absolute() || wasm_relative.has_root() {
         return Err(SecurityError::AbsolutePathNotAllowed(
-            wasm_relative.to_string_lossy().into_owned(),
+            wasm_relative.to_string_lossy().to_string(),
         ));
     }
 
@@ -91,7 +91,7 @@ pub fn validate_local_wasm_path(
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
         return Err(SecurityError::ParentDirNotAllowed(
-            wasm_relative.to_string_lossy().into_owned(),
+            wasm_relative.to_string_lossy().to_string(),
         ));
     }
 
@@ -99,22 +99,22 @@ pub fn validate_local_wasm_path(
 
     if !wasm_path.exists() {
         return Err(SecurityError::FileNotFound {
-            path: wasm_path.to_string_lossy().into_owned(),
+            path: wasm_path.to_string_lossy().to_string(),
         });
     }
 
     let manifest_canon = manifest_dir
         .canonicalize()
         .map_err(|_| SecurityError::PathTraversal {
-            path: wasm_path.to_string_lossy().into_owned(),
-            base: manifest_dir.to_string_lossy().into_owned(),
+            path: wasm_path.to_string_lossy().to_string(),
+            base: manifest_dir.to_string_lossy().to_string(),
         })?;
 
     let wasm_canon = wasm_path
         .canonicalize()
         .map_err(|_| SecurityError::PathTraversal {
-            path: wasm_path.to_string_lossy().into_owned(),
-            base: manifest_dir.to_string_lossy().into_owned(),
+            path: wasm_path.to_string_lossy().to_string(),
+            base: manifest_dir.to_string_lossy().to_string(),
         })?;
 
     if !wasm_canon.starts_with(&manifest_canon) {

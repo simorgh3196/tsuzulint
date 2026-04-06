@@ -93,7 +93,7 @@ pub fn lint_file_internal(
         )));
     }
 
-    let content_hash = CacheManager::hash_content(content.as_bytes());
+    let content_hash = CacheManager::hash_content(&content);
     let rule_versions = super::rule_loader::get_rule_versions_from_host(host);
 
     {

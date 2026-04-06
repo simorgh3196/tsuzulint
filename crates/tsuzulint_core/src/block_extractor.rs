@@ -18,8 +18,13 @@ pub fn extract_blocks(ast: &TxtNode, content: &str) -> Vec<BlockCacheEntry> {
         let content_bytes = content.as_bytes();
 
         if start <= content_bytes.len() && end <= content_bytes.len() && start <= end {
-            let bytes = &content_bytes[start..end];
-            let hash = CacheManager::hash_content(bytes);
+            let hash = if let Some(slice) = content.get(start..end) {
+                CacheManager::hash_content(slice)
+            } else {
+                let bytes = &content_bytes[start..end];
+                let block_content = String::from_utf8_lossy(bytes);
+                CacheManager::hash_content(&block_content)
+            };
 
             blocks.push(BlockCacheEntry {
                 hash,
