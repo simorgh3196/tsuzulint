@@ -164,7 +164,7 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            match read_wasm_bounded(&cached.wasm_path) {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -209,6 +209,38 @@ impl PluginResolver {
         })
     }
 
+}
+
+fn read_wasm_bounded(path: &Path) -> Result<Vec<u8>, DownloadError> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(DownloadError::IoError)?;
+    let metadata = file.metadata().map_err(DownloadError::IoError)?;
+    let max_size = crate::downloader::DEFAULT_MAX_SIZE;
+
+    if metadata.len() > max_size {
+        return Err(DownloadError::TooLarge {
+            size: metadata.len(),
+            max: max_size,
+        });
+    }
+
+    let mut buffer = Vec::with_capacity(metadata.len() as usize);
+    let bytes_read = file
+        .take(max_size + 1)
+        .read_to_end(&mut buffer)
+        .map_err(DownloadError::IoError)?;
+
+    if bytes_read as u64 > max_size {
+        return Err(DownloadError::TooLarge {
+            size: bytes_read as u64,
+            max: max_size,
+        });
+    }
+
+    Ok(buffer)
+}
+
+impl PluginResolver {
     fn resolve_local(
         &self,
         manifest_path: &Path,
@@ -233,7 +265,7 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let bytes = read_wasm_bounded(&wasm_path)?;
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -730,6 +762,62 @@ mod tests {
 
         let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
+    }
+
+    #[test]
+    fn test_read_wasm_bounded_metadata_too_large() {
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("too_large.wasm");
+        let file = std::fs::File::create(&wasm_path).unwrap();
+
+        let max_size = crate::downloader::DEFAULT_MAX_SIZE;
+        file.set_len(max_size + 1).unwrap();
+
+        let result = read_wasm_bounded(&wasm_path);
+        match result {
+            Err(DownloadError::TooLarge { size, max }) => {
+                assert_eq!(size, max_size + 1);
+                assert_eq!(max, max_size);
+            }
+            res => panic!("Expected TooLarge error, got {:?}", res),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_read_wasm_bounded_content_too_large() {
+        use std::io::Write;
+        use rustix::fs::{mknodat, CWD, FileType, Mode};
+
+        let dir = tempdir().unwrap();
+        let fifo_path = dir.path().join("fifo.wasm");
+
+        mknodat(CWD, &fifo_path, FileType::Fifo, Mode::from_raw_mode(0o666), 0).unwrap();
+
+        let max_size = crate::downloader::DEFAULT_MAX_SIZE;
+
+        // Open fifo for writing and reading
+        // It's a fifo, so opening for write blocks until read, we need threads.
+        let fifo_path_clone = fifo_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(mut writer) = std::fs::OpenOptions::new().write(true).open(&fifo_path_clone) {
+                let chunk = vec![0u8; 1024 * 1024]; // 1MB chunks
+                for _ in 0..(max_size / (1024 * 1024) + 1) {
+                    if writer.write_all(&chunk).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let result = read_wasm_bounded(&fifo_path);
+        match result {
+            Err(DownloadError::TooLarge { size, max }) => {
+                assert!(size > max_size);
+                assert_eq!(max, max_size);
+            }
+            res => panic!("Expected TooLarge error, got {:?}", res),
+        }
     }
 
     #[tokio::test]

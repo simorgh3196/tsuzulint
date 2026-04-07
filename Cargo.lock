@@ -4636,6 +4636,7 @@ dependencies = [
  "miette",
  "proptest",
  "reqwest 0.12.28",
+ "rustix 0.38.44",
  "serde",
  "serde_json",
  "tempfile",

@@ -29,3 +29,6 @@ url = "2.5.8"
 wiremock.workspace = true
 proptest = "1.10"
 tempfile.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "0.38.44", features = ["fs"] }
