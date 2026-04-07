@@ -208,7 +208,6 @@ impl PluginResolver {
             alias,
         })
     }
-
 }
 
 fn read_wasm_bounded(path: &Path) -> Result<Vec<u8>, DownloadError> {
@@ -783,16 +782,23 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_read_wasm_bounded_content_too_large() {
+        use rustix::fs::{CWD, FileType, Mode, mknodat};
         use std::io::Write;
-        use rustix::fs::{mknodat, CWD, FileType, Mode};
 
         let dir = tempdir().unwrap();
         let fifo_path = dir.path().join("fifo.wasm");
 
-        mknodat(CWD, &fifo_path, FileType::Fifo, Mode::from_raw_mode(0o666), 0).unwrap();
+        mknodat(
+            CWD,
+            &fifo_path,
+            FileType::Fifo,
+            Mode::from_raw_mode(0o666),
+            0,
+        )
+        .unwrap();
 
         let max_size = crate::downloader::DEFAULT_MAX_SIZE;
 
@@ -800,7 +806,10 @@ mod tests {
         // It's a fifo, so opening for write blocks until read, we need threads.
         let fifo_path_clone = fifo_path.clone();
         std::thread::spawn(move || {
-            if let Ok(mut writer) = std::fs::OpenOptions::new().write(true).open(&fifo_path_clone) {
+            if let Ok(mut writer) = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&fifo_path_clone)
+            {
                 let chunk = vec![0u8; 1024 * 1024]; // 1MB chunks
                 for _ in 0..(max_size / (1024 * 1024) + 1) {
                     if writer.write_all(&chunk).is_err() {
