@@ -92,7 +92,7 @@ impl PluginResolver {
 
         match &spec.source {
             PluginSource::GitHub { version, .. } => {
-                let version_str = version.as_ref().unwrap_or(&manifest.rule.version).clone();
+                let version_str = version.clone().unwrap_or_else(|| manifest.rule.version.clone());
                 self.resolve_remote(&fetcher_source, &version_str, manifest, alias)
                     .await
             }
