@@ -69,14 +69,18 @@ impl Tokenizer {
                 .iter()
                 .take(4)
                 .filter(|s| **s != "*")
-                .map(|s| s.to_string())
+                // Use String::from(*s) instead of s.to_string() for &&str to bypass the
+                // unspecialized Display formatter overhead for double references.
+                .map(|s| String::from(*s))
                 .collect();
 
             let detail: Vec<String> = details
                 .iter()
                 .skip(4)
                 .filter(|s| **s != "*")
-                .map(|s| s.to_string())
+                // Use String::from(*s) instead of s.to_string() for &&str to bypass the
+                // unspecialized Display formatter overhead for double references.
+                .map(|s| String::from(*s))
                 .collect();
 
             let span = lindera_token.byte_start..lindera_token.byte_end;
