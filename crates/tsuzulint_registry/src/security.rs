@@ -32,13 +32,13 @@ pub fn check_ip(ip: std::net::IpAddr) -> Result<(), SecurityError> {
             }
         }
         std::net::IpAddr::V6(ipv6) => {
-            // Check for IPv6-mapped IPv4 addresses (e.g., ::ffff:127.0.0.1)
-            // These must be checked as IPv4 to prevent SSRF bypass
-            if let Some(ipv4) = ipv6.to_ipv4_mapped() {
-                return check_ip(std::net::IpAddr::V4(ipv4));
-            }
             if ipv6.is_loopback() || ipv6.is_unspecified() {
                 return Err(SecurityError::LoopbackDenied(ipv6.to_string()));
+            }
+            // Check for both IPv4-compatible (::a.b.c.d) and IPv4-mapped (::ffff:a.b.c.d)
+            // These must be checked as IPv4 to prevent SSRF bypass
+            if let Some(ipv4) = ipv6.to_ipv4() {
+                return check_ip(std::net::IpAddr::V4(ipv4));
             }
             // Unique local (fc00::/7)
             if (ipv6.segments()[0] & 0xfe00) == 0xfc00 || ipv6.is_unicast_link_local() {
@@ -307,6 +307,13 @@ mod tests {
 
     #[test]
     fn test_check_ip_ipv4_mapped_ipv6() {
+        // IPv4-compatible loopback
+        let ip: std::net::IpAddr = "::127.0.0.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::LoopbackDenied(_))),
+            "::127.0.0.1 should be denied as loopback"
+        );
+
         // IPv4-mapped loopback
         let ip: std::net::IpAddr = "::ffff:127.0.0.1".parse().unwrap();
         assert!(
