@@ -92,7 +92,9 @@ impl PluginResolver {
 
         match &spec.source {
             PluginSource::GitHub { version, .. } => {
-                let version_str = version.as_ref().unwrap_or(&manifest.rule.version).clone();
+                let version_str = version
+                    .clone()
+                    .unwrap_or_else(|| manifest.rule.version.clone());
                 self.resolve_remote(&fetcher_source, &version_str, manifest, alias)
                     .await
             }
@@ -112,21 +114,7 @@ impl PluginResolver {
 
     fn prepare_source(&self, source: &PluginSource) -> (PluginSource, Option<PathBuf>) {
         match source {
-            PluginSource::GitHub {
-                owner,
-                repo,
-                version,
-                server_url,
-            } => (
-                PluginSource::GitHub {
-                    owner: owner.clone(),
-                    repo: repo.clone(),
-                    version: version.clone(),
-                    server_url: server_url.clone(),
-                },
-                None,
-            ),
-            PluginSource::Url(url) => (PluginSource::Url(url.clone()), None),
+            PluginSource::GitHub { .. } | PluginSource::Url(_) => (source.clone(), None),
             PluginSource::Path(path) => {
                 let p = if path.is_dir() {
                     path.join("tsuzulint-rule.json")

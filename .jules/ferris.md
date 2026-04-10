@@ -1,0 +1,3 @@
+## 2025-04-10 - Idiomatic Enum Cloning and Lazy Evaluation
+**Learning:** When an enum derives `Clone` (like `PluginSource`), you can clone the entire instance directly instead of manually destructuring and cloning individual fields inside `match` arms. Also, when providing a fallback that requires an allocation (like string cloning), `unwrap_or_else(|| fallback.clone())` should be used instead of `unwrap_or(&fallback).clone()` to avoid eager allocation.
+**Action:** Replaced destructuring of `PluginSource::GitHub` and `PluginSource::Url` with `source.clone()`, and updated `version` fallback in `tsuzulint_registry/src/resolver.rs` to use `unwrap_or_else()`.
