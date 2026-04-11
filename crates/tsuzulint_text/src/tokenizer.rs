@@ -69,14 +69,14 @@ impl Tokenizer {
                 .iter()
                 .take(4)
                 .filter(|s| **s != "*")
-                .map(|s| s.to_string())
+                .map(|s| String::from(*s))
                 .collect();
 
             let detail: Vec<String> = details
                 .iter()
                 .skip(4)
                 .filter(|s| **s != "*")
-                .map(|s| s.to_string())
+                .map(|s| String::from(*s))
                 .collect();
 
             let span = lindera_token.byte_start..lindera_token.byte_end;
