@@ -437,16 +437,12 @@ mod tests {
 
     #[test]
     fn apply_fixes_to_file_success() {
-        use std::io::Write;
-        use tempfile::NamedTempFile;
+        use tempfile::tempdir;
 
-        // Create a temporary file with content
-        let mut file = NamedTempFile::new().expect("Failed to create temp file");
-        write!(file, "Hello World").expect("Failed to write to temp file");
-
-        // Close the file handle but keep the path valid for the test duration
-        // This is important for Windows where open file handles prevent other access
-        let path = file.into_temp_path();
+        // Create a temporary file within a directory
+        let dir = tempdir().expect("Failed to create temp dir");
+        let path = dir.path().join("test_file.txt");
+        fs::write(&path, "Hello World").expect("Failed to write to temp file");
 
         // Create diagnostic with fix: replace "World" [6..11] with "Rust"
         let diagnostics = vec![make_diagnostic_with_fix(6, 11, "Rust")];
@@ -466,14 +462,11 @@ mod tests {
 
     #[test]
     fn apply_fixes_to_file_no_changes() {
-        use std::io::Write;
-        use tempfile::NamedTempFile;
+        use tempfile::tempdir;
 
-        let mut file = NamedTempFile::new().expect("Failed to create temp file");
-        write!(file, "Hello World").expect("Failed to write to temp file");
-
-        // Close the file handle but keep the path valid
-        let path = file.into_temp_path();
+        let dir = tempdir().expect("Failed to create temp dir");
+        let path = dir.path().join("test_file.txt");
+        fs::write(&path, "Hello World").expect("Failed to write to temp file");
 
         // No diagnostics
         let diagnostics: Vec<Diagnostic> = vec![];
