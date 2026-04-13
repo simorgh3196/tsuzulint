@@ -32,13 +32,14 @@ pub fn check_ip(ip: std::net::IpAddr) -> Result<(), SecurityError> {
             }
         }
         std::net::IpAddr::V6(ipv6) => {
-            // Check for IPv6-mapped IPv4 addresses (e.g., ::ffff:127.0.0.1)
-            // These must be checked as IPv4 to prevent SSRF bypass
-            if let Some(ipv4) = ipv6.to_ipv4_mapped() {
-                return check_ip(std::net::IpAddr::V4(ipv4));
-            }
             if ipv6.is_loopback() || ipv6.is_unspecified() {
                 return Err(SecurityError::LoopbackDenied(ipv6.to_string()));
+            }
+            // Check for IPv6-mapped IPv4 addresses (e.g., ::ffff:127.0.0.1)
+            // and IPv4-compatible IPv6 addresses (e.g., ::127.0.0.1)
+            // These must be checked as IPv4 to prevent SSRF bypass
+            if let Some(ipv4) = ipv6.to_ipv4() {
+                return check_ip(std::net::IpAddr::V4(ipv4));
             }
             // Unique local (fc00::/7)
             if (ipv6.segments()[0] & 0xfe00) == 0xfc00 || ipv6.is_unicast_link_local() {
@@ -302,6 +303,59 @@ mod tests {
         assert!(
             check_ip(ip).is_ok(),
             "2001:4860:4860::8888 should be allowed"
+        );
+    }
+
+    #[test]
+    fn test_check_ip_ipv4_compatible_ipv6() {
+        // IPv4-compatible loopback
+        let ip: std::net::IpAddr = "::127.0.0.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::LoopbackDenied(_))),
+            "::127.0.0.1 should be denied as loopback"
+        );
+
+        // IPv4-compatible private (10.0.0.0/8)
+        let ip: std::net::IpAddr = "::10.0.0.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::PrivateIpDenied(_))),
+            "::10.0.0.1 should be denied as private"
+        );
+
+        // IPv4-compatible private (172.16.0.0/12)
+        let ip: std::net::IpAddr = "::172.16.0.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::PrivateIpDenied(_))),
+            "::172.16.0.1 should be denied as private"
+        );
+
+        // IPv4-compatible private (192.168.0.0/16)
+        let ip: std::net::IpAddr = "::192.168.1.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::PrivateIpDenied(_))),
+            "::192.168.1.1 should be denied as private"
+        );
+
+        // IPv4-compatible link-local
+        let ip: std::net::IpAddr = "::169.254.1.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::PrivateIpDenied(_))),
+            "::169.254.1.1 should be denied as link-local"
+        );
+
+        // IPv4-compatible unspecified
+        // Note: ::0.0.0.0 parses correctly as ::
+        let ip: std::net::IpAddr = "::0.0.0.0".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::LoopbackDenied(_))),
+            "::0.0.0.0 should be denied as unspecified"
+        );
+
+        // IPv4-compatible public
+        let ip: std::net::IpAddr = "::8.8.8.8".parse().unwrap();
+        assert!(
+            check_ip(ip).is_ok(),
+            "::8.8.8.8 should be allowed as public"
         );
     }
 
