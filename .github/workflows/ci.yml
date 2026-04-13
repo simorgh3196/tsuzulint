@@ -106,7 +106,7 @@ jobs:
           target: wasm32-unknown-unknown,wasm32-wasip1
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        uses: taiki-e/install-action@wasm-pack
       - name: Build WASM
         run: wasm-pack build crates/tsuzulint_wasm --target web
 
