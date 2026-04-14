@@ -119,8 +119,8 @@ pub fn validate_local_wasm_path(
 
     if !wasm_canon.starts_with(&manifest_canon) {
         return Err(SecurityError::PathTraversal {
-            path: wasm_path.display().to_string(),
-            base: manifest_dir.display().to_string(),
+            path: wasm_path.to_string_lossy().into_owned(),
+            base: manifest_dir.to_string_lossy().into_owned(),
         });
     }
 
