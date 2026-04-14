@@ -373,4 +373,25 @@ mod tests {
             "::10.0.0.1 should be denied as private"
         );
     }
+
+    #[test]
+    fn test_validate_local_wasm_path_absolute() {
+        let manifest_dir = std::path::PathBuf::from("/base/dir");
+        let result = validate_local_wasm_path(std::path::Path::new("/absolute/path.wasm"), &manifest_dir);
+        assert!(matches!(result, Err(SecurityError::AbsolutePathNotAllowed(_))));
+    }
+
+    #[test]
+    fn test_validate_local_wasm_path_parent_dir() {
+        let manifest_dir = std::path::PathBuf::from("/base/dir");
+        let result = validate_local_wasm_path(std::path::Path::new("../parent/path.wasm"), &manifest_dir);
+        assert!(matches!(result, Err(SecurityError::ParentDirNotAllowed(_))));
+    }
+
+    #[test]
+    fn test_validate_local_wasm_path_not_found() {
+        let manifest_dir = std::path::PathBuf::from("/base/dir");
+        let result = validate_local_wasm_path(std::path::Path::new("not_found.wasm"), &manifest_dir);
+        assert!(matches!(result, Err(SecurityError::FileNotFound { .. })));
+    }
 }
