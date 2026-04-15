@@ -830,7 +830,8 @@ mod tests {
         let spec = PluginSpec::parse(&serde_json::json!({
             "path": manifest_path.to_str().unwrap(),
             "as": "local-rule"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let result = resolver.resolve(&spec).await;
 
