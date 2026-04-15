@@ -219,7 +219,29 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let file = std::fs::File::open(&wasm_path).map_err(DownloadError::IoError)?;
+        let metadata = file.metadata().map_err(DownloadError::IoError)?;
+
+        let max_size = crate::downloader::DEFAULT_MAX_SIZE;
+        if metadata.len() > max_size {
+            return Err(ResolveError::DownloadError(DownloadError::TooLarge {
+                size: metadata.len(),
+                max: max_size,
+            }));
+        }
+
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        use std::io::Read;
+        std::io::Read::take(file, max_size + 1)
+            .read_to_end(&mut bytes)
+            .map_err(DownloadError::IoError)?;
+
+        if bytes.len() as u64 > max_size {
+            return Err(ResolveError::DownloadError(DownloadError::TooLarge {
+                size: bytes.len() as u64,
+                max: max_size,
+            }));
+        }
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
