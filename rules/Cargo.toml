@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["rules-pdk", "no-todo", "sentence-length", "no-doubled-joshi"]
+members = [
+    "rules-pdk",
+    "no-todo",
+    "sentence-length",
+    "no-doubled-joshi",
+    "max-ten",
+]
 
 [workspace.package]
 version = "0.1.0"
