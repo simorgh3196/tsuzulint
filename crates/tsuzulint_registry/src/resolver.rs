@@ -219,7 +219,29 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let file = std::fs::File::open(&wasm_path).map_err(DownloadError::IoError)?;
+        let metadata = file.metadata().map_err(DownloadError::IoError)?;
+
+        let max_size = crate::downloader::DEFAULT_MAX_SIZE;
+        if metadata.len() > max_size {
+            return Err(ResolveError::DownloadError(DownloadError::TooLarge {
+                size: metadata.len(),
+                max: max_size,
+            }));
+        }
+
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        use std::io::Read;
+        std::io::Read::take(file, max_size + 1)
+            .read_to_end(&mut bytes)
+            .map_err(DownloadError::IoError)?;
+
+        if bytes.len() as u64 > max_size {
+            return Err(ResolveError::DownloadError(DownloadError::TooLarge {
+                size: bytes.len() as u64,
+                max: max_size,
+            }));
+        }
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -779,5 +801,47 @@ mod tests {
         assert!(resolved2.wasm_path.exists());
         let wasm_bytes = std::fs::read(&resolved2.wasm_path).unwrap();
         assert_eq!(wasm_bytes, wasm_content);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_too_large() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        // Create a file larger than max size
+        let max_size = crate::downloader::DEFAULT_MAX_SIZE;
+        let file = std::fs::File::create(&wasm_path).unwrap();
+        file.set_len(max_size + 1).unwrap();
+
+        let manifest = serde_json::json!({
+            "rule": {
+                "name": "local-rule",
+                "version": "1.0.0",
+            },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": HashVerifier::compute(b"") // hash doesn't matter, we should fail before verifying
+            }]
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        let resolver = PluginResolver::new().unwrap();
+        let spec = PluginSpec::parse(&serde_json::json!({
+            "path": manifest_path.to_str().unwrap(),
+            "as": "local-rule"
+        }))
+        .unwrap();
+
+        let result = resolver.resolve(&spec).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ResolveError::DownloadError(DownloadError::TooLarge { size, max }) => {
+                assert_eq!(size, max_size + 1);
+                assert_eq!(max, max_size);
+            }
+            e => panic!("Expected DownloadError::TooLarge, got {:?}", e),
+        }
     }
 }
