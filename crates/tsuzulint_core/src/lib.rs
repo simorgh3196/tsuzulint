@@ -45,7 +45,8 @@ mod safe_io;
 pub mod walker;
 
 pub use config::{
-    CacheConfig, CacheConfigDetail, LinterConfig, RuleDefinition, RuleDefinitionDetail,
+    CacheConfig, CacheConfigDetail, LinterConfig, MAX_CONFIG_SIZE, RuleDefinition,
+    RuleDefinitionDetail,
 };
 pub use context::{CodeBlockInfo, DocumentStructure, HeadingInfo, LineInfo, LinkInfo, LintContext};
 pub use error::LinterError;
