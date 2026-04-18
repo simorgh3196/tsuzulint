@@ -41,7 +41,6 @@ pub mod resolver;
 mod result;
 mod rule_loader;
 pub mod rule_manifest;
-mod safe_io;
 pub mod walker;
 
 pub use config::{

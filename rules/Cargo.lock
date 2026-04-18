@@ -527,18 +527,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tsuzulint-rule-max-ten"
-version = "0.1.0"
-dependencies = [
- "extism-pdk",
- "pretty_assertions",
- "rmp-serde",
- "serde",
- "serde_json",
- "tsuzulint-rule-pdk",
-]
-
-[[package]]
 name = "tsuzulint-rule-no-doubled-joshi"
 version = "0.1.0"
 dependencies = [
