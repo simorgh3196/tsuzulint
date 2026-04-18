@@ -171,7 +171,7 @@ mod tests {
         let mut config = LinterConfig::new();
         config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
             enabled: true,
-            path: temp_dir.path().to_string_lossy().to_string(),
+            path: temp_dir.path().to_string_lossy().into_owned(),
         });
         (config, temp_dir)
     }
@@ -421,7 +421,7 @@ mod tests {
                 github: None,
                 server_url: None,
                 url: None,
-                path: Some(abs_manifest_path.to_string_lossy().to_string()),
+                path: Some(abs_manifest_path.to_string_lossy().into_owned()),
                 r#as: None,
             },
         ));

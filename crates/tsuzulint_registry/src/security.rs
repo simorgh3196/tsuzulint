@@ -82,7 +82,7 @@ pub fn validate_local_wasm_path(
 ) -> Result<PathBuf, SecurityError> {
     if wasm_relative.is_absolute() || wasm_relative.has_root() {
         return Err(SecurityError::AbsolutePathNotAllowed(
-            wasm_relative.to_string_lossy().to_string(),
+            wasm_relative.to_string_lossy().into_owned(),
         ));
     }
 
@@ -91,7 +91,7 @@ pub fn validate_local_wasm_path(
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
         return Err(SecurityError::ParentDirNotAllowed(
-            wasm_relative.to_string_lossy().to_string(),
+            wasm_relative.to_string_lossy().into_owned(),
         ));
     }
 
@@ -99,28 +99,28 @@ pub fn validate_local_wasm_path(
 
     if !wasm_path.exists() {
         return Err(SecurityError::FileNotFound {
-            path: wasm_path.to_string_lossy().to_string(),
+            path: wasm_path.to_string_lossy().into_owned(),
         });
     }
 
     let manifest_canon = manifest_dir
         .canonicalize()
         .map_err(|_| SecurityError::PathTraversal {
-            path: wasm_path.to_string_lossy().to_string(),
-            base: manifest_dir.to_string_lossy().to_string(),
+            path: wasm_path.to_string_lossy().into_owned(),
+            base: manifest_dir.to_string_lossy().into_owned(),
         })?;
 
     let wasm_canon = wasm_path
         .canonicalize()
         .map_err(|_| SecurityError::PathTraversal {
-            path: wasm_path.to_string_lossy().to_string(),
-            base: manifest_dir.to_string_lossy().to_string(),
+            path: wasm_path.to_string_lossy().into_owned(),
+            base: manifest_dir.to_string_lossy().into_owned(),
         })?;
 
     if !wasm_canon.starts_with(&manifest_canon) {
         return Err(SecurityError::PathTraversal {
-            path: wasm_path.display().to_string(),
-            base: manifest_dir.display().to_string(),
+            path: wasm_path.to_string_lossy().into_owned(),
+            base: manifest_dir.to_string_lossy().into_owned(),
         });
     }
 
@@ -372,5 +372,55 @@ mod tests {
             matches!(check_ip(ip), Err(SecurityError::PrivateIpDenied(_))),
             "::10.0.0.1 should be denied as private"
         );
+    }
+
+    #[test]
+    fn test_validate_local_wasm_path_absolute() {
+        let manifest_dir = std::path::PathBuf::from("/base/dir");
+        let result =
+            validate_local_wasm_path(std::path::Path::new("/absolute/path.wasm"), &manifest_dir);
+        assert!(matches!(
+            result,
+            Err(SecurityError::AbsolutePathNotAllowed(_))
+        ));
+    }
+
+    #[test]
+    fn test_validate_local_wasm_path_parent_dir() {
+        let manifest_dir = std::path::PathBuf::from("/base/dir");
+        let result =
+            validate_local_wasm_path(std::path::Path::new("../parent/path.wasm"), &manifest_dir);
+        assert!(matches!(result, Err(SecurityError::ParentDirNotAllowed(_))));
+    }
+
+    #[test]
+    fn test_validate_local_wasm_path_not_found() {
+        let manifest_dir = std::path::PathBuf::from("/base/dir");
+        let result =
+            validate_local_wasm_path(std::path::Path::new("not_found.wasm"), &manifest_dir);
+        assert!(matches!(result, Err(SecurityError::FileNotFound { .. })));
+    }
+
+    #[test]
+    fn test_validate_local_wasm_path_traversal_symlink() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_dir = temp_dir.path().join("base");
+        std::fs::create_dir(&base_dir).unwrap();
+
+        let outside_dir = temp_dir.path().join("outside");
+        std::fs::create_dir(&outside_dir).unwrap();
+
+        let outside_wasm = outside_dir.join("rule.wasm");
+        std::fs::write(&outside_wasm, "fake wasm").unwrap();
+
+        let symlink_wasm = base_dir.join("rule.wasm");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside_wasm, &symlink_wasm).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&outside_wasm, &symlink_wasm).unwrap();
+
+        let result = validate_local_wasm_path(std::path::Path::new("rule.wasm"), &base_dir);
+        assert!(matches!(result, Err(SecurityError::PathTraversal { .. })));
     }
 }
