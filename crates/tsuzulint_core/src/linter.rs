@@ -109,20 +109,16 @@ impl Linter {
 
         let enabled_rules_vec = self.config.enabled_rules();
         let enabled_rules: HashSet<&str> = enabled_rules_vec.iter().map(|(n, _)| *n).collect();
-        let rule_versions = crate::rule_loader::get_rule_versions_from_host(&host);
 
-        let mut ctx = crate::file_linter::LintContext {
+        lint_file_internal(
             path,
-            host: &mut host,
-            tokenizer: &self.tokenizer,
-            config_hash: &self.config_hash,
-            cache: &self.cache,
-            enabled_rules: &enabled_rules,
-            rule_versions: &rule_versions,
-            timings_enabled: self.config.timings,
-        };
-
-        lint_file_internal(&mut ctx)
+            &mut host,
+            &self.tokenizer,
+            &self.config_hash,
+            &self.cache,
+            &enabled_rules,
+            self.config.timings,
+        )
     }
 
     pub fn lint_patterns(&self, patterns: &[String]) -> LintFilesResult {
@@ -171,7 +167,7 @@ mod tests {
         let mut config = LinterConfig::new();
         config.cache = crate::config::CacheConfig::Detail(crate::config::CacheConfigDetail {
             enabled: true,
-            path: temp_dir.path().to_string_lossy().into_owned(),
+            path: temp_dir.path().to_string_lossy().to_string(),
         });
         (config, temp_dir)
     }
@@ -421,7 +417,7 @@ mod tests {
                 github: None,
                 server_url: None,
                 url: None,
-                path: Some(abs_manifest_path.to_string_lossy().into_owned()),
+                path: Some(abs_manifest_path.to_string_lossy().to_string()),
                 r#as: None,
             },
         ));

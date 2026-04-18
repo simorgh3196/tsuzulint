@@ -232,7 +232,7 @@ impl ArtifactLocation {
     /// Creates artifact location from path
     fn new(path: &std::path::Path) -> Self {
         Self {
-            uri: path.to_string_lossy().into_owned(),
+            uri: path.to_string_lossy().to_string(),
         }
     }
 }
