@@ -159,7 +159,7 @@ fn validate_wasm_path(path: &Path) -> Result<PathBuf, AddRuleError> {
         return Err(AddRuleError::FileNotFound(path.to_path_buf()));
     }
 
-    let ext = path.extension().map(|e| e.to_string_lossy().to_string());
+    let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
     if ext.as_deref() != Some("wasm") {
         return Err(AddRuleError::InvalidExtension(ext));
     }
@@ -271,7 +271,7 @@ pub fn run_add_rule(path: &Path, alias: Option<&str>, config_path: Option<PathBu
         let alias_str = alias.map(str::to_string).unwrap_or_else(|| {
             wasm_path
                 .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
+                .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "unnamed-rule".to_string())
         });
         warn!(
