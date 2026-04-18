@@ -76,7 +76,8 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
         )));
     }
 
-    let mut content = String::new();
+    // Initialize string with known file size to minimize reallocations and optimize performance
+    let mut content = String::with_capacity(metadata.len() as usize);
     // Clear O_NONBLOCK so that subsequent reads block normally.
     clear_nonblocking(&file).map_err(|e| {
         LinterError::file(format!(
