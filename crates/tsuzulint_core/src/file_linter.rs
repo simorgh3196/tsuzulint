@@ -424,18 +424,11 @@ fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
 /// reads block normally.  This is a no-op on non-Unix platforms.
 #[cfg(unix)]
 fn clear_nonblocking(file: &std::fs::File) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd as _;
-    let fd = file.as_raw_fd();
-    // SAFETY: `fd` is a valid, open file descriptor owned by `file`.
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags == -1 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let new_flags = flags & !libc::O_NONBLOCK;
-    // SAFETY: same fd, setting valid flags.
-    if unsafe { libc::fcntl(fd, libc::F_SETFL, new_flags) } == -1 {
-        return Err(std::io::Error::last_os_error());
-    }
+    use std::os::unix::io::AsFd;
+    let fd = file.as_fd();
+    let flags = rustix::fs::fcntl_getfl(fd)?;
+    let new_flags = flags - rustix::fs::OFlags::NONBLOCK;
+    rustix::fs::fcntl_setfl(fd, new_flags)?;
     Ok(())
 }
 
