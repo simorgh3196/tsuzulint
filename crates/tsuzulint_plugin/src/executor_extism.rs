@@ -4,13 +4,13 @@
 //! which internally uses wasmtime for JIT compilation.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use extism::{Manifest, Plugin, PluginBuilder, Wasm};
 use extism_manifest::MemoryOptions;
 use sha2::{Digest, Sha256};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::executor::{LoadResult, PluginOptions, RuleExecutor};
 use crate::{PluginError, RuleManifest};
@@ -62,6 +62,58 @@ pub struct ExtismExecutor {
     fuel_limit: Option<u64>,
 }
 
+/// Prepares the Wasmtime JIT cache directory layout under `cache_root` and
+/// returns the path to the cache `config.toml` on success.
+///
+/// Layout:
+/// ```text
+/// <cache_root>/
+///   config.toml
+///   data/            <-- wasmtime stores compiled artifacts here
+/// ```
+///
+/// Returns `None` if the directory or config file could not be created.
+/// Failures are logged via `tracing::warn!` rather than silently swallowed so
+/// operators can diagnose cache-related performance issues.
+fn prepare_cache_config(cache_root: &Path) -> Option<PathBuf> {
+    if let Err(e) = std::fs::create_dir_all(cache_root) {
+        warn!(
+            error = %e,
+            path = %cache_root.display(),
+            "wasmtime_cache_root_create_failed"
+        );
+        return None;
+    }
+
+    let data_dir = cache_root.join("data");
+    if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        warn!(
+            error = %e,
+            path = %data_dir.display(),
+            "wasmtime_cache_data_dir_create_failed"
+        );
+        return None;
+    }
+
+    let cache_config = cache_root.join("config.toml");
+    if !cache_config.exists() {
+        let contents = format!(
+            "[cache]\ndirectory = \"{}\"\n",
+            data_dir.display().to_string().replace('\\', "\\\\")
+        );
+        if let Err(e) = std::fs::write(&cache_config, contents) {
+            warn!(
+                error = %e,
+                path = %cache_config.display(),
+                "wasmtime_cache_config_write_failed"
+            );
+            return None;
+        }
+    }
+
+    Some(cache_config)
+}
+
 impl ExtismExecutor {
     /// Creates a new Extism executor.
     pub fn new() -> Self {
@@ -110,29 +162,14 @@ impl ExtismExecutor {
 
         // Enable Wasmtime JIT compilation caching
         // This dramatically reduces startup time for repeated instantiations of the same WASM.
-        let cache_dir = dirs::cache_dir()
+        let cache_root = dirs::cache_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("tsuzulint")
             .join("wasmtime_cache");
 
-        // Ensure cache directory exists, ignore if it already does
-        let _ = std::fs::create_dir_all(&cache_dir);
-
-        let cache_config = cache_dir.join("config.toml");
-        let data_dir = cache_dir.join("data");
-        let _ = std::fs::create_dir_all(&data_dir);
-
-        if !cache_config.exists() {
-            let _ = std::fs::write(
-                &cache_config,
-                format!(
-                    "[cache]\ndirectory = \"{}\"\n",
-                    data_dir.display().to_string().replace("\\", "\\\\")
-                ),
-            );
+        if let Some(cache_config) = prepare_cache_config(&cache_root) {
+            builder = builder.with_cache_config(&cache_config);
         }
-
-        builder = builder.with_cache_config(&cache_config);
 
         if let Some(limit) = self.fuel_limit {
             builder = builder.with_fuel_limit(limit);
@@ -262,5 +299,80 @@ impl RuleExecutor for ExtismExecutor {
 
     fn loaded_rules(&self) -> Vec<&str> {
         self.rules.keys().map(|s| s.as_str()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn prepare_cache_config_creates_layout_on_miss() {
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path().join("wasmtime_cache");
+        assert!(!root.exists(), "precondition: cache root should not exist");
+
+        let cfg = prepare_cache_config(&root).expect("cache config should be created on miss");
+
+        assert_eq!(cfg, root.join("config.toml"));
+        assert!(cfg.is_file(), "config.toml should exist after miss");
+        assert!(root.join("data").is_dir(), "data/ directory should exist");
+
+        let contents = std::fs::read_to_string(&cfg).expect("read config.toml");
+        assert!(
+            contents.contains("[cache]"),
+            "config should contain [cache] section, got: {contents}"
+        );
+        assert!(
+            contents.contains("directory = "),
+            "config should reference data directory, got: {contents}"
+        );
+    }
+
+    #[test]
+    fn prepare_cache_config_is_idempotent_on_hit() {
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path().join("wasmtime_cache");
+
+        // First call: cache miss -- creates the files.
+        let cfg1 = prepare_cache_config(&root).expect("first call");
+        let original = std::fs::read_to_string(&cfg1).expect("read after first call");
+        let mtime1 = std::fs::metadata(&cfg1)
+            .and_then(|m| m.modified())
+            .expect("mtime after first call");
+
+        // Second call: cache hit -- must not rewrite the existing config.
+        let cfg2 = prepare_cache_config(&root).expect("second call");
+        assert_eq!(cfg1, cfg2, "same config path returned on hit");
+
+        let after = std::fs::read_to_string(&cfg2).expect("read after second call");
+        assert_eq!(
+            original, after,
+            "config.toml contents must not change on cache hit"
+        );
+
+        let mtime2 = std::fs::metadata(&cfg2)
+            .and_then(|m| m.modified())
+            .expect("mtime after second call");
+        assert_eq!(mtime1, mtime2, "config.toml must not be rewritten on hit");
+
+        // Data dir still present.
+        assert!(root.join("data").is_dir());
+    }
+
+    #[test]
+    fn prepare_cache_config_returns_none_when_root_unwritable() {
+        // Point the cache root at a path rooted in a regular file; create_dir_all
+        // cannot create a directory underneath a file, so this forces an error.
+        let tmp = TempDir::new().expect("tempdir");
+        let blocker = tmp.path().join("blocker");
+        std::fs::write(&blocker, b"not a directory").expect("write blocker file");
+
+        let unreachable_root = blocker.join("nested").join("cache");
+        assert!(
+            prepare_cache_config(&unreachable_root).is_none(),
+            "should return None when cache root cannot be created"
+        );
     }
 }

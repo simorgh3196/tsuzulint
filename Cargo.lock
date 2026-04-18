@@ -4632,7 +4632,6 @@ dependencies = [
  "tsuzulint_ast",
  "tsuzulint_text",
  "wasmi",
- "wasmtime",
  "wat",
 ]
 
