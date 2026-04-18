@@ -284,7 +284,7 @@ mod tests {
         assert!(
             !files
                 .iter()
-                .any(|f| f.to_string_lossy().contains("node_modules"))
+                .any(|f| f.to_str().unwrap_or("").contains("node_modules"))
         );
     }
 
@@ -339,7 +339,7 @@ mod tests {
         assert!(
             !files
                 .iter()
-                .any(|f| f.to_string_lossy().contains("node_modules")),
+                .any(|f| f.to_str().unwrap_or("").contains("node_modules")),
             "excluded file should not be discovered even though it matches include glob"
         );
     }

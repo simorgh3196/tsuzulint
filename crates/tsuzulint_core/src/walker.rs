@@ -417,7 +417,7 @@ mod tests {
         assert!(
             !files
                 .iter()
-                .any(|f| f.to_string_lossy().contains("node_modules"))
+                .any(|f| f.to_str().unwrap_or("").contains("node_modules"))
         );
 
         // Regular files should be found
@@ -438,7 +438,7 @@ mod tests {
         assert!(
             files
                 .iter()
-                .any(|f| f.to_string_lossy().contains("node_modules"))
+                .any(|f| f.to_str().unwrap_or("").contains("node_modules"))
         );
     }
 
@@ -454,7 +454,7 @@ mod tests {
         // .hidden.md should be excluded
         assert!(!files.iter().any(|f| {
             f.file_name()
-                .is_some_and(|n| n.to_string_lossy() == ".hidden.md")
+                .is_some_and(|n| n.to_str().unwrap_or("") == ".hidden.md")
         }));
     }
 
@@ -470,7 +470,7 @@ mod tests {
         // .hidden.md should be included
         assert!(files.iter().any(|f| {
             f.file_name()
-                .is_some_and(|n| n.to_string_lossy() == ".hidden.md")
+                .is_some_and(|n| n.to_str().unwrap_or("") == ".hidden.md")
         }));
     }
 
