@@ -8,6 +8,10 @@ use tracing::{debug, warn};
 use tsuzulint_plugin::{Diagnostic, Fix};
 
 use crate::LinterError;
+use crate::file_linter::MAX_FILE_SIZE;
+use crate::safe_io::{
+    check_file_metadata, clear_nonblocking, handle_io_err, open_nonblocking, read_to_string_bounded,
+};
 
 /// Result of applying fixes to a file.
 #[derive(Debug)]
@@ -133,15 +137,50 @@ pub(crate) fn filter_overlapping_fixes(mut fixes: Vec<&Fix>) -> Vec<&Fix> {
     result
 }
 
+/// Reads `path` safely: rejects non-regular files (incl. FIFOs that would
+/// otherwise block), caps the read at `max_size` bytes to prevent
+/// memory-exhaustion via pseudo-files (e.g. `/dev/zero`), and uses
+/// `O_NONBLOCK` on Unix to close the TOCTOU window around the open itself.
+fn read_file_bounded(path: &Path, max_size: u64) -> Result<String, LinterError> {
+    // O_NONBLOCK open: never blocks on FIFOs or TTYs, and gives us an fd we
+    // can fstat (instead of racing a lstat/open pair).
+    let mut file = handle_io_err(open_nonblocking(path), path, "Failed to open")?;
+
+    // fstat-based metadata on the opened fd; no TOCTOU window vs. a separate
+    // lstat on `path`.  This replaces the previous
+    // `file.metadata().unwrap_or_else(|_| unreachable!())` which could panic
+    // on platforms where `fstat` can still fail after a successful open.
+    let metadata = handle_io_err(file.metadata(), path, "Failed to read metadata for")?;
+    check_file_metadata(&metadata, max_size, path)?;
+
+    // Clear O_NONBLOCK so the subsequent read can block as usual.
+    handle_io_err(
+        clear_nonblocking(&file),
+        path,
+        "Failed to clear O_NONBLOCK on",
+    )?;
+
+    // Bounded read: `/proc/version`, `/dev/zero`, and similar pseudo-files
+    // may report `metadata.len() == 0` while producing arbitrarily many
+    // bytes, so we must cap at the content level too.
+    read_to_string_bounded(&mut file, max_size, path)
+}
+
+fn apply_fixes_to_file_inner(
+    path: &Path,
+    diagnostics: &[Diagnostic],
+    max_size: u64,
+) -> Result<FixerResult, LinterError> {
+    let content = read_file_bounded(path, max_size)?;
+    Ok(apply_fixes_to_content(&content, diagnostics))
+}
+
 /// Applies fixes to a file and writes the result.
 pub fn apply_fixes_to_file(
     path: &Path,
     diagnostics: &[Diagnostic],
 ) -> Result<FixerResult, LinterError> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| LinterError::file(format!("Failed to read {}: {}", path.display(), e)))?;
-
-    let result = apply_fixes_to_content(&content, diagnostics);
+    let result = apply_fixes_to_file_inner(path, diagnostics, MAX_FILE_SIZE)?;
 
     if result.modified {
         fs::write(path, &result.fixed_content)
@@ -498,15 +537,191 @@ mod tests {
 
         let diagnostics = vec![make_diagnostic_with_fix(0, 5, "Hi")];
 
-        // This should fail to read the file
+        // This should fail to open the file
         let result = apply_fixes_to_file(&path, &diagnostics);
 
         match result {
             Err(LinterError::File(msg)) => {
-                assert!(msg.contains("Failed to read"));
+                assert!(
+                    msg.contains("Failed to open"),
+                    "Unexpected error message: {}",
+                    msg
+                );
             }
             Ok(_) => panic!("Expected LinterError::File, got Ok"),
             Err(e) => panic!("Expected LinterError::File, got {:?}", e),
         }
+    }
+
+    #[test]
+    fn apply_fixes_to_file_rejects_directory() {
+        // Directories are not regular files and must be rejected.
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let diagnostics: Vec<Diagnostic> = vec![];
+        let result = apply_fixes_to_file(dir.path(), &diagnostics);
+
+        match result {
+            Err(LinterError::File(msg)) => {
+                assert!(
+                    msg.contains("Not a regular file")
+                        || msg.contains("Failed to open")
+                        || msg.contains("Access is denied")
+                        || msg.contains("Permission denied"),
+                    "Unexpected error message: {}",
+                    msg
+                );
+            }
+            Err(e) => panic!("Expected LinterError::File, got {:?}", e),
+            Ok(_) => panic!("Expected error for directory input, got Ok"),
+        }
+    }
+
+    #[test]
+    fn apply_fixes_to_file_inner_rejects_oversized_metadata() {
+        // Simulate a file whose metadata-reported size already exceeds the
+        // limit; we must reject before ever issuing a read.
+        use tempfile::NamedTempFile;
+        let file = NamedTempFile::new().expect("Failed to create temp file");
+        file.as_file().set_len(100).expect("Failed to set len");
+        let path = file.into_temp_path();
+
+        let res = apply_fixes_to_file_inner(&path, &[], 10);
+        let msg = res.unwrap_err().to_string();
+        assert!(msg.contains("exceeds limit"), "unexpected: {msg}");
+    }
+
+    #[test]
+    fn apply_fixes_to_file_inner_rejects_oversized_content() {
+        // Write more bytes than max_size — metadata check passes (size is
+        // within limit), but the bounded read should then reject because the
+        // +1 byte makes total > max_size.
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"123456").unwrap();
+        let path = file.into_temp_path();
+
+        let res = apply_fixes_to_file_inner(&path, &[], 3);
+        let msg = res.unwrap_err().to_string();
+        assert!(msg.contains("exceeds limit"), "unexpected: {msg}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn apply_fixes_to_file_inner_proc_file_is_bounded() {
+        // /proc/version reports metadata.len() == 0 but produces many bytes
+        // when read.  With max_size = 5, metadata check passes, then the
+        // bounded read must reject the oversized content — this is the
+        // OOM-guard we rely on for /dev/zero-style pseudo-files.
+        let path = Path::new("/proc/version");
+        if path.exists() {
+            let res = apply_fixes_to_file_inner(path, &[], 5);
+            assert!(res.is_err());
+            assert!(res.unwrap_err().to_string().contains("exceeds limit"));
+        }
+    }
+
+    /// Opening a FIFO must not hang the `--fix` path.  With `O_NONBLOCK` the
+    /// open returns immediately, and `check_file_metadata` then rejects the
+    /// FIFO because it is not a regular file — all bounded by a real
+    /// wall-clock deadline to catch regressions.
+    #[test]
+    #[cfg(unix)]
+    fn apply_fixes_to_file_fifo_does_not_block() {
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let fifo = dir.path().join("fifo");
+        let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: c_path is a valid nul-terminated string.
+        let rc = unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) };
+        if rc != 0 {
+            eprintln!("mkfifo not supported; skipping");
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel();
+        let fifo_path = fifo.clone();
+        let handle = thread::spawn(move || {
+            let res = apply_fixes_to_file(&fifo_path, &[]);
+            let _ = tx.send(res);
+        });
+
+        // If the FIFO still blocks we'd hang here; 5s is generous but
+        // finite, so a regression surfaces as a test timeout rather than a
+        // hang.
+        let res = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("apply_fixes_to_file blocked on FIFO");
+        let _ = handle.join();
+
+        match res {
+            Err(LinterError::File(msg)) => {
+                assert!(
+                    msg.contains("Not a regular file") || msg.contains("Failed to open"),
+                    "unexpected error: {msg}"
+                );
+            }
+            Err(e) => panic!("Expected LinterError::File, got {e:?}"),
+            Ok(_) => panic!("FIFO should not be accepted as a fixable file"),
+        }
+    }
+
+    /// `/dev/zero` is a regular stream of NUL bytes.  Without the bounded
+    /// read, `fs::read_to_string` would allocate unbounded memory and OOM.
+    /// With the bounded read we get a clean `exceeds limit` error.
+    #[test]
+    #[cfg(unix)]
+    fn apply_fixes_to_file_dev_zero_is_bounded() {
+        let path = Path::new("/dev/zero");
+        if !path.exists() {
+            return;
+        }
+        let res = apply_fixes_to_file_inner(path, &[], 1024);
+        match res {
+            Err(LinterError::File(msg)) => {
+                // Either "Not a regular file" (if metadata reports it as a
+                // char device) or "exceeds limit" (if metadata passes but
+                // the read overflows).  Both are safe outcomes; what we
+                // must *not* see is an unbounded allocation.
+                assert!(
+                    msg.contains("Not a regular file")
+                        || msg.contains("exceeds limit")
+                        || msg.contains("Failed to read"),
+                    "unexpected error for /dev/zero: {msg}"
+                );
+            }
+            Err(e) => panic!("Expected LinterError::File, got {e:?}"),
+            Ok(_) => panic!("/dev/zero must not be accepted as a fixable file"),
+        }
+    }
+
+    /// Symlink-swap TOCTOU race: even if an attacker swaps the symlink
+    /// target between metadata and open, the fix path reads from the fd we
+    /// opened ourselves (via `open_nonblocking` + `file.metadata`), not by
+    /// reopening the path.  This test just exercises the symlink-followed
+    /// path to make sure a regular-file symlink is still accepted.
+    #[test]
+    #[cfg(unix)]
+    fn apply_fixes_to_file_follows_symlink_to_regular_file() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.txt");
+        std::fs::File::create(&real)
+            .unwrap()
+            .write_all(b"Hello World")
+            .unwrap();
+        let link = dir.path().join("link.txt");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let diagnostics = vec![make_diagnostic_with_fix(6, 11, "Rust")];
+        let result = apply_fixes_to_file(&link, &diagnostics).expect("symlink fix must succeed");
+        assert!(result.modified);
+        assert_eq!(result.fixed_content, "Hello Rust");
+
+        // The real file on disk is updated (the symlink was followed).
+        let on_disk = std::fs::read_to_string(&real).unwrap();
+        assert_eq!(on_disk, "Hello Rust");
     }
 }
