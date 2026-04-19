@@ -24,6 +24,32 @@ A high-performance natural language linter written in Rust, inspired by [textlin
 - **WASM-based rules** - Write rules in Rust or AssemblyScript, compile to WASM
 - **textlint compatibility** - Similar configuration format and rule concepts
 
+## Benchmarks
+
+TsuzuLint with the native rule engine is **100x–8000x faster** than textlint
+on identical Japanese Markdown corpora. Measured with
+[`hyperfine`](https://github.com/sharkdp/hyperfine).
+
+**Two rules** (`no-todo` + `sentence-length`):
+
+| Corpus | tsuzulint (native) | textlint | Speedup |
+| :--- | ---: | ---: | ---: |
+| 1 file · 4 KB      | 7.1 ms |  425 ms |   **60x** |
+| 10 files · 120 KB  | 6.2 ms |  585 ms |   **94x** |
+| 100 files · 1.2 MB | 7.7 ms | 1.31 s  |  **170x** |
+| 1 file · 2 MB      | 6.1 ms | 23.8 s  | **3875x** |
+
+**Preset** (`ja-technical-writing`, 10 rules incl. morphological):
+
+| Corpus | tsuzulint | textlint | Speedup |
+| :--- | ---: | ---: | ---: |
+| 1 file · 4 KB      | 1.7 ms |  814 ms |  **476x** |
+| 10 files · 120 KB  | 5.7 ms |  1.41 s |  **249x** |
+| 100 files · 1.2 MB | 6.5 ms |  6.79 s | **1039x** |
+
+See [`docs/benchmarks.md`](./docs/benchmarks.md) for methodology and
+reproduction steps. Benchmarks live in [`benches/`](./benches/).
+
 ## Installation
 
 Since this project is currently in research phase, please install from source:
@@ -155,6 +181,8 @@ graph TB
 
 ## Documentation
 
+- [Native Rules Reference](./docs/native-rules.md)
+- [Benchmarks vs textlint](./docs/benchmarks.md)
 - [Rule Development Guide](./docs/rule-development.md)
 - [Migration Guide from textlint](./docs/migration-guide.md)
 - [Architecture](./docs/architecture.md)
