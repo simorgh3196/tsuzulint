@@ -22,10 +22,12 @@
 //! assembled from the current file's AST.
 
 mod context;
+pub mod presets;
 mod registry;
 mod rule_trait;
 mod rules;
 
 pub use context::RuleContext;
+pub use presets::{PresetEntry, all_preset_names, resolve_preset};
 pub use registry::{BuiltinRegistry, builtin_registry};
 pub use rule_trait::Rule;
