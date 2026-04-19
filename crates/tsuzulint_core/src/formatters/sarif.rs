@@ -114,7 +114,7 @@ impl ToolComponent {
         let rules_vec: Vec<_> = rules.into_values().collect();
         Self {
             name: TOOL_NAME.to_string(),
-            version: option_env!("CARGO_PKG_VERSION").map(|s| s.to_string()),
+            version: option_env!("CARGO_PKG_VERSION").map(String::from),
             rules: rules_vec,
         }
     }
