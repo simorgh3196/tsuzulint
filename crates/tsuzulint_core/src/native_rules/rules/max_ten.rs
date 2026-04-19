@@ -59,7 +59,7 @@ impl Rule for MaxTen {
     }
 
     fn description(&self) -> &'static str {
-        "Limit the number of Japanese commas (読点) per sentence."
+        "一文に含まれる読点 (「、」) の数を制限する。"
     }
 
     fn lint(&self, ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
@@ -114,8 +114,8 @@ fn check_block(node: &TxtNode<'_>, source: &str, config: &Config, out: &mut Vec<
                     Diagnostic::new(
                         RULE_ID,
                         format!(
-                            "Sentence contains {} '{}' marks (limit is {}).",
-                            ten_count, config.touten, config.max
+                            "一文に「{}」が {} 個あります。上限は {} 個です。",
+                            config.touten, ten_count, config.max
                         ),
                         Span::new(abs_start as u32, abs_end as u32),
                     )

@@ -21,7 +21,7 @@ impl Rule for JaNoMixedPeriod {
     }
 
     fn description(&self) -> &'static str {
-        "Disallow mixing '。' and '.' as sentence terminators in the same document."
+        "同一ドキュメント内で句点「。」と「.」が混在することを禁止する。"
     }
 
     fn lint(&self, ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
@@ -52,8 +52,8 @@ impl Rule for JaNoMixedPeriod {
                 Diagnostic::new(
                     RULE_ID,
                     format!(
-                        "Mixed period style: this '{}' should be '{}' to match the document's dominant style.",
-                        minority_label, majority_label
+                        "句点の表記が混在しています。文書全体で多く使われている「{}」に合わせて「{}」を書き換えてください。",
+                        majority_label, minority_label
                     ),
                     Span::new(s as u32, e as u32),
                 )

@@ -25,7 +25,7 @@ impl Rule for NoHankakuKana {
     }
 
     fn description(&self) -> &'static str {
-        "Disallow half-width katakana in prose."
+        "半角カタカナの使用を禁止する (全角カタカナを推奨)。"
     }
 
     fn lint(&self, ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
@@ -59,7 +59,7 @@ fn scan(node: &TxtNode<'_>, source: &str, out: &mut Vec<Diagnostic>) {
                 out.push(
                     Diagnostic::new(
                         RULE_ID,
-                        "Half-width katakana is discouraged; prefer full-width.",
+                        "半角カタカナは推奨されません。全角カタカナを使ってください。",
                         Span::new((start + rs) as u32, (start + byte_pos) as u32),
                     )
                     .with_severity(Severity::Warning),
@@ -71,7 +71,7 @@ fn scan(node: &TxtNode<'_>, source: &str, out: &mut Vec<Diagnostic>) {
             out.push(
                 Diagnostic::new(
                     RULE_ID,
-                    "Half-width katakana is discouraged; prefer full-width.",
+                    "半角カタカナは推奨されません。全角カタカナを使ってください。",
                     Span::new((start + rs) as u32, (start + byte_pos) as u32),
                 )
                 .with_severity(Severity::Warning),

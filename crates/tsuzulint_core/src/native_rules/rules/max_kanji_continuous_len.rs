@@ -45,7 +45,7 @@ impl Rule for MaxKanjiContinuousLen {
     }
 
     fn description(&self) -> &'static str {
-        "Flag continuous kanji runs longer than the configured maximum."
+        "指定した長さを超える漢字の連続を検出する。"
     }
 
     fn lint(&self, ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
@@ -104,7 +104,7 @@ fn scan(node: &TxtNode<'_>, source: &str, config: &Config, out: &mut Vec<Diagnos
                 Diagnostic::new(
                     RULE_ID,
                     format!(
-                        "Kanji run of length {} exceeds the maximum of {}.",
+                        "漢字が {} 字連続しています。上限は {} 字です。",
                         run_char_count, config.max
                     ),
                     Span::new((start + rs) as u32, (start + byte_pos) as u32),
@@ -158,9 +158,16 @@ mod tests {
 
     #[test]
     fn long_run_flagged() {
-        // 8 consecutive kanji, max 5 → flagged
-        let diags = lint("一二三四五六七八する", 5);
+        // 7 consecutive kanji, max 6 → flagged at the tight boundary
+        // (`max: 6` matches the ja-technical-writing preset default).
+        let diags = lint("一二三四五六七する", 6);
         assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn run_at_max_passes() {
+        // 6 kanji with max 6: equal to the limit, should pass.
+        assert!(lint("一二三四五六する", 6).is_empty());
     }
 
     #[test]

@@ -32,7 +32,7 @@ impl Rule for NoMixedZenkakuHankakuAlphabet {
     }
 
     fn description(&self) -> &'static str {
-        "Flag prose that mixes half-width and full-width alphabet characters."
+        "半角英字と全角英字が混在している段落を検出する。"
     }
 
     fn lint(&self, ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
@@ -82,7 +82,7 @@ fn scan(node: &TxtNode<'_>, source: &str, out: &mut Vec<Diagnostic>) {
             out.push(
                 Diagnostic::new(
                     RULE_ID,
-                    "This text mixes half-width and full-width alphabet characters. Pick one style for consistency.",
+                    "半角英字と全角英字が混在しています。どちらかに統一してください。",
                     Span::new(span_start as u32, span_end as u32),
                 )
                 .with_severity(Severity::Warning),

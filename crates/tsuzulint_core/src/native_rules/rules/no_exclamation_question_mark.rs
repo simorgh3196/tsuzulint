@@ -56,7 +56,7 @@ impl Rule for NoExclamationQuestionMark {
     }
 
     fn description(&self) -> &'static str {
-        "Disallow exclamation / question marks in technical prose."
+        "技術文書における感嘆符・疑問符 (! ? ！ ？) の使用を禁止する。"
     }
 
     fn lint(&self, ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
@@ -94,7 +94,7 @@ fn scan(node: &TxtNode<'_>, source: &str, config: &Config, out: &mut Vec<Diagnos
                 out.push(
                     Diagnostic::new(
                         RULE_ID,
-                        format!("Disallowed punctuation: '{}'.", mark),
+                        format!("「{}」は技術文書では使用を避けてください。", mark),
                         Span::new(abs_start as u32, abs_end as u32),
                     )
                     .with_severity(Severity::Warning),
