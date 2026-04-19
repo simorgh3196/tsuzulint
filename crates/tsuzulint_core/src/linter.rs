@@ -12,7 +12,7 @@
 //! - [`manifest_resolver`]: Secure manifest path resolution
 //! - [`parallel_linter`]: Parallel file linting logic
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::warn;
@@ -109,6 +109,10 @@ impl Linter {
 
         let enabled_rules_vec = self.config.enabled_rules();
         let enabled_rules: HashSet<&str> = enabled_rules_vec.iter().map(|(n, _)| *n).collect();
+        let rule_options: HashMap<String, serde_json::Value> = enabled_rules_vec
+            .iter()
+            .map(|(name, opt)| ((*name).to_string(), opt.options()))
+            .collect();
         let rule_versions = crate::rule_loader::get_rule_versions_from_host(&host);
 
         let mut ctx = crate::file_linter::LintContext {
@@ -120,6 +124,7 @@ impl Linter {
             enabled_rules: &enabled_rules,
             rule_versions: &rule_versions,
             timings_enabled: self.config.timings,
+            rule_options: &rule_options,
         };
 
         lint_file_internal(&mut ctx)

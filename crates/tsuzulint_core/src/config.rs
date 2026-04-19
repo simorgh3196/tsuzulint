@@ -25,6 +25,12 @@ pub struct LinterConfig {
     #[serde(default)]
     pub rules: Vec<RuleDefinition>,
 
+    /// Native presets to enable (e.g. `"ja-technical-writing"`). Each preset
+    /// expands to a list of built-in rules with default options. User-supplied
+    /// entries in `options` override the preset defaults.
+    #[serde(default)]
+    pub presets: Vec<String>,
+
     /// Rule configuration (enable/disable/options).
     #[serde(default)]
     pub options: HashMap<String, RuleOption>,
@@ -184,6 +190,7 @@ impl LinterConfig {
     pub fn new() -> Self {
         Self {
             rules: Vec::new(),
+            presets: Vec::new(),
             options: HashMap::new(),
             include: Vec::new(),
             exclude: Vec::new(),
@@ -225,6 +232,8 @@ impl LinterConfig {
             config.base_dir = Some(parent.to_path_buf());
         }
 
+        config.apply_presets();
+
         Ok(config)
     }
 
@@ -265,6 +274,34 @@ impl LinterConfig {
             .filter(|(_, config)| config.is_enabled())
             .map(|(name, config)| (name.as_str(), config))
             .collect()
+    }
+
+    /// Expand referenced `presets` into the `options` map.
+    ///
+    /// Applied at config-load time. User-supplied entries in `options` always
+    /// win, so users can override a preset rule by setting it explicitly —
+    /// including disabling it with `"rule-name": false`.
+    pub fn apply_presets(&mut self) {
+        if self.presets.is_empty() {
+            return;
+        }
+        for preset_name in self.presets.clone() {
+            let Some(entries) = crate::native_rules::resolve_preset(&preset_name) else {
+                tracing::warn!("Unknown preset '{}'; skipping", preset_name);
+                continue;
+            };
+            for entry in entries {
+                // Don't clobber explicit user config.
+                if self.options.contains_key(entry.name) {
+                    continue;
+                }
+                let opt = match entry.default_options {
+                    serde_json::Value::Null => RuleOption::Enabled(true),
+                    other => RuleOption::Options(other),
+                };
+                self.options.insert(entry.name.to_string(), opt);
+            }
+        }
     }
 
     /// Computes a hash of the configuration for cache invalidation.
