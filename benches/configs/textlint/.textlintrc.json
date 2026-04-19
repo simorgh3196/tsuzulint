@@ -1,0 +1,12 @@
+{
+  "rules": {
+    "no-todo": true,
+    "sentence-length": {
+      "max": 100
+    },
+    "no-doubled-joshi": {
+      "min_interval": 1,
+      "strict": false
+    }
+  }
+}

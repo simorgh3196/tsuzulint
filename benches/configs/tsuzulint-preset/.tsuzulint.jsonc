@@ -1,0 +1,12 @@
+// Benchmark config: uses the ja-technical-writing preset to enable 9+ native
+// rules at once, matching textlint-rule-preset-ja-technical-writing-style
+// enforcement.
+{
+  "presets": ["ja-technical-writing"],
+  "options": {
+    "no-todo": true
+  },
+  "cache": {
+    "enabled": false
+  }
+}
