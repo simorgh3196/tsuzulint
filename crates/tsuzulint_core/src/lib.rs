@@ -35,6 +35,7 @@ pub mod formatters;
 mod ignore_range;
 mod linter;
 mod manifest_resolver;
+pub mod native_rules;
 mod parallel_linter;
 pub mod pool;
 pub mod resolver;

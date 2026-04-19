@@ -267,6 +267,7 @@ impl LinterConfig {
             .collect()
     }
 
+
     /// Computes a hash of the configuration for cache invalidation.
     pub fn hash(&self) -> Result<[u8; 32], LinterError> {
         let json = serde_json::to_string(self)
