@@ -1,0 +1,13 @@
+// Benchmark config: three rules in common with textlint to make comparisons apples-to-apples.
+{
+  "$schema": "../../../schemas/v1/config.json",
+  "rules": [
+    { "path": "./rules/no-todo/tsuzulint-rule.json", "as": "no-todo" }
+  ],
+  "options": {
+    "no-todo": true
+  },
+  "cache": {
+    "enabled": false
+  }
+}

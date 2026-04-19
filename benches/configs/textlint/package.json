@@ -1,0 +1,15 @@
+{
+  "name": "tsuzulint-bench-textlint",
+  "version": "0.0.0",
+  "private": true,
+  "description": "textlint side of the tsuzulint benchmark harness.",
+  "scripts": {
+    "lint": "textlint"
+  },
+  "dependencies": {
+    "textlint": "^15.5.4",
+    "textlint-rule-no-todo": "^2.0.1",
+    "textlint-rule-sentence-length": "^5.2.1",
+    "textlint-rule-no-doubled-joshi": "^5.1.1"
+  }
+}
