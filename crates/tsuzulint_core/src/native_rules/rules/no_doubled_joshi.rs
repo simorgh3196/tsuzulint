@@ -375,4 +375,59 @@ mod tests {
         let particles = extract_particles(&tokens, &config);
         assert!(particles.is_empty());
     }
+
+    #[test]
+    fn interval_below_min_is_flagged() {
+        // Two は with 0 commas between them. Default min_interval=1 flags this.
+        let source = "私は彼は好きだ";
+        let tokens = vec![
+            make_token("私", vec!["名詞"], 0, 3),
+            make_token("は", vec!["助詞", "係助詞"], 3, 6),
+            make_token("彼", vec!["名詞"], 6, 9),
+            make_token("は", vec!["助詞", "係助詞"], 9, 12),
+            make_token("好き", vec!["名詞"], 12, 18),
+        ];
+        let config = Config::from_options(&Value::Null);
+        let particles = extract_particles(&tokens, &config);
+        let diags = detect_doubles(&particles, source, &config);
+        assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn interval_at_min_passes() {
+        // Two は with one 、 between them. interval=1 == min_interval=1 passes.
+        let source = "私は、彼は好きだ";
+        let tokens = vec![
+            make_token("私", vec!["名詞"], 0, 3),
+            make_token("は", vec!["助詞", "係助詞"], 3, 6),
+            make_token("、", vec!["記号", "読点"], 6, 9),
+            make_token("彼", vec!["名詞"], 9, 12),
+            make_token("は", vec!["助詞", "係助詞"], 12, 15),
+            make_token("好き", vec!["名詞"], 15, 21),
+        ];
+        let config = Config::from_options(&Value::Null);
+        let particles = extract_particles(&tokens, &config);
+        let diags = detect_doubles(&particles, source, &config);
+        assert!(diags.is_empty(), "{:?}", diags);
+    }
+
+    #[test]
+    fn interval_one_below_custom_min_is_flagged() {
+        // min_interval=2, but text has one 、 between the は particles.
+        // interval=1 < min_interval=2 → flagged at the boundary.
+        let source = "私は、彼は好きだ";
+        let tokens = vec![
+            make_token("私", vec!["名詞"], 0, 3),
+            make_token("は", vec!["助詞", "係助詞"], 3, 6),
+            make_token("、", vec!["記号", "読点"], 6, 9),
+            make_token("彼", vec!["名詞"], 9, 12),
+            make_token("は", vec!["助詞", "係助詞"], 12, 15),
+            make_token("好き", vec!["名詞"], 15, 21),
+        ];
+        let options = serde_json::json!({ "min_interval": 2 });
+        let config = Config::from_options(&options);
+        let particles = extract_particles(&tokens, &config);
+        let diags = detect_doubles(&particles, source, &config);
+        assert_eq!(diags.len(), 1);
+    }
 }

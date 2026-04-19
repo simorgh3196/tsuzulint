@@ -225,21 +225,26 @@ mod tests {
     }
 
     #[test]
-    fn short_sentence_passes() {
-        let diags = run("短い文。", 100);
-        assert!(diags.is_empty());
+    fn sentence_at_exact_limit_passes() {
+        // 99 "あ" + "。" = 100 chars — exactly at the limit, must pass.
+        let text = "あ".repeat(99) + "。";
+        let diags = run(&text, 100);
+        assert!(diags.is_empty(), "{:?}", diags);
     }
 
     #[test]
-    fn long_sentence_fails() {
-        let long = "あ".repeat(120) + "。";
-        let diags = run(&long, 100);
+    fn sentence_one_char_over_limit_fails() {
+        // 100 "あ" + "。" = 101 chars — one char over the limit.
+        let text = "あ".repeat(100) + "。";
+        let diags = run(&text, 100);
         assert_eq!(diags.len(), 1);
     }
 
     #[test]
-    fn multiple_sentences_mixed() {
-        let text = format!("短い文。{}。", "あ".repeat(120));
+    fn only_over_limit_sentence_is_flagged() {
+        // First sentence is at the limit (passes); second sentence is one
+        // char over (fails). Verifies per-sentence evaluation.
+        let text = format!("{}。{}。", "あ".repeat(99), "い".repeat(100));
         let diags = run(&text, 100);
         assert_eq!(diags.len(), 1);
     }
