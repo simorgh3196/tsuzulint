@@ -73,15 +73,11 @@ impl Rule for MaxTen {
 fn scan(node: &TxtNode<'_>, source: &str, config: &Config, out: &mut Vec<Diagnostic>) {
     match node.node_type {
         NodeType::CodeBlock | NodeType::Code | NodeType::Html => {}
-        NodeType::Paragraph
-        | NodeType::Header
-        | NodeType::ListItem
-        | NodeType::TableCell
-        | NodeType::BlockQuote => {
+        // Run the comma-count check only on *leaf* blocks. Container blocks
+        // like ListItem or BlockQuote wrap paragraphs, so checking them in
+        // addition to their children would count the same commas twice.
+        NodeType::Paragraph | NodeType::Header | NodeType::TableCell => {
             check_block(node, source, config, out);
-            for child in node.children.iter() {
-                scan(child, source, config, out);
-            }
         }
         _ => {
             for child in node.children.iter() {
@@ -200,5 +196,47 @@ mod tests {
     fn flags_trailing_sentence_without_kuten() {
         let diags = run("あ、い、う、え、お", 3);
         assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn nested_list_item_paragraph_is_not_double_counted() {
+        // Regression: ListItem wrapping a Paragraph would previously be
+        // scanned at both levels, double-counting commas.
+        let arena = AstArena::new();
+        let text = "あ、い、う、え、お。";
+        let str_node = arena.alloc(TxtNode::new_text(
+            NodeType::Str,
+            AstSpan::new(0, text.len() as u32),
+            text,
+        ));
+        let paragraph_children = arena.alloc_slice_copy(&[*str_node]);
+        let paragraph = arena.alloc(TxtNode::new_parent(
+            NodeType::Paragraph,
+            AstSpan::new(0, text.len() as u32),
+            paragraph_children,
+        ));
+        let list_item_children = arena.alloc_slice_copy(&[*paragraph]);
+        let list_item = arena.alloc(TxtNode::new_parent(
+            NodeType::ListItem,
+            AstSpan::new(0, text.len() as u32),
+            list_item_children,
+        ));
+        let doc_children = arena.alloc_slice_copy(&[*list_item]);
+        let ast = TxtNode::new_parent(
+            NodeType::Document,
+            AstSpan::new(0, text.len() as u32),
+            doc_children,
+        );
+        let options = serde_json::json!({ "max": 3 });
+        let ctx = RuleContext {
+            ast: &ast,
+            source: text,
+            tokens: &[],
+            sentences: &[],
+            options: &options,
+            file_path: None,
+        };
+        let diags = MaxTen.lint(&ctx);
+        assert_eq!(diags.len(), 1, "{:?}", diags);
     }
 }

@@ -104,44 +104,19 @@ fn scan(node: &TxtNode<'_>, source: &str, config: &Config, out: &mut Vec<Diagnos
 }
 
 fn report_matches(text: &str, base_offset: u32, config: &Config, out: &mut Vec<Diagnostic>) {
-    // Building the haystack once per Str node is cheaper than re-casing per
-    // pattern. `to_lowercase` is O(n) but only fires when the user opted out
-    // of case sensitivity (the default for textlint-rule-no-todo).
-    let haystack_owned;
-    let haystack: &str = if config.case_sensitive {
-        text
-    } else {
-        haystack_owned = text.to_lowercase();
-        haystack_owned.as_str()
-    };
-
-    let patterns: Vec<String> = if config.case_sensitive {
-        config.patterns.clone()
-    } else {
-        config.patterns.iter().map(|p| p.to_lowercase()).collect()
-    };
-    let ignore_patterns: Vec<String> = if config.case_sensitive {
-        config.ignore_patterns.clone()
-    } else {
-        config
-            .ignore_patterns
-            .iter()
-            .map(|p| p.to_lowercase())
-            .collect()
-    };
-
-    for (pattern, pattern_cased) in patterns.iter().zip(config.patterns.iter()) {
+    for (pattern_idx, pattern) in config.patterns.iter().enumerate() {
         let mut search_start = 0usize;
-        while let Some(idx) = haystack[search_start..].find(pattern.as_str()) {
-            let match_start = search_start + idx;
-            let match_end = match_start + pattern.len();
+        while let Some((match_start, match_end)) =
+            find_pattern(text, pattern, search_start, config.case_sensitive)
+        {
             let matched_text = &text[match_start..match_end];
 
-            if !ignore_patterns
-                .iter()
-                .any(|p| matched_text.to_lowercase().contains(p.as_str()))
-            {
-                let display = pattern_cased.trim_end();
+            let ignored = config.ignore_patterns.iter().any(|ignore_pat| {
+                contains_pattern(matched_text, ignore_pat, config.case_sensitive)
+            });
+
+            if !ignored {
+                let display = config.patterns[pattern_idx].trim_end();
                 out.push(
                     Diagnostic::new(
                         RULE_ID,
@@ -161,6 +136,84 @@ fn report_matches(text: &str, base_offset: u32, config: &Config, out: &mut Vec<D
             search_start = match_end;
         }
     }
+}
+
+/// Find the first occurrence of `pattern` in `haystack[start..]`, returning
+/// `(match_start, match_end)` as byte offsets into the **original**
+/// `haystack`.
+///
+/// This avoids the trap where `text.to_lowercase()` can change byte length
+/// for a handful of Unicode characters (e.g. U+1E9E `ẞ` → "ss", U+0130
+/// `İ` → "i\u{0307}"). A naive "lowercase then .find()" implementation
+/// returns byte positions into the lowercased string which are not
+/// necessarily valid in the original — slicing the original there can land
+/// mid-codepoint and panic.
+fn find_pattern(
+    haystack: &str,
+    pattern: &str,
+    start: usize,
+    case_sensitive: bool,
+) -> Option<(usize, usize)> {
+    if case_sensitive {
+        let idx = haystack[start..].find(pattern)?;
+        let match_start = start + idx;
+        return Some((match_start, match_start + pattern.len()));
+    }
+
+    // Case-insensitive: walk the haystack character-by-character, comparing
+    // against the pattern via case-insensitive char equality, while keeping
+    // byte positions anchored to the ORIGINAL haystack.
+    let pattern_chars: Vec<char> = pattern.chars().collect();
+    if pattern_chars.is_empty() {
+        return Some((start, start));
+    }
+
+    let mut char_starts: Vec<usize> = Vec::new();
+    for (i, _) in haystack[start..].char_indices() {
+        char_starts.push(start + i);
+    }
+    char_starts.push(haystack.len());
+
+    'outer: for (i, &anchor) in char_starts[..char_starts.len().saturating_sub(1)]
+        .iter()
+        .enumerate()
+    {
+        let mut cursor = anchor;
+        for &pc in &pattern_chars {
+            let Some(hc) = haystack[cursor..].chars().next() else {
+                continue 'outer;
+            };
+            if !chars_equal_ignore_case(pc, hc) {
+                continue 'outer;
+            }
+            cursor += hc.len_utf8();
+        }
+        let _ = i;
+        return Some((anchor, cursor));
+    }
+    None
+}
+
+fn contains_pattern(haystack: &str, pattern: &str, case_sensitive: bool) -> bool {
+    find_pattern(haystack, pattern, 0, case_sensitive).is_some()
+}
+
+/// Case-insensitive char equality that works for the characters TODO / FIXME
+/// marker users actually type. We compare by lowercasing each char into a
+/// small String; this handles the special-case multi-char expansions (e.g.
+/// `İ → i\u{0307}`) by treating them as non-matches for single-char
+/// patterns, which is the safe default — the markers we care about are all
+/// ASCII anyway.
+fn chars_equal_ignore_case(a: char, b: char) -> bool {
+    if a == b {
+        return true;
+    }
+    let mut la = a.to_lowercase();
+    let mut lb = b.to_lowercase();
+    let (Some(ca), Some(cb)) = (la.next(), lb.next()) else {
+        return false;
+    };
+    ca == cb && la.next().is_none() && lb.next().is_none()
 }
 
 #[cfg(test)]
@@ -211,6 +264,34 @@ mod tests {
     fn detects_fixme_case_insensitive() {
         let diags = run("fixme: check this");
         assert_eq!(diags.len(), 1);
+    }
+
+    #[test]
+    fn does_not_panic_on_multi_byte_lowercase_expanding_chars() {
+        // Regression: `str::to_lowercase()` changes the byte length of
+        // U+1E9E (`ẞ` → "ss") and U+0130 (`İ` → "i\u{0307}"), which used
+        // to shift the byte index of a TODO: match into the middle of a
+        // multi-byte char when indexing the original text afterwards.
+        // This test exercises both "expanding" (ẞ) and "growing" (İ) forms
+        // and passes only if the rule tracks byte positions in the
+        // *original* text rather than the lowercased copy.
+        let inputs = [
+            "日ẞ日TODO: fix",  // expanding: ẞ (3B) → "ss" (2B)
+            "İabcTODO: later", // growing:  İ (2B) → "i\u{0307}" (3B)
+            "FOOẞBARFIXME: x",
+        ];
+        for text in inputs {
+            let diags = run(text);
+            assert!(
+                !diags.is_empty(),
+                "expected at least one diagnostic for {:?}",
+                text
+            );
+            for d in &diags {
+                // Spans must not panic when slicing the original text.
+                let _slice = &text[d.span.start as usize..d.span.end as usize];
+            }
+        }
     }
 
     #[test]

@@ -71,22 +71,17 @@ impl Rule for SentenceLength {
 
 /// Scan the AST for prose blocks and check each one's sentence lengths.
 ///
-/// We operate at the block level (Paragraph / Header / ListItem / TableCell /
-/// BlockQuote) so that we can (a) skip code blocks cleanly and (b) reuse the
-/// block's text range for diagnostic spans.
+/// We operate at the *leaf* block level (Paragraph / Header / TableCell)
+/// rather than container blocks (ListItem / BlockQuote / Document) because
+/// list items and block quotes wrap paragraphs, and counting them as their
+/// own block produces duplicate diagnostics for the same underlying text.
+/// Container blocks are still traversed — we just don't run the sentence
+/// check on them directly.
 fn scan(node: &TxtNode<'_>, source: &str, config: &Config, out: &mut Vec<Diagnostic>) {
     match node.node_type {
         NodeType::CodeBlock | NodeType::Code | NodeType::Html | NodeType::HorizontalRule => {}
-        NodeType::Paragraph
-        | NodeType::Header
-        | NodeType::ListItem
-        | NodeType::TableCell
-        | NodeType::BlockQuote => {
+        NodeType::Paragraph | NodeType::Header | NodeType::TableCell => {
             check_block(node, source, config, out);
-            for child in node.children.iter() {
-                // Blocks can nest (ListItem > Paragraph > ...), so keep walking.
-                scan(child, source, config, out);
-            }
         }
         _ => {
             for child in node.children.iter() {
@@ -260,5 +255,48 @@ mod tests {
         );
         let diags = run(&text, 30);
         assert!(diags.is_empty(), "URL should be collapsed: {:?}", diags);
+    }
+
+    #[test]
+    fn nested_list_item_paragraph_is_not_double_counted() {
+        // Regression: ListItem containing a Paragraph would previously be
+        // checked at both the ListItem *and* the Paragraph level, producing
+        // two diagnostics (with overlapping spans) for the same sentence.
+        let arena = AstArena::new();
+        let source = "あ".repeat(101) + "。";
+        let str_node = arena.alloc(TxtNode::new_text(
+            NodeType::Str,
+            AstSpan::new(0, source.len() as u32),
+            &source,
+        ));
+        let paragraph_children = arena.alloc_slice_copy(&[*str_node]);
+        let paragraph = arena.alloc(TxtNode::new_parent(
+            NodeType::Paragraph,
+            AstSpan::new(0, source.len() as u32),
+            paragraph_children,
+        ));
+        let list_item_children = arena.alloc_slice_copy(&[*paragraph]);
+        let list_item = arena.alloc(TxtNode::new_parent(
+            NodeType::ListItem,
+            AstSpan::new(0, source.len() as u32),
+            list_item_children,
+        ));
+        let doc_children = arena.alloc_slice_copy(&[*list_item]);
+        let ast = TxtNode::new_parent(
+            NodeType::Document,
+            AstSpan::new(0, source.len() as u32),
+            doc_children,
+        );
+        let options = serde_json::json!({ "max": 100 });
+        let ctx = RuleContext {
+            ast: &ast,
+            source: &source,
+            tokens: &[],
+            sentences: &[],
+            options: &options,
+            file_path: None,
+        };
+        let diags = SentenceLength.lint(&ctx);
+        assert_eq!(diags.len(), 1, "{:?}", diags);
     }
 }
