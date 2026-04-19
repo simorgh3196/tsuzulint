@@ -104,6 +104,13 @@
         ]
       }
     },
+    "presets": {
+      "type": "array",
+      "description": "Native preset bundles to enable (e.g. 'ja-technical-writing', 'ja-basic'). User-supplied entries in 'options' override preset defaults.",
+      "items": {
+        "type": "string"
+      }
+    },
     "options": {
       "type": "object",
       "description": "Rule options. Keys are rule IDs, values are rule options or boolean/severity.",
