@@ -1,0 +1,13 @@
+{
+  "name": "tsuzulint-bench-textlint-preset",
+  "version": "0.0.0",
+  "private": true,
+  "description": "textlint + preset-ja-technical-writing for head-to-head bench.",
+  "scripts": {
+    "lint": "textlint"
+  },
+  "dependencies": {
+    "textlint": "^15.5.4",
+    "textlint-rule-preset-ja-technical-writing": "^12.0.2"
+  }
+}
