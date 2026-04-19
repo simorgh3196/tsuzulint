@@ -7,6 +7,7 @@ use crate::fetcher::ManifestFetcher;
 use crate::manifest::{ExternalRuleManifest, HashVerifier, IntegrityError};
 use crate::security::validate_local_wasm_path;
 use std::path::{Path, PathBuf};
+use std::io::Read;
 use thiserror::Error;
 
 pub use crate::fetcher::PluginSource;
@@ -219,7 +220,20 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let mut file = std::fs::File::open(&wasm_path).map_err(DownloadError::IoError)?;
+        let metadata = file.metadata().map_err(DownloadError::IoError)?;
+
+        let max_size = crate::downloader::DEFAULT_MAX_SIZE;
+        if metadata.len() > max_size {
+            return Err(DownloadError::TooLarge { size: metadata.len(), max: max_size }.into());
+        }
+
+        let mut bytes = Vec::new();
+        std::io::Read::take(&mut file, max_size + 1).read_to_end(&mut bytes).map_err(DownloadError::IoError)?;
+
+        if bytes.len() as u64 > max_size {
+            return Err(DownloadError::TooLarge { size: bytes.len() as u64, max: max_size }.into());
+        }
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
