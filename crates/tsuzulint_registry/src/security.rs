@@ -59,11 +59,10 @@ pub fn validate_url(url: &Url, allow_local: bool) -> Result<(), SecurityError> {
     }
 
     match url.host() {
-        Some(url::Host::Domain(domain)) => {
-            if domain == "localhost" {
-                return Err(SecurityError::LoopbackDenied(domain.to_string()));
-            }
+        Some(url::Host::Domain(domain)) if domain == "localhost" => {
+            return Err(SecurityError::LoopbackDenied(domain.to_string()));
         }
+        Some(url::Host::Domain(_)) => {}
         Some(url::Host::Ipv4(ipv4)) => {
             check_ip(std::net::IpAddr::V4(ipv4))?;
         }
