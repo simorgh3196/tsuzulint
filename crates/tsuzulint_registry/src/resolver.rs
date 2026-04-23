@@ -152,7 +152,29 @@ impl PluginResolver {
         wasm_url = wasm_url.replace("{version}", &manifest.rule.version);
 
         if let Some(cached) = self.cache.get(source, version) {
-            match std::fs::read(&cached.wasm_path) {
+            let max_size = self.downloader.max_size();
+
+            let read_result = std::fs::metadata(&cached.wasm_path).and_then(|metadata| {
+                if metadata.len() > max_size {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::FileTooLarge,
+                        "Cached file exceeds maximum size limit",
+                    ));
+                }
+                let file = std::fs::File::open(&cached.wasm_path)?;
+                let mut bytes = Vec::new();
+                use std::io::Read;
+                file.take(max_size + 1).read_to_end(&mut bytes)?;
+                if bytes.len() as u64 > max_size {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::FileTooLarge,
+                        "Cached file exceeds maximum size limit",
+                    ));
+                }
+                Ok(bytes)
+            });
+
+            match read_result {
                 Ok(cached_bytes) => {
                     if HashVerifier::verify(&cached_bytes, &expected_hash).is_ok() {
                         return Ok(ResolvedPlugin {
@@ -221,7 +243,32 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let max_size = self.downloader.max_size();
+        let metadata = std::fs::metadata(&wasm_path).map_err(DownloadError::IoError)?;
+        let size = metadata.len();
+
+        if size > max_size {
+            return Err(DownloadError::TooLarge {
+                size,
+                max: max_size,
+            }
+            .into());
+        }
+
+        let file = std::fs::File::open(&wasm_path).map_err(DownloadError::IoError)?;
+        let mut bytes = Vec::new();
+        use std::io::Read;
+        file.take(max_size + 1)
+            .read_to_end(&mut bytes)
+            .map_err(DownloadError::IoError)?;
+
+        if bytes.len() as u64 > max_size {
+            return Err(DownloadError::TooLarge {
+                size: bytes.len() as u64,
+                max: max_size,
+            }
+            .into());
+        }
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(

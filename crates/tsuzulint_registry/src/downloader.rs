@@ -73,6 +73,11 @@ impl WasmDownloader {
         })
     }
 
+    /// Get the maximum allowed file size.
+    pub fn max_size(&self) -> u64 {
+        self.max_size
+    }
+
     /// Configure whether to allow downloads from local network addresses.
     ///
     /// By default, downloads from loopback, link-local, and private IP ranges are blocked
