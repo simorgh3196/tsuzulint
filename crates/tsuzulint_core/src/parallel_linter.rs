@@ -31,18 +31,9 @@ pub fn lint_files(
     let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
         .par_iter()
         .map_init(
-            || {
-                let host_result = create_plugin_host(config, dynamic_rules);
-                host_result.map(|host| {
-                    // Optimization: We compute `rule_versions` once per parallel thread (initialization phase)
-                    // and pass it down. This completely eliminates the per-file HashMap allocation
-                    // during `lint_file_internal` which significantly speeds up large codebase linting.
-                    let rule_versions = crate::rule_loader::get_rule_versions_from_host(&host);
-                    (host, rule_versions)
-                })
-            },
+            || create_plugin_host(config, dynamic_rules),
             |host_result, path| {
-                let (file_host, rule_versions) = match host_result.as_mut() {
+                let file_host = match host_result.as_mut() {
                     Ok(h) => h,
                     Err(e) => {
                         return Err((
@@ -55,18 +46,16 @@ pub fn lint_files(
                     }
                 };
 
-                let mut ctx = crate::file_linter::LintContext {
+                lint_file_internal(
                     path,
-                    host: file_host,
+                    file_host,
                     tokenizer,
                     config_hash,
                     cache,
-                    enabled_rules: &enabled_rules,
-                    rule_versions,
+                    &enabled_rules,
                     timings_enabled,
-                };
-
-                lint_file_internal(&mut ctx).map_err(|e| (path.clone(), e))
+                )
+                .map_err(|e| (path.clone(), e))
             },
         )
         .collect();

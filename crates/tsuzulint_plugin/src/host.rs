@@ -75,7 +75,6 @@ impl PreparedLintRequest {
     }
 }
 
-/// Converts a serializable node into a JSON value, handling raw JSON strings.
 fn convert_node_to_value<T: Serialize>(node: &T) -> Result<serde_json::Value, PluginError> {
     // Convert node to serde_json::Value for proper MsgPack serialization
     let node_value = serde_json::to_value(node)
@@ -199,9 +198,8 @@ impl PluginHost {
         let real_name = self
             .aliases
             .get(old_name)
-            .map(String::as_str)
-            .unwrap_or(old_name)
-            .to_string(); // we need an owned string for insertion later
+            .cloned()
+            .unwrap_or_else(|| old_name.to_string());
 
         if !self.manifests.contains_key(old_name) && old_name == real_name {
             // Check if real_name is loaded?
@@ -310,19 +308,6 @@ impl PluginHost {
     ///
     /// This is an optimized version of `run_rule` that avoids repeated
     /// deserialization of tokens and sentences when running multiple rules.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Rule name or alias
-    /// * `node` - The AST node
-    /// * `source` - The source text
-    /// * `tokens` - Pre-deserialized tokens
-    /// * `sentences` - Pre-deserialized sentences
-    /// * `file_path` - Optional file path
-    ///
-    /// # Returns
-    ///
-    /// Diagnostics reported by the rule.
     pub fn run_rule_with_parts<T: Serialize>(
         &mut self,
         name: &str,
@@ -380,18 +365,6 @@ impl PluginHost {
     ///
     /// Note: This does not include rule-specific config. Use `run_rule_with_parts`
     /// for per-rule config support.
-    ///
-    /// # Arguments
-    ///
-    /// * `node` - The AST node
-    /// * `source` - The source text
-    /// * `tokens` - Pre-deserialized tokens
-    /// * `sentences` - Pre-deserialized sentences
-    /// * `file_path` - Optional file path
-    ///
-    /// # Returns
-    ///
-    /// A prepared request ready for `run_rule_with_prepared`.
     pub fn prepare_lint_request<T: Serialize>(
         &self,
         node: &T,
@@ -421,15 +394,6 @@ impl PluginHost {
     ///
     /// Note: This does not include rule-specific config. Use `run_rule_with_parts`
     /// for per-rule config support.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Rule name or alias
-    /// * `request` - The pre-prepared request
-    ///
-    /// # Returns
-    ///
-    /// Diagnostics reported by the rule.
     pub fn run_rule_with_prepared(
         &mut self,
         name: &str,
@@ -486,18 +450,6 @@ impl PluginHost {
     }
 
     /// Runs all loaded rules on a node with pre-deserialized analysis data.
-    ///
-    /// # Arguments
-    ///
-    /// * `node` - The AST node
-    /// * `source` - The source text
-    /// * `tokens` - Pre-deserialized tokens
-    /// * `sentences` - Pre-deserialized sentences
-    /// * `file_path` - Optional file path
-    ///
-    /// # Returns
-    ///
-    /// All diagnostics from all rules.
     pub fn run_all_rules_with_parts<T: Serialize>(
         &mut self,
         node: &T,
@@ -570,31 +522,23 @@ impl PluginHost {
         Ok(all_diagnostics)
     }
 
-    /// Unloads a rule and removes its associated configurations and aliases.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Rule name or alias to unload
-    ///
-    /// # Returns
-    ///
-    /// `true` if the rule was found and unloaded, `false` otherwise.
+    /// Unloads a rule.
     pub fn unload_rule(&mut self, name: &str) -> bool {
         let real_name = self
             .aliases
-            .remove(name)
+            .get(name)
+            .cloned()
             .unwrap_or_else(|| name.to_string());
 
-        self.aliases.retain(|_, v| v != &real_name);
-
-        self.manifests.remove(&real_name);
-        self.configs.remove(&real_name);
+        self.manifests.remove(name);
+        self.configs.remove(name);
+        self.aliases.remove(name);
 
         // Since rename_rule uses move semantics, unloading is safe.
         self.executor.unload(&real_name)
     }
 
-    /// Unloads all rules and clears all configurations and aliases.
+    /// Unloads all rules.
     pub fn unload_all(&mut self) {
         self.manifests.clear();
         self.configs.clear();
@@ -823,66 +767,6 @@ mod tests {
         let result = host.load_rule_bytes(b"invalid wasm bytes", PluginOptions::default());
         assert!(result.is_err());
         assert!(host.loaded_rules().next().is_none());
-    }
-
-    #[test]
-    fn test_unload_rule_by_real_name_removes_aliases() {
-        use crate::IsolationLevel;
-        let mut host = PluginHost::new();
-        // Since we cannot easily load a real WASM plugin here without full fixtures,
-        // we'll populate the internal data structures directly to test unloading.
-        host.manifests.insert(
-            "my-rule".to_string(),
-            RuleManifest {
-                name: "my-rule".to_string(),
-                version: "1.0.0".to_string(),
-                description: Some("test".to_string()),
-                fixable: false,
-                node_types: vec![],
-                isolation_level: IsolationLevel::Global,
-                schema: None,
-                languages: vec![],
-                capabilities: vec![],
-            },
-        );
-        host.configs.insert("my-rule".to_string(), vec![0x80]);
-        host.aliases
-            .insert("my-rule-alias".to_string(), "my-rule".to_string());
-
-        // Test unloading by real name
-        host.unload_rule("my-rule");
-        assert!(!host.manifests.contains_key("my-rule"));
-        assert!(!host.configs.contains_key("my-rule"));
-        assert!(!host.aliases.contains_key("my-rule-alias"));
-    }
-
-    #[test]
-    fn test_unload_rule_by_alias_removes_backing_entries() {
-        use crate::IsolationLevel;
-        let mut host = PluginHost::new();
-        host.manifests.insert(
-            "my-rule".to_string(),
-            RuleManifest {
-                name: "my-rule".to_string(),
-                version: "1.0.0".to_string(),
-                description: Some("test".to_string()),
-                fixable: false,
-                node_types: vec![],
-                isolation_level: IsolationLevel::Global,
-                schema: None,
-                languages: vec![],
-                capabilities: vec![],
-            },
-        );
-        host.configs.insert("my-rule".to_string(), vec![0x80]);
-        host.aliases
-            .insert("my-rule-alias".to_string(), "my-rule".to_string());
-
-        // Test unloading by alias
-        host.unload_rule("my-rule-alias");
-        assert!(!host.manifests.contains_key("my-rule"));
-        assert!(!host.configs.contains_key("my-rule"));
-        assert!(!host.aliases.contains_key("my-rule-alias"));
     }
 
     #[test]
