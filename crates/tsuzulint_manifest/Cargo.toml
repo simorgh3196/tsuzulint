@@ -18,4 +18,4 @@ hex = "0.4"
 extism-manifest.workspace = true
 
 [dev-dependencies]
-proptest = "1.10"
+proptest = "1.11"
