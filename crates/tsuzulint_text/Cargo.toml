@@ -10,7 +10,7 @@ description = "Text analysis components for TsuzuLint"
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 # Morphological analysis
-lindera = { version = "2.3.3", features = ["embed-ipadic"] }
+lindera = { version = "3.0.7", features = ["embed-ipadic"] }
 
 # Utilities
 thiserror = { workspace = true }

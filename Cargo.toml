@@ -36,7 +36,7 @@ tsuzulint_manifest = { path = "crates/tsuzulint_manifest" }
 tsuzulint_text = { path = "crates/tsuzulint_text" }
 
 # WASM Runtime - Extism uses wasmtime internally (native)
-extism = "1.20.0"
+extism = "1.21.0"
 extism-manifest = "1.13.0"
 
 # WASM Runtime - Pure Rust interpreter (browser/wasm32 compatible)
@@ -51,16 +51,16 @@ bumpalo = "3.20"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
-jsonc-parser = "0.31.0"
+jsonc-parser = "0.32.3"
 rkyv = "0.8"                                               # Zero-copy deserialization for cache
 
 # Async/Parallel
-tokio = { version = "1.50", features = ["full"] }
-rayon = "1.10"
+tokio = { version = "1.52", features = ["full"] }
+rayon = "1.12"
 tower-lsp = "0.20"
 
 # Hashing for cache
-blake3 = "1.5"
+blake3 = "1.8"
 
 # CLI
 clap = { version = "4.6", features = ["derive", "cargo"] }
@@ -81,9 +81,9 @@ reqwest = { version = "0.12", default-features = false, features = [
     "stream",
 ] }
 semver = "1.0"
-jsonschema = "0.45"
-sha2 = "0.10"
-unicode-segmentation = "1.12.0"
+jsonschema = "0.46"
+sha2 = "0.11"
+unicode-segmentation = "1.13.2"
 
 
 # File system
@@ -100,7 +100,7 @@ js-sys = "0.3"
 # Testing
 pretty_assertions = "1.4"
 rstest = "0.26"
-insta = { version = "1.46", features = ["json", "redactions"] }
+insta = { version = "1.47", features = ["json", "redactions"] }
 tempfile = "3.27"
 assert_fs = "1.1"
 assert_cmd = "2.2"
