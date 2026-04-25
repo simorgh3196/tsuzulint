@@ -636,10 +636,9 @@ mod tests {
 
         // Verify that we got the correct diagnostics back (meaning correct blocks were matched)
         // Since we didn't shift positions (current == cached), spans should be identical to cached diagnostics.
-        let messages: Vec<String> = diagnostics.iter().map(|d| d.message.clone()).collect();
-        assert!(messages.contains(&"Err1".to_string()));
-        assert!(messages.contains(&"Err2".to_string()));
-        assert!(messages.contains(&"Err3".to_string()));
+        assert!(diagnostics.iter().any(|d| d.message == "Err1"));
+        assert!(diagnostics.iter().any(|d| d.message == "Err2"));
+        assert!(diagnostics.iter().any(|d| d.message == "Err3"));
     }
 
     #[test]
