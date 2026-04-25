@@ -177,7 +177,8 @@ fn find_manifest(wasm_path: &Path) -> Option<PathBuf> {
 }
 
 fn load_manifest(path: &Path) -> Result<tsuzulint_manifest::ExternalRuleManifest, AddRuleError> {
-    let content = std::fs::read_to_string(path).map_err(AddRuleError::ManifestReadError)?;
+    let content = crate::utils::read_to_string_with_limit(path, 1024 * 1024)
+        .map_err(AddRuleError::ManifestReadError)?;
 
     tsuzulint_manifest::validate_manifest(&content).map_err(AddRuleError::ManifestParseError)
 }
@@ -189,7 +190,8 @@ fn generate_minimal_manifest(
     use tsuzulint_manifest::{IsolationLevel, RuleMetadata};
     use tsuzulint_registry::HashVerifier;
 
-    let wasm_content = std::fs::read(wasm_path).map_err(AddRuleError::WasmReadError)?;
+    let wasm_content = crate::utils::read_with_limit(wasm_path, 1024 * 1024 * 10)
+        .map_err(AddRuleError::WasmReadError)?;
     let sha256 = HashVerifier::compute(&wasm_content);
 
     Ok(tsuzulint_manifest::ExternalRuleManifest {
@@ -236,7 +238,8 @@ fn copy_plugin_files(
 
     std::fs::copy(wasm_path, &target_wasm).map_err(AddRuleError::CopyError)?;
 
-    let wasm_content = std::fs::read(&target_wasm).map_err(AddRuleError::WasmReadError)?;
+    let wasm_content = crate::utils::read_with_limit(&target_wasm, 1024 * 1024 * 10)
+        .map_err(AddRuleError::WasmReadError)?;
     let sha256 = tsuzulint_registry::HashVerifier::compute(&wasm_content);
 
     manifest.wasm = vec![Wasm::File {
