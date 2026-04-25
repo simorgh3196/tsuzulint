@@ -49,3 +49,41 @@ pub fn read_with_limit<P: AsRef<Path>>(path: P, limit: u64) -> std::io::Result<V
     }
     Ok(buffer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_read_to_string_with_limit_success() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"hello world").unwrap();
+        let content = read_to_string_with_limit(file.path(), 100).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn test_read_to_string_with_limit_exceeds_limit() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"hello world").unwrap();
+        let err = read_to_string_with_limit(file.path(), 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_read_with_limit_success() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"hello world").unwrap();
+        let content = read_with_limit(file.path(), 100).unwrap();
+        assert_eq!(content, b"hello world");
+    }
+
+    #[test]
+    fn test_read_with_limit_exceeds_limit() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"hello world").unwrap();
+        let err = read_with_limit(file.path(), 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+}
