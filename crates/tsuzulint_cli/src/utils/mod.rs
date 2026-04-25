@@ -86,4 +86,20 @@ mod tests {
         let err = read_with_limit(file.path(), 5).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
+
+    #[test]
+    fn test_read_to_string_with_limit_buffer_len_exceeds_limit() {
+        if std::path::Path::new("/dev/zero").exists() {
+            let err = read_to_string_with_limit("/dev/zero", 10).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        }
+    }
+
+    #[test]
+    fn test_read_with_limit_buffer_len_exceeds_limit() {
+        if std::path::Path::new("/dev/zero").exists() {
+            let err = read_with_limit("/dev/zero", 10).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        }
+    }
 }
