@@ -64,4 +64,14 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("size exceeds limit"));
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_to_string_with_limit_content_exceeded() {
+        // We need a file where metadata.len() is 0 but it has content.
+        // /dev/zero is perfect for this, but we only want to read up to limit + 1
+        let err = read_to_string_with_limit("/dev/zero", 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("content exceeds limit"));
+    }
 }
