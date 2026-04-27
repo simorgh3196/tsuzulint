@@ -461,7 +461,7 @@ mod tests {
         assert!(
             msg.contains("Refusing to modify configuration file because it is a symbolic link")
         );
-        assert!(msg.contains(&symlink_path.to_string_lossy().to_string()));
+        assert!(msg.contains(symlink_path.to_string_lossy().as_ref()));
 
         let target_content = std::fs::read(target_path).unwrap();
         assert!(
