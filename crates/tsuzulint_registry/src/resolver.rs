@@ -114,7 +114,21 @@ impl PluginResolver {
 
     fn prepare_source(&self, source: &PluginSource) -> (PluginSource, Option<PathBuf>) {
         match source {
-            PluginSource::GitHub { .. } | PluginSource::Url(_) => (source.clone(), None),
+            PluginSource::GitHub {
+                owner,
+                repo,
+                version,
+                server_url,
+            } => (
+                PluginSource::GitHub {
+                    owner: owner.clone(),
+                    repo: repo.clone(),
+                    version: version.clone(),
+                    server_url: server_url.clone(),
+                },
+                None,
+            ),
+            PluginSource::Url(url) => (PluginSource::Url(url.clone()), None),
             PluginSource::Path(path) => {
                 let p = if path.is_dir() {
                     path.join("tsuzulint-rule.json")

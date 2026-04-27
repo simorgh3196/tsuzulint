@@ -108,6 +108,38 @@ impl ExtismExecutor {
         // Fetch Wasmtime JIT cache configuration if available
         let mut builder = PluginBuilder::new(manifest).with_wasi(true);
 
+        // Enable Wasmtime JIT compilation caching
+        // This dramatically reduces startup time for repeated instantiations of the same WASM.
+        let cache_dir = dirs::cache_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("tsuzulint")
+            .join("wasmtime_cache");
+
+        // Ensure cache directory exists, ignore if it already does
+        let _ = std::fs::create_dir_all(&cache_dir);
+
+        let cache_config = cache_dir.join("config.toml");
+        let data_dir = cache_dir.join("data");
+
+        let mut cache_setup_success = cache_config.exists();
+
+        if !cache_setup_success && std::fs::create_dir_all(&data_dir).is_ok() {
+            // Unwrapping since failures here should be localized to IO errors
+            // that we catch inside a closure.
+            let config_content = format!(
+                "[cache]\ndirectory = \"{}\"\n",
+                data_dir.display().to_string().replace("\\", "\\\\")
+            );
+            if std::fs::write(&cache_config, config_content).is_ok() {
+                cache_setup_success = true;
+            }
+        }
+
+        // Only set cache config if the file was successfully created or exists
+        if cache_setup_success {
+            builder = builder.with_cache_config(&cache_config);
+        }
+
         if let Some(limit) = self.fuel_limit {
             builder = builder.with_fuel_limit(limit);
         }

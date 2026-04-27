@@ -1,6 +1,7 @@
 //! Single file linting logic.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -16,68 +17,90 @@ use crate::diagnostic_dist::distribute_diagnostics;
 use crate::error::LinterError;
 use crate::ignore_range::extract_ignore_ranges;
 use crate::result::LintResult;
-use crate::safe_io::{
-    check_file_metadata, clear_nonblocking, handle_io_err, open_nonblocking, read_to_string_bounded,
-};
 
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-/// Context for linting a single file.
-pub struct LintContext<'a> {
-    pub path: &'a Path,
-    pub host: &'a mut PluginHost,
-    pub tokenizer: &'a Arc<Tokenizer>,
-    pub config_hash: &'a [u8; 32],
-    pub cache: &'a Mutex<CacheManager>,
-    pub enabled_rules: &'a HashSet<&'a str>,
-    pub rule_versions: &'a HashMap<String, String>,
-    pub timings_enabled: bool,
-}
-
-pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, LinterError> {
-    let LintContext {
-        path,
-        host,
-        tokenizer,
-        config_hash,
-        cache,
-        enabled_rules,
-        rule_versions,
-        timings_enabled,
-    } = ctx;
-    let timings_enabled = *timings_enabled;
+pub fn lint_file_internal(
+    path: &Path,
+    host: &mut PluginHost,
+    tokenizer: &Arc<Tokenizer>,
+    config_hash: &[u8; 32],
+    cache: &Mutex<CacheManager>,
+    enabled_rules: &HashSet<&str>,
+    timings_enabled: bool,
+) -> Result<LintResult, LinterError> {
     debug!("Linting {}", path.display());
 
     // Open with O_NONBLOCK so that opening a FIFO (or other special file)
     // does not block. This eliminates the TOCTOU window between a metadata
     // check and the actual open call.
-    let mut file = handle_io_err(open_nonblocking(path), path, "Failed to open")?;
+    let file = open_nonblocking(path)
+        .map_err(|e| LinterError::file(format!("Failed to open {}: {}", path.display(), e)))?;
 
     // Verify the opened fd refers to a regular file (TOCTOU-safe, uses fstat).
-    let metadata = handle_io_err(file.metadata(), path, "Failed to read metadata for")?;
-    check_file_metadata(&metadata, MAX_FILE_SIZE, path)?;
+    let metadata = file.metadata().map_err(|e| {
+        LinterError::file(format!(
+            "Failed to read metadata for {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
 
+    if !metadata.is_file() {
+        return Err(LinterError::file(format!(
+            "Not a regular file: {}",
+            path.display()
+        )));
+    }
+
+    if metadata.len() > MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            MAX_FILE_SIZE,
+            path.display()
+        )));
+    }
+
+    let mut content = String::new();
     // Clear O_NONBLOCK so that subsequent reads block normally.
-    handle_io_err(
-        clear_nonblocking(&file),
-        path,
-        "Failed to clear O_NONBLOCK on",
-    )?;
+    clear_nonblocking(&file).map_err(|e| {
+        LinterError::file(format!(
+            "Failed to clear O_NONBLOCK on {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    file.take(MAX_FILE_SIZE + 1)
+        .read_to_string(&mut content)
+        .map_err(|e| {
+            // EAGAIN / EWOULDBLOCK can theoretically appear if O_NONBLOCK was not
+            // successfully cleared; surface a clear error in that case.
+            #[cfg(unix)]
+            if e.raw_os_error() == Some(libc::EAGAIN) {
+                return LinterError::file(format!(
+                    "Failed to read {} (EAGAIN: O_NONBLOCK still set)",
+                    path.display()
+                ));
+            }
+            LinterError::file(format!("Failed to read {}: {}", path.display(), e))
+        })?;
 
-    // Bounded read: caps content at MAX_FILE_SIZE even when metadata.len()
-    // underreports the file size (e.g. pseudo-files under /proc, /dev/zero).
-    let content = read_to_string_bounded(&mut file, MAX_FILE_SIZE, path)?;
+    if content.len() as u64 > MAX_FILE_SIZE {
+        return Err(LinterError::file(format!(
+            "File size exceeds limit of {} bytes: {}",
+            MAX_FILE_SIZE,
+            path.display()
+        )));
+    }
 
     let content_hash = CacheManager::hash_content(&content);
+    let rule_versions = super::rule_loader::get_rule_versions_from_host(host);
 
-    // Optimization: rule_versions is passed in by reference rather than calling
-    // super::rule_loader::get_rule_versions_from_host(host) here to avoid
-    // an unnecessary HashMap allocation and insertions for every file being linted.
     {
         let cache_guard = cache
             .lock()
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
-        if cache_guard.is_valid(path, &content_hash, config_hash, rule_versions)
+        if cache_guard.is_valid(path, &content_hash, config_hash, &rule_versions)
             && let Some(entry) = cache_guard.get(path)
         {
             debug!("Using cached result for {}", path.display());
@@ -98,10 +121,8 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
 
     let ignore_ranges = extract_ignore_ranges(&ast);
 
-    // host is &mut &'a mut PluginHost after destructuring LintContext.
-    // We double-dereference and take an immutable borrow to pass &PluginHost to read-only helpers.
-    let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), &**host, enabled_rules);
-    let needs_sentences = any_rule_needs_sentences(host.loaded_rules(), &**host, enabled_rules);
+    let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), host, enabled_rules);
+    let needs_sentences = any_rule_needs_sentences(host.loaded_rules(), host, enabled_rules);
 
     let tokens = if needs_morphology {
         tokenizer
@@ -122,10 +143,10 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
         let cache_guard = cache
             .lock()
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
-        cache_guard.reconcile_blocks(path, &current_blocks, config_hash, rule_versions)
+        cache_guard.reconcile_blocks(path, &current_blocks, config_hash, &rule_versions)
     };
 
-    let (global_rule_names, block_rule_names) = get_classified_rules(&**host, enabled_rules);
+    let (global_rule_names, block_rule_names) = get_classified_rules(host, enabled_rules);
 
     let mut global_diagnostics = Vec::new();
     let mut block_diagnostics = Vec::new();
@@ -261,8 +282,8 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
             .map_err(|_| LinterError::Internal("Cache mutex poisoned".to_string()))?;
         let entry = tsuzulint_cache::CacheEntry::new(
             content_hash,
-            **config_hash,
-            rule_versions.clone(),
+            *config_hash,
+            rule_versions,
             final_diagnostics.clone(),
             new_blocks,
         );
@@ -357,6 +378,50 @@ fn select_parser(extension: &str) -> FileParser {
     } else {
         FileParser::Text(PlainTextParser::new())
     }
+}
+
+/// Opens a file with `O_NONBLOCK` on Unix to avoid blocking on FIFOs or other
+/// special files.  After a successful open the caller must clear `O_NONBLOCK`
+/// before performing blocking reads (use [`clear_nonblocking`]).
+///
+/// On non-Unix platforms this is a plain `fs::File::open`.
+fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::File::open(path)
+    }
+}
+
+/// Clears the `O_NONBLOCK` flag on an open file descriptor so that subsequent
+/// reads block normally.  This is a no-op on non-Unix platforms.
+#[cfg(unix)]
+fn clear_nonblocking(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd as _;
+    let fd = file.as_raw_fd();
+    // SAFETY: `fd` is a valid, open file descriptor owned by `file`.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let new_flags = flags & !libc::O_NONBLOCK;
+    // SAFETY: same fd, setting valid flags.
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, new_flags) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn clear_nonblocking(_file: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn to_raw_value<T: serde::Serialize>(
