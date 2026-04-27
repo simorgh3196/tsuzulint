@@ -1,0 +1,4 @@
+## 2024-04-15 - [OOM/DoS Vulnerability in tsuzulint_registry]
+**Vulnerability:** Unbounded file reads were present in `resolver.rs` when loading WASM plugins from local file paths, potentially leading to Out-Of-Memory (OOM) errors and DoS vulnerabilities from malicious or excessively large local files.
+**Learning:** The system has max file sizes (DEFAULT_MAX_SIZE), but these were only being enforced when fetching remote payloads, not when reading them locally. It is a critical learning that boundaries for memory safety should exist indiscriminately, irrespective of the artifact source.
+**Prevention:** Before reading from local paths (or remotely) to memory, use `file.metadata()` to check size limits against expected thresholds, and wrap `file.take(max_size).read_to_end(&mut buffer)` to strictly enforce memory limits against huge inputs.
