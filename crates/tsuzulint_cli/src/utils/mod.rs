@@ -45,3 +45,40 @@ pub fn read_to_string_with_limit(path: &Path, limit: u64) -> std::io::Result<Str
     }
     Ok(content)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_to_string_with_limit_success() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"hello world").unwrap();
+        let content = read_to_string_with_limit(file.path(), 100).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn test_read_to_string_with_limit_exceeds_metadata_limit() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(b"hello world").unwrap();
+        let err = read_to_string_with_limit(file.path(), 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds size limit"));
+    }
+
+    #[test]
+    fn test_read_to_string_with_limit_exceeds_read_limit() {
+        // We can simulate an issue where metadata lies or we just want to test the pseudo-file path
+        // Actually, since we check metadata first, testing the second check is tricky with regular files.
+        // But we can test it using /dev/zero on unix.
+        #[cfg(unix)]
+        {
+            let err = read_to_string_with_limit(Path::new("/dev/zero"), 5).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+            assert!(err.to_string().contains("exceeds size limit"));
+        }
+    }
+}
