@@ -177,7 +177,8 @@ fn find_manifest(wasm_path: &Path) -> Option<PathBuf> {
 }
 
 fn load_manifest(path: &Path) -> Result<tsuzulint_manifest::ExternalRuleManifest, AddRuleError> {
-    let content = std::fs::read_to_string(path).map_err(AddRuleError::ManifestReadError)?;
+    let content = crate::utils::read_to_string_with_limit(path, 1024 * 1024)
+        .map_err(AddRuleError::ManifestReadError)?;
 
     tsuzulint_manifest::validate_manifest(&content).map_err(AddRuleError::ManifestParseError)
 }
@@ -537,7 +538,11 @@ mod manifest_tests {
         assert!(target_dir.join("tsuzulint-rule.json").exists());
 
         let saved_manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(target_dir.join("tsuzulint-rule.json")).unwrap(),
+            &crate::utils::read_to_string_with_limit(
+                target_dir.join("tsuzulint-rule.json"),
+                1024 * 1024,
+            )
+            .unwrap(),
         )
         .unwrap();
 
@@ -594,7 +599,11 @@ mod manifest_tests {
         assert!(result.is_ok());
 
         let saved_manifest: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(target_dir.join("tsuzulint-rule.json")).unwrap(),
+            &crate::utils::read_to_string_with_limit(
+                target_dir.join("tsuzulint-rule.json"),
+                1024 * 1024,
+            )
+            .unwrap(),
         )
         .unwrap();
 
