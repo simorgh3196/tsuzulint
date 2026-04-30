@@ -39,3 +39,41 @@ pub fn read_to_string_with_limit<P: AsRef<Path>>(path: P, limit: u64) -> std::io
 
     Ok(buffer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_success() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "hello world").unwrap();
+        let path = file.path();
+
+        let result = read_to_string_with_limit(path, 100).unwrap();
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn test_read_metadata_limit_exceeded() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "hello world").unwrap(); // 11 bytes
+        let path = file.path();
+
+        let err = read_to_string_with_limit(path, 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds size limit"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_stream_limit_exceeded() {
+        // /dev/zero has 0 metadata length but infinite stream
+        let path = Path::new("/dev/zero");
+        let err = read_to_string_with_limit(path, 100).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("File stream exceeds size limit"));
+    }
+}
