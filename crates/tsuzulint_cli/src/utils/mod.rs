@@ -34,3 +34,49 @@ pub fn create_tokio_runtime() -> Result<Runtime> {
         .build()
         .into_diagnostic()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_within_limit() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "hello").unwrap();
+        let content = read_to_string_with_limit(file.path(), 10).unwrap();
+        assert_eq!(content, "hello");
+    }
+
+    #[test]
+    fn test_read_exact_limit() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "hello").unwrap();
+        let content = read_to_string_with_limit(file.path(), 5).unwrap();
+        assert_eq!(content, "hello");
+    }
+
+    #[test]
+    fn test_read_exceeds_limit() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "hello world").unwrap();
+        let err = read_to_string_with_limit(file.path(), 5).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            err.to_string()
+                .contains("File size exceeds limit of 5 bytes")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_pseudo_file_bounded() {
+        // /dev/zero is infinite. If the read is bounded correctly, it will
+        // hit the limit and return an error rather than looping infinitely.
+        let path = Path::new("/dev/zero");
+        let err = read_to_string_with_limit(path, 10).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds limit"));
+    }
+}
