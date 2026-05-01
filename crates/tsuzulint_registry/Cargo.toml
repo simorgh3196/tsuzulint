@@ -27,5 +27,5 @@ url = "2.5.8"
 
 [dev-dependencies]
 wiremock.workspace = true
-proptest = "1.10"
+proptest = "1.11"
 tempfile.workspace = true
