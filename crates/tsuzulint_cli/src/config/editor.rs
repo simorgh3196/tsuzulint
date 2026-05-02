@@ -40,7 +40,8 @@ pub fn update_config_with_plugin(
         ));
     }
 
-    let content = crate::utils::read_to_string_with_limit(&path_to_use, 1024 * 1024).into_diagnostic()?;
+    let content =
+        crate::utils::read_to_string_with_limit(&path_to_use, 1024 * 1024).into_diagnostic()?;
 
     let parse_options = ParseOptions::default();
     let collect_options = CollectOptions::default();

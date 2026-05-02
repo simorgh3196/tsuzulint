@@ -1,9 +1,9 @@
 //! CLI utility functions
 
+use miette::{IntoDiagnostic, Result};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
-use miette::{IntoDiagnostic, Result};
 use tokio::runtime::Runtime;
 
 pub fn create_tokio_runtime() -> Result<Runtime> {
@@ -67,7 +67,12 @@ mod tests {
 
         let result = read_to_string_with_limit(path, 4);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("exceeds size limit"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds size limit")
+        );
     }
 
     #[test]
@@ -78,6 +83,11 @@ mod tests {
         // It should then be caught by the limit + 1 byte read check.
         let result = read_to_string_with_limit(path, 10);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("exceeds size limit"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds size limit")
+        );
     }
 }
