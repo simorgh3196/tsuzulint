@@ -42,3 +42,42 @@ pub fn read_to_string_with_limit(path: &Path, limit: u64) -> std::io::Result<Str
 
     Ok(buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_to_string_with_limit_success() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "hello").unwrap();
+        let path = temp_file.path();
+
+        let result = read_to_string_with_limit(path, 100).unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_read_to_string_with_limit_exceeds_metadata_limit() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "123456789").unwrap();
+        let path = temp_file.path();
+
+        let result = read_to_string_with_limit(path, 4);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("exceeds size limit"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_to_string_with_limit_pseudo_file() {
+        let path = Path::new("/dev/zero");
+        // /dev/zero will report 0 size, so it will bypass the metadata check.
+        // It should then be caught by the limit + 1 byte read check.
+        let result = read_to_string_with_limit(path, 10);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("exceeds size limit"));
+    }
+}
