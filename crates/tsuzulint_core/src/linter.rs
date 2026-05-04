@@ -187,6 +187,7 @@ mod tests {
     fn test_linter_with_cache_disabled() {
         let (mut config, _temp) = test_config();
         config.cache = crate::config::CacheConfig::Boolean(false);
+        config.timings = true;
 
         let linter = Linter::new(config).unwrap();
         let temp_dir = tempfile::tempdir().unwrap();

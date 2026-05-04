@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 use tsuzulint_ast::AstArena;
 use tsuzulint_cache::CacheManager;
@@ -148,12 +148,7 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
                     Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                 }
                 if timings_enabled {
-                    let elapsed = start.elapsed();
-                    if let Some(dur) = timings.get_mut(*rule) {
-                        *dur += elapsed;
-                    } else {
-                        timings.insert(rule.to_string(), elapsed);
-                    }
+                    *timings.entry(rule.to_string()).or_insert(Duration::ZERO) += start.elapsed();
                 }
             } else {
                 let ast_raw = to_raw_value(&ast, "AST")?;
@@ -170,12 +165,8 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
                         Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                     }
                     if timings_enabled {
-                        let elapsed = start.elapsed();
-                        if let Some(dur) = timings.get_mut(*rule) {
-                            *dur += elapsed;
-                        } else {
-                            timings.insert(rule.to_string(), elapsed);
-                        }
+                        *timings.entry(rule.to_string()).or_insert(Duration::ZERO) +=
+                            start.elapsed();
                     }
                 }
             }
@@ -202,12 +193,8 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
                                 Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                             }
                             if timings_enabled {
-                                let elapsed = start.elapsed();
-                                if let Some(dur) = timings.get_mut(*rule) {
-                                    *dur += elapsed;
-                                } else {
-                                    timings.insert(rule.to_string(), elapsed);
-                                }
+                                *timings.entry(rule.to_string()).or_insert(Duration::ZERO) +=
+                                    start.elapsed();
                             }
                         } else if let Ok(node_raw) = to_raw_value(node, "block node") {
                             // Serialize request once for all rules running on this block
@@ -226,12 +213,9 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
                                             Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                         }
                                         if timings_enabled {
-                                            let elapsed = start.elapsed();
-                                            if let Some(dur) = timings.get_mut(*rule) {
-                                                *dur += elapsed;
-                                            } else {
-                                                timings.insert(rule.to_string(), elapsed);
-                                            }
+                                            *timings
+                                                .entry(rule.to_string())
+                                                .or_insert(Duration::ZERO) += start.elapsed();
                                         }
                                     }
                                 }
