@@ -199,7 +199,8 @@ mod tests {
             "span": { "start": 10, "end": 20 },
             "severity": "error",
             "certainty": "certain"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let diag_warn: Diagnostic = serde_json::from_value(serde_json::json!({
             "rule_id": "rule-warn",
@@ -207,7 +208,8 @@ mod tests {
             "span": { "start": 30, "end": 40 },
             "severity": "warning",
             "certainty": "certain"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let diag_info: Diagnostic = serde_json::from_value(serde_json::json!({
             "rule_id": "rule-info",
@@ -215,7 +217,8 @@ mod tests {
             "span": { "start": 50, "end": 60 },
             "severity": "info",
             "certainty": "certain"
-        })).unwrap();
+        }))
+        .unwrap();
 
         let result = LintResult {
             path: PathBuf::from("test.md"),
