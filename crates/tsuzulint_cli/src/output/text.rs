@@ -71,7 +71,10 @@ pub(crate) fn output_text_to<W: std::io::Write>(
     Ok(())
 }
 
-fn output_timings_to<W: std::io::Write>(mut writer: W, results: &[LintResult]) -> std::io::Result<()> {
+fn output_timings_to<W: std::io::Write>(
+    mut writer: W,
+    results: &[LintResult],
+) -> std::io::Result<()> {
     let mut total_duration = Duration::new(0, 0);
     let mut rule_timings: HashMap<&str, Duration> = HashMap::new();
 
@@ -96,7 +99,11 @@ fn output_timings_to<W: std::io::Write>(mut writer: W, results: &[LintResult]) -
             } else {
                 0.0
             };
-            writeln!(writer, "{:<30} | {:<15?} | {:<10.1}%", rule, duration, percentage)?;
+            writeln!(
+                writer,
+                "{:<30} | {:<15?} | {:<10.1}%",
+                rule, duration, percentage
+            )?;
         }
         writeln!(writer, "{:-<30}-+-{:-<15}-+-{:-<10}", "", "", "")?;
         writeln!(writer, "{:<30} | {:<15?}", "Total", total_duration)?;
