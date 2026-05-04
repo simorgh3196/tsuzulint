@@ -64,7 +64,11 @@ fn output_timings(results: &[LintResult]) {
 
     for result in results {
         for (rule, duration) in &result.timings {
-            *rule_timings.entry(rule.clone()).or_default() += *duration;
+            if let Some(dur) = rule_timings.get_mut(rule) {
+                *dur += *duration;
+            } else {
+                rule_timings.insert(rule.clone(), *duration);
+            }
             total_duration += *duration;
         }
     }
