@@ -188,4 +188,48 @@ mod tests {
         assert!(out.contains("rule-b"));
         assert!(out.contains("Total"));
     }
+
+    #[test]
+    fn test_output_text_to_with_diagnostics() {
+        let mut buf = Vec::new();
+
+        let diag: Diagnostic = serde_json::from_value(serde_json::json!({
+            "rule_id": "rule-err",
+            "message": "this is an error",
+            "span": { "start": 10, "end": 20 },
+            "severity": "error",
+            "certainty": "certain"
+        })).unwrap();
+
+        let diag_warn: Diagnostic = serde_json::from_value(serde_json::json!({
+            "rule_id": "rule-warn",
+            "message": "this is a warning",
+            "span": { "start": 30, "end": 40 },
+            "severity": "warning",
+            "certainty": "certain"
+        })).unwrap();
+
+        let diag_info: Diagnostic = serde_json::from_value(serde_json::json!({
+            "rule_id": "rule-info",
+            "message": "this is info",
+            "span": { "start": 50, "end": 60 },
+            "severity": "info",
+            "certainty": "certain"
+        })).unwrap();
+
+        let result = LintResult {
+            path: PathBuf::from("test.md"),
+            diagnostics: vec![diag, diag_warn, diag_info],
+            from_cache: true,
+            timings: HashMap::new(),
+        };
+
+        super::output_text_to(&mut buf, &[result], false).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("test.md:"));
+        assert!(out.contains("10:20 error [rule-err]: this is an error"));
+        assert!(out.contains("30:40 warning [rule-warn]: this is a warning"));
+        assert!(out.contains("50:60 info [rule-info]: this is info"));
+        assert!(out.contains("Checked 1 files (1 from cache), found 3 issues"));
+    }
 }
