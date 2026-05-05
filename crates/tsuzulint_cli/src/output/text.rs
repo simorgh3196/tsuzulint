@@ -97,6 +97,8 @@ mod tests {
     use std::path::PathBuf;
     use tsuzulint_core::{Diagnostic, LintResult};
 
+    use super::output_timings;
+
     #[test]
     fn test_count_displayable_issues() {
         let diag1: Diagnostic = serde_json::from_value(serde_json::json!({
@@ -126,5 +128,41 @@ mod tests {
 
         // We only expect 1 displayable issue (the Certain one)
         assert_eq!(count_displayable_issues(&[result]), 1);
+    }
+
+    #[test]
+    fn test_output_timings() {
+        let mut timings1 = HashMap::new();
+        timings1.insert("rule1".to_string(), std::time::Duration::from_millis(100));
+        timings1.insert("rule2".to_string(), std::time::Duration::from_millis(50));
+
+        let mut timings2 = HashMap::new();
+        timings2.insert("rule1".to_string(), std::time::Duration::from_millis(150));
+        timings2.insert("rule3".to_string(), std::time::Duration::from_millis(10));
+
+        let result1 = LintResult {
+            path: PathBuf::from("test1.md"),
+            diagnostics: vec![],
+            from_cache: false,
+            timings: timings1,
+        };
+        let result2 = LintResult {
+            path: PathBuf::from("test2.md"),
+            diagnostics: vec![],
+            from_cache: false,
+            timings: timings2,
+        };
+
+        // Just call it to ensure it doesn't panic and to get coverage on the lines
+        output_timings(&[result1, result2]);
+
+        // Also test with empty timings to hit the `!rule_timings.is_empty()` branch
+        let empty_result = LintResult {
+            path: PathBuf::from("test3.md"),
+            diagnostics: vec![],
+            from_cache: false,
+            timings: HashMap::new(),
+        };
+        output_timings(&[empty_result]);
     }
 }
