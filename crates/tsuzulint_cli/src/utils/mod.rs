@@ -26,13 +26,13 @@ pub fn read_to_string_with_limit<P: AsRef<Path>>(
     let mut content = String::new();
 
     // Check metadata len first as a fast path
-    if let Ok(metadata) = file.metadata() {
-        if metadata.len() > limit as u64 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("File too large. Exceeds {} byte limit", limit),
-            ));
-        }
+    if let Ok(metadata) = file.metadata()
+        && metadata.len() > limit as u64
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("File too large. Exceeds {} byte limit", limit),
+        ));
     }
 
     file.take((limit + 1) as u64).read_to_string(&mut content)?;
