@@ -177,7 +177,7 @@ fn find_manifest(wasm_path: &Path) -> Option<PathBuf> {
 }
 
 fn load_manifest(path: &Path) -> Result<tsuzulint_manifest::ExternalRuleManifest, AddRuleError> {
-    let content = std::fs::read_to_string(path).map_err(AddRuleError::ManifestReadError)?;
+    let content = crate::utils::read_to_string_with_limit(path, None).map_err(AddRuleError::ManifestReadError)?;
 
     tsuzulint_manifest::validate_manifest(&content).map_err(AddRuleError::ManifestParseError)
 }
