@@ -127,4 +127,24 @@ mod tests {
         // We only expect 1 displayable issue (the Certain one)
         assert_eq!(count_displayable_issues(&[result]), 1);
     }
+
+    #[test]
+    fn test_output_timings_coverage() {
+        use super::output_timings;
+        use std::time::Duration;
+
+        let mut timings = HashMap::new();
+        timings.insert("rule1".to_string(), Duration::from_millis(100));
+        timings.insert("rule2".to_string(), Duration::from_millis(200));
+
+        let result = LintResult {
+            path: PathBuf::from("test.md"),
+            diagnostics: vec![],
+            from_cache: false,
+            timings,
+        };
+
+        // Just ensure it doesn't panic and we cover the newly modified code path.
+        output_timings(&[result]);
+    }
 }
