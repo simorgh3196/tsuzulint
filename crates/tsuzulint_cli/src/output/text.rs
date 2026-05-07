@@ -131,9 +131,9 @@ mod tests {
     #[test]
     fn test_output_timings() {
         use std::collections::HashMap;
+        use std::path::PathBuf;
         use std::time::Duration;
         use tsuzulint_core::LintResult;
-        use std::path::PathBuf;
 
         let mut timings1 = HashMap::new();
         timings1.insert("rule1".to_string(), Duration::from_millis(100));
