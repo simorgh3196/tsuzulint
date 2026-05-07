@@ -127,4 +127,39 @@ mod tests {
         // We only expect 1 displayable issue (the Certain one)
         assert_eq!(count_displayable_issues(&[result]), 1);
     }
+
+    #[test]
+    fn test_output_timings() {
+        use std::collections::HashMap;
+        use std::time::Duration;
+        use tsuzulint_core::LintResult;
+        use std::path::PathBuf;
+
+        let mut timings1 = HashMap::new();
+        timings1.insert("rule1".to_string(), Duration::from_millis(100));
+        timings1.insert("rule2".to_string(), Duration::from_millis(50));
+
+        let mut timings2 = HashMap::new();
+        timings2.insert("rule1".to_string(), Duration::from_millis(150));
+        timings2.insert("rule3".to_string(), Duration::from_millis(200));
+
+        let result1 = LintResult {
+            path: PathBuf::from("file1.md"),
+            diagnostics: vec![],
+            from_cache: false,
+            timings: timings1,
+        };
+
+        let result2 = LintResult {
+            path: PathBuf::from("file2.md"),
+            diagnostics: vec![],
+            from_cache: false,
+            timings: timings2,
+        };
+
+        let results = vec![result1, result2];
+
+        // This should not panic and should cover the logic.
+        super::output_timings(&results);
+    }
 }
