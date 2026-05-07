@@ -60,11 +60,11 @@ pub fn output_text(results: &[LintResult], timings: bool) {
 
 fn output_timings(results: &[LintResult]) {
     let mut total_duration = Duration::new(0, 0);
-    let mut rule_timings: HashMap<String, Duration> = HashMap::new();
+    let mut rule_timings: HashMap<&str, Duration> = HashMap::new();
 
     for result in results {
         for (rule, duration) in &result.timings {
-            *rule_timings.entry(rule.clone()).or_default() += *duration;
+            *rule_timings.entry(rule.as_str()).or_default() += *duration;
             total_duration += *duration;
         }
     }
