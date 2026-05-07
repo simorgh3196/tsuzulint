@@ -95,6 +95,7 @@ mod tests {
     use super::count_displayable_issues;
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::time::Duration;
     use tsuzulint_core::{Diagnostic, LintResult};
 
     #[test]
@@ -126,5 +127,30 @@ mod tests {
 
         // We only expect 1 displayable issue (the Certain one)
         assert_eq!(count_displayable_issues(&[result]), 1);
+    }
+
+    #[test]
+    fn test_output_timings() {
+        let mut timings1 = HashMap::new();
+        timings1.insert("rule1".to_string(), Duration::from_millis(150));
+        timings1.insert("rule2".to_string(), Duration::from_millis(50));
+
+        let result1 = LintResult {
+            path: PathBuf::from("test1.md"),
+            diagnostics: vec![],
+            from_cache: false,
+            timings: timings1,
+        };
+
+        let mut timings2 = HashMap::new();
+        timings2.insert("rule2".to_string(), Duration::from_millis(100));
+        let result2 = LintResult {
+            path: PathBuf::from("test2.md"),
+            diagnostics: vec![],
+            from_cache: false,
+            timings: timings2,
+        };
+
+        super::output_timings(&[result1, result2]);
     }
 }
