@@ -813,3 +813,40 @@ mod tests {
         assert!(parser.extensions().contains(&"md"));
     }
 }
+
+#[cfg(test)]
+mod timings_tests {
+    use super::*;
+
+    #[test]
+    fn test_timings_enabled_behavior() {
+        let mut timings = HashMap::new();
+        let rule_name = "test_rule";
+
+        let start = Instant::now();
+        let elapsed = start.elapsed();
+        let timings_enabled = true;
+
+        if timings_enabled {
+            match timings.get_mut(rule_name) {
+                Some(total) => *total += elapsed,
+                None => {
+                    timings.insert(rule_name.to_string(), elapsed);
+                }
+            }
+        }
+        assert!(timings.contains_key("test_rule"));
+
+        let start = Instant::now();
+        let elapsed2 = start.elapsed();
+        if timings_enabled {
+            match timings.get_mut(rule_name) {
+                Some(total) => *total += elapsed2,
+                None => {
+                    timings.insert(rule_name.to_string(), elapsed2);
+                }
+            }
+        }
+        assert_eq!(*timings.get("test_rule").unwrap(), elapsed + elapsed2);
+    }
+}
