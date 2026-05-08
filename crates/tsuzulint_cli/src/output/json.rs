@@ -20,12 +20,8 @@ pub(crate) fn output_json_to<W: std::io::Write>(
             })
         })
         .collect();
-    writeln!(
-        writer,
-        "{}",
-        serde_json::to_string_pretty(&output).into_diagnostic()?
-    )
-    .into_diagnostic()?;
+    serde_json::to_writer_pretty(&mut writer, &output).into_diagnostic()?;
+    writeln!(writer).into_diagnostic()?;
     Ok(())
 }
 
