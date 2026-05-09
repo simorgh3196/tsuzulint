@@ -60,11 +60,11 @@ pub fn output_text(results: &[LintResult], timings: bool) {
 
 fn output_timings(results: &[LintResult]) {
     let mut total_duration = Duration::new(0, 0);
-    let mut rule_timings: HashMap<&str, Duration> = HashMap::new();
+    let mut rule_timings: HashMap<String, Duration> = HashMap::new();
 
     for result in results {
         for (rule, duration) in &result.timings {
-            *rule_timings.entry(rule.as_str()).or_default() += *duration;
+            *rule_timings.entry(rule.clone()).or_default() += *duration;
             total_duration += *duration;
         }
     }
@@ -126,5 +126,35 @@ mod tests {
 
         // We only expect 1 displayable issue (the Certain one)
         assert_eq!(count_displayable_issues(&[result]), 1);
+    }
+
+    #[test]
+    fn test_output_timings() {
+        use std::time::Duration;
+
+        let mut timings1 = HashMap::new();
+        timings1.insert("rule1".to_string(), Duration::from_millis(100));
+        timings1.insert("rule2".to_string(), Duration::from_millis(50));
+
+        let mut timings2 = HashMap::new();
+        timings2.insert("rule1".to_string(), Duration::from_millis(200));
+
+        let results = vec![
+            LintResult {
+                path: PathBuf::from("test1.md"),
+                diagnostics: vec![],
+                from_cache: false,
+                timings: timings1,
+            },
+            LintResult {
+                path: PathBuf::from("test2.md"),
+                diagnostics: vec![],
+                from_cache: false,
+                timings: timings2,
+            },
+        ];
+
+        // Ensure it doesn't panic
+        super::output_timings(&results);
     }
 }
