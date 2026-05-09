@@ -12,7 +12,10 @@ pub fn create_tokio_runtime() -> Result<Runtime> {
 
 /// Reads a file to a string with a size limit to prevent memory exhaustion
 /// vulnerabilities when reading untrusted input like configs or manifests.
-pub fn read_to_string_with_limit<P: AsRef<std::path::Path>>(path: P, limit: u64) -> std::io::Result<String> {
+pub fn read_to_string_with_limit<P: AsRef<std::path::Path>>(
+    path: P,
+    limit: u64,
+) -> std::io::Result<String> {
     use std::io::Read;
     let file = std::fs::File::open(path)?;
     let metadata = file.metadata()?;
