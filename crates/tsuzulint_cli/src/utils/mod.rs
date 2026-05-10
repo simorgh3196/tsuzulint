@@ -36,3 +36,41 @@ pub fn create_tokio_runtime() -> Result<Runtime> {
         .build()
         .into_diagnostic()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_to_string_with_limit_success() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "hello").unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        let content = read_to_string_with_limit(&path, 10).unwrap();
+        assert_eq!(content, "hello");
+    }
+
+    #[test]
+    fn test_read_to_string_with_limit_metadata_too_large() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "hello").unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        let err = read_to_string_with_limit(&path, 3).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(err.to_string(), "file too large");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_to_string_with_limit_dev_zero() {
+        let path = "/dev/zero";
+        // /dev/zero has size 0 but is infinite.
+        let err = read_to_string_with_limit(path, 10).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(err.to_string(), "file too large");
+    }
+}
