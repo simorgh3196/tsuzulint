@@ -129,4 +129,36 @@ mod tests {
         // We only expect 1 displayable issue (the Certain one)
         assert_eq!(count_displayable_issues(&[result]), 1);
     }
+
+    #[test]
+    fn test_output_timings_coverage() {
+        use super::output_timings;
+        use std::time::Duration;
+
+        let mut timings1 = HashMap::new();
+        timings1.insert("rule1".to_string(), Duration::from_millis(100));
+        timings1.insert("rule2".to_string(), Duration::from_millis(50));
+
+        let mut timings2 = HashMap::new();
+        timings2.insert("rule1".to_string(), Duration::from_millis(200));
+
+        let results = vec![
+            LintResult {
+                path: PathBuf::from("test1.md"),
+                diagnostics: vec![],
+                from_cache: false,
+                timings: timings1,
+            },
+            LintResult {
+                path: PathBuf::from("test2.md"),
+                diagnostics: vec![],
+                from_cache: false,
+                timings: timings2,
+            },
+        ];
+
+        // This mainly tests that the optimization to use `&str` keys
+        // doesn't panic and executes cleanly. We don't capture stdout here.
+        output_timings(&results);
+    }
 }
