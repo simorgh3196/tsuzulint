@@ -130,8 +130,8 @@ mod tests {
 
     #[test]
     fn test_output_timings_execution() {
-        use std::time::Duration;
         use super::output_timings;
+        use std::time::Duration;
 
         let mut timings = HashMap::new();
         timings.insert("rule1".to_string(), Duration::from_millis(100));
