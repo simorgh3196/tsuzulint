@@ -26,3 +26,26 @@ pub fn read_to_string_with_limit<P: AsRef<std::path::Path>>(
     }
     Ok(buffer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_read_to_string_with_limit_success() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"hello").unwrap();
+        let s = read_to_string_with_limit(tmp.path(), 100).unwrap();
+        assert_eq!(s, "hello");
+    }
+
+    #[test]
+    fn test_read_to_string_with_limit_exceeds() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"123456789").unwrap();
+        let err = read_to_string_with_limit(tmp.path(), 4).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(err.to_string(), "File too large");
+    }
+}
