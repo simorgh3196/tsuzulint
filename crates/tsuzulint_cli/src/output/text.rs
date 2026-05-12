@@ -95,6 +95,7 @@ mod tests {
     use super::count_displayable_issues;
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::time::Duration;
     use tsuzulint_core::{Diagnostic, LintResult};
 
     #[test]
@@ -126,5 +127,38 @@ mod tests {
 
         // We only expect 1 displayable issue (the Certain one)
         assert_eq!(count_displayable_issues(&[result]), 1);
+    }
+
+    #[test]
+    fn test_output_text_with_timings() {
+        let diag1: Diagnostic = serde_json::from_value(serde_json::json!({
+            "rule_id": "rule1",
+            "message": "error",
+            "span": { "start": 0, "end": 5 },
+            "severity": "error",
+            "certainty": "certain"
+        }))
+        .unwrap();
+
+        let mut timings = HashMap::new();
+        timings.insert("rule1".to_string(), Duration::from_millis(10));
+        timings.insert("rule2".to_string(), Duration::from_millis(20));
+
+        let result = LintResult {
+            path: PathBuf::from("test.md"),
+            diagnostics: vec![diag1],
+            from_cache: false,
+            timings,
+        };
+
+        let empty_result = LintResult {
+            path: PathBuf::from("empty.md"),
+            diagnostics: vec![],
+            from_cache: true,
+            timings: HashMap::new(),
+        };
+
+        // Just call it to ensure it doesn't panic and we hit the lines for coverage
+        super::output_text(&[result, empty_result], true);
     }
 }
