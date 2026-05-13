@@ -40,3 +40,40 @@ pub fn read_to_string_with_limit<P: AsRef<Path>>(path: P, limit: u64) -> std::io
 
     Ok(content)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_to_string_with_limit_success() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "Hello, World!").unwrap();
+        let content = read_to_string_with_limit(file.path(), 100).unwrap();
+        assert_eq!(content, "Hello, World!");
+    }
+
+    #[test]
+    fn test_read_to_string_with_limit_exceeds_metadata() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "Hello, World!").unwrap();
+        let result = read_to_string_with_limit(file.path(), 5);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds 5 bytes"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_read_to_string_with_limit_pseudo_file() {
+        // /dev/zero has metadata length 0, but reads forever
+        let result = read_to_string_with_limit("/dev/zero", 10);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("exceeds 10 bytes"));
+    }
+}
