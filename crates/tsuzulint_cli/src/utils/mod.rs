@@ -18,13 +18,13 @@ pub fn read_to_string_with_limit<P: AsRef<Path>>(path: P, limit: u64) -> std::io
     let file = File::open(path.as_ref())?;
 
     // Check metadata first if possible
-    if let Ok(metadata) = file.metadata() {
-        if metadata.len() > limit {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("File too large (exceeds {} bytes)", limit),
-            ));
-        }
+    if let Ok(metadata) = file.metadata()
+        && metadata.len() > limit
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("File too large (exceeds {} bytes)", limit),
+        ));
     }
 
     // Read with explicit limit to protect against pseudo-files (/dev/zero)
