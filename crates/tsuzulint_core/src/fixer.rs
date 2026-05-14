@@ -100,7 +100,7 @@ pub(crate) fn filter_overlapping_fixes(mut fixes: Vec<&Fix>) -> Vec<&Fix> {
     }
 
     // Sort by span.start in descending order (apply from end to beginning)
-    fixes.sort_by(|a, b| b.span.start.cmp(&a.span.start));
+    fixes.sort_by_key(|b| std::cmp::Reverse(b.span.start));
 
     let mut result: Vec<&Fix> = Vec::with_capacity(fixes.len());
 
