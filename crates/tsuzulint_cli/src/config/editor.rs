@@ -1,6 +1,5 @@
 //! Configuration file editing logic
 
-use std::io::Read;
 use std::path::PathBuf;
 
 use jsonc_parser::ast::ObjectPropName;
@@ -41,40 +40,8 @@ pub fn update_config_with_plugin(
         ));
     }
 
-    // Open the file once and perform metadata checks via the file descriptor to
-    // avoid a TOCTOU window where the file could be swapped between the size
-    // check and the subsequent read.
-    let mut file = std::fs::File::open(&path_to_use)
-        .map_err(|e| miette::miette!("Failed to open config {}: {}", path_to_use.display(), e))?;
-    let metadata = file.metadata().map_err(|e| {
-        miette::miette!(
-            "Failed to read metadata for {}: {}",
-            path_to_use.display(),
-            e
-        )
-    })?;
-
-    if metadata.len() > MAX_CONFIG_SIZE {
-        return Err(miette::miette!(
-            "Config file too large: {} bytes exceeds limit of {} bytes",
-            metadata.len(),
-            MAX_CONFIG_SIZE
-        ));
-    }
-
-    let mut content = String::with_capacity(metadata.len() as usize);
-    let bytes_read = (&mut file)
-        .take(MAX_CONFIG_SIZE + 1)
-        .read_to_string(&mut content)
+    let content = crate::utils::read_to_string_with_limit(&path_to_use, MAX_CONFIG_SIZE)
         .map_err(|e| miette::miette!("Failed to read config {}: {}", path_to_use.display(), e))?;
-
-    if bytes_read > MAX_CONFIG_SIZE as usize {
-        return Err(miette::miette!(
-            "Config file too large: {} bytes exceeds limit of {} bytes",
-            bytes_read,
-            MAX_CONFIG_SIZE
-        ));
-    }
 
     let parse_options = ParseOptions::default();
     let collect_options = CollectOptions::default();
@@ -344,7 +311,7 @@ mod tests {
 
         update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = crate::utils::read_to_string_with_limit(&path, MAX_CONFIG_SIZE).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
         let rules = json["rules"].as_array().expect("rules should be an array");
@@ -382,7 +349,7 @@ mod tests {
 
         update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = crate::utils::read_to_string_with_limit(&path, MAX_CONFIG_SIZE).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
         let rules = json["rules"].as_array().expect("rules should be an array");
@@ -418,7 +385,7 @@ mod tests {
 
         update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = crate::utils::read_to_string_with_limit(&path, MAX_CONFIG_SIZE).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
         assert_eq!(json["options"]["existing"], true);
@@ -453,7 +420,7 @@ mod tests {
 
         update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = crate::utils::read_to_string_with_limit(&path, MAX_CONFIG_SIZE).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
         let rules = json["rules"].as_array().unwrap();
