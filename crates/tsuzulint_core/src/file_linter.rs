@@ -32,6 +32,10 @@ pub struct LintContext<'a> {
     pub enabled_rules: &'a HashSet<&'a str>,
     pub rule_versions: &'a HashMap<String, String>,
     pub timings_enabled: bool,
+    /// Options for enabled rules keyed by rule alias. Used by the native
+    /// rule engine to hand per-rule config to rules (the WASM host path
+    /// wires options through its own `configure_rule` mechanism).
+    pub rule_options: &'a HashMap<String, serde_json::Value>,
 }
 
 pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, LinterError> {
@@ -44,6 +48,7 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
         enabled_rules,
         rule_versions,
         timings_enabled,
+        rule_options,
     } = ctx;
     let timings_enabled = *timings_enabled;
     debug!("Linting {}", path.display());
@@ -100,8 +105,21 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
 
     // host is &mut &'a mut PluginHost after destructuring LintContext.
     // We double-dereference and take an immutable borrow to pass &PluginHost to read-only helpers.
-    let needs_morphology = any_rule_needs_morphology(host.loaded_rules(), &**host, enabled_rules);
-    let needs_sentences = any_rule_needs_sentences(host.loaded_rules(), &**host, enabled_rules);
+    let wasm_needs_morphology =
+        any_rule_needs_morphology(host.loaded_rules(), &**host, enabled_rules);
+    let wasm_needs_sentences =
+        any_rule_needs_sentences(host.loaded_rules(), &**host, enabled_rules);
+    // Native rules also declare capability needs. Without this, a native rule
+    // that sets `needs_morphology()` would silently get an empty token slice.
+    let registry = crate::native_rules::builtin_registry();
+    let native_needs_morphology = enabled_rules
+        .iter()
+        .any(|name| registry.get(name).is_some_and(|r| r.needs_morphology()));
+    let native_needs_sentences = enabled_rules
+        .iter()
+        .any(|name| registry.get(name).is_some_and(|r| r.needs_sentences()));
+    let needs_morphology = wasm_needs_morphology || native_needs_morphology;
+    let needs_sentences = wasm_needs_sentences || native_needs_sentences;
 
     let tokens = if needs_morphology {
         tokenizer
@@ -233,7 +251,48 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
         }
     }
 
+    // Native rules run after WASM rules so they see the same pre-computed
+    // tokens/sentences and share the ignore_ranges-aware splitter output.
+    // We only dispatch native rules whose name appears in enabled_rules AND
+    // is not already loaded as a WASM rule — that lets a user override a
+    // built-in rule with a custom WASM plugin just by loading one with the
+    // same name.
+    let mut native_diagnostics: Vec<tsuzulint_plugin::Diagnostic> = Vec::new();
+    let mut native_rule_ids: HashSet<&str> = HashSet::new();
+    let registry = crate::native_rules::builtin_registry();
+    let null_options = serde_json::Value::Null;
+    for &rule_name in enabled_rules.iter() {
+        if host.loaded_rules().any(|loaded| loaded == rule_name) {
+            continue;
+        }
+        let Some(rule) = registry.get(rule_name) else {
+            continue;
+        };
+        native_rule_ids.insert(rule_name);
+        let options = rule_options.get(rule_name).unwrap_or(&null_options);
+        let native_ctx = crate::native_rules::RuleContext {
+            ast: &ast,
+            source: &content,
+            tokens: &tokens,
+            sentences: &sentences,
+            options,
+            file_path: Some(path),
+        };
+        let start = Instant::now();
+        native_diagnostics.extend(rule.lint(&native_ctx));
+        if timings_enabled {
+            *timings
+                .entry(rule_name.to_string())
+                .or_insert(Duration::ZERO) += start.elapsed();
+        }
+    }
+
     let mut local_diagnostics = reused_diagnostics;
+    // Native rules are recomputed for the whole file on every non-full-cache
+    // run, so any native diagnostics surviving in per-block cache from a
+    // previous run must be dropped to avoid stale results when only a subset
+    // of blocks changed.
+    local_diagnostics.retain(|d| !native_rule_ids.contains(d.rule_id.as_str()));
     local_diagnostics.extend(block_diagnostics);
 
     // Filter out diagnostics that are covered by global rules (by checking rule ID).
@@ -244,12 +303,14 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
     local_diagnostics.sort_unstable();
     local_diagnostics.dedup();
 
-    // Distribute local diagnostics to blocks.
+    // Distribute local diagnostics to blocks. Native diagnostics are kept out
+    // of this distribution so they are not stored in per-block cache.
     // We pass an empty set for global_keys because we already filtered them out from local_diagnostics.
     let new_blocks = distribute_diagnostics(current_blocks, &local_diagnostics, &HashSet::new());
 
     let mut final_diagnostics = local_diagnostics;
-    final_diagnostics.reserve(global_diagnostics.len());
+    final_diagnostics.reserve(native_diagnostics.len() + global_diagnostics.len());
+    final_diagnostics.extend(native_diagnostics);
     final_diagnostics.extend(global_diagnostics);
 
     final_diagnostics.sort_unstable();
@@ -398,6 +459,9 @@ where
                 IsolationLevel::Global => global_rules.push(name),
                 IsolationLevel::Block => block_rules.push(name),
             }
+        } else if crate::native_rules::builtin_registry().get(name).is_some() {
+            // Rule is served by the native engine; handled in `lint_file_internal`
+            // after the WASM dispatch loop. No warning to avoid noise.
         } else {
             warn!("Missing manifest for enabled rule: {}", name);
         }

@@ -26,6 +26,10 @@ pub fn lint_files(
     let enabled_rules_vec = config.enabled_rules();
     let enabled_rules: std::collections::HashSet<&str> =
         enabled_rules_vec.iter().map(|(n, _)| *n).collect();
+    let rule_options: std::collections::HashMap<String, serde_json::Value> = enabled_rules_vec
+        .iter()
+        .map(|(name, opt)| ((*name).to_string(), opt.options()))
+        .collect();
     let timings_enabled = config.timings;
 
     let results: Vec<Result<LintResult, (PathBuf, LinterError)>> = paths
@@ -64,6 +68,7 @@ pub fn lint_files(
                     enabled_rules: &enabled_rules,
                     rule_versions,
                     timings_enabled,
+                    rule_options: &rule_options,
                 };
 
                 lint_file_internal(&mut ctx).map_err(|e| (path.clone(), e))
