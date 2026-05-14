@@ -258,6 +258,7 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
     // built-in rule with a custom WASM plugin just by loading one with the
     // same name.
     let mut native_diagnostics: Vec<tsuzulint_plugin::Diagnostic> = Vec::new();
+    let mut native_rule_ids: HashSet<&str> = HashSet::new();
     let registry = crate::native_rules::builtin_registry();
     let null_options = serde_json::Value::Null;
     for &rule_name in enabled_rules.iter() {
@@ -267,6 +268,7 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
         let Some(rule) = registry.get(rule_name) else {
             continue;
         };
+        native_rule_ids.insert(rule_name);
         let options = rule_options.get(rule_name).unwrap_or(&null_options);
         let native_ctx = crate::native_rules::RuleContext {
             ast: &ast,
@@ -286,8 +288,12 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
     }
 
     let mut local_diagnostics = reused_diagnostics;
+    // Native rules are recomputed for the whole file on every non-full-cache
+    // run, so any native diagnostics surviving in per-block cache from a
+    // previous run must be dropped to avoid stale results when only a subset
+    // of blocks changed.
+    local_diagnostics.retain(|d| !native_rule_ids.contains(d.rule_id.as_str()));
     local_diagnostics.extend(block_diagnostics);
-    local_diagnostics.extend(native_diagnostics);
 
     // Filter out diagnostics that are covered by global rules (by checking rule ID).
     // Global rules take precedence, and their diagnostics should not be stored in block cache.
@@ -297,12 +303,14 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
     local_diagnostics.sort_unstable();
     local_diagnostics.dedup();
 
-    // Distribute local diagnostics to blocks.
+    // Distribute local diagnostics to blocks. Native diagnostics are kept out
+    // of this distribution so they are not stored in per-block cache.
     // We pass an empty set for global_keys because we already filtered them out from local_diagnostics.
     let new_blocks = distribute_diagnostics(current_blocks, &local_diagnostics, &HashSet::new());
 
     let mut final_diagnostics = local_diagnostics;
-    final_diagnostics.reserve(global_diagnostics.len());
+    final_diagnostics.reserve(native_diagnostics.len() + global_diagnostics.len());
+    final_diagnostics.extend(native_diagnostics);
     final_diagnostics.extend(global_diagnostics);
 
     final_diagnostics.sort_unstable();
