@@ -6,6 +6,7 @@ use crate::error::FetchError;
 use crate::fetcher::ManifestFetcher;
 use crate::manifest::{ExternalRuleManifest, HashVerifier, IntegrityError};
 use crate::security::validate_local_wasm_path;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -221,7 +222,30 @@ impl PluginResolver {
 
         let wasm_path = validate_local_wasm_path(wasm_relative, parent)?;
 
-        let bytes = std::fs::read(&wasm_path).map_err(DownloadError::IoError)?;
+        let file = std::fs::File::open(&wasm_path).map_err(DownloadError::IoError)?;
+        let metadata = file.metadata().map_err(DownloadError::IoError)?;
+
+        let max_size = crate::downloader::DEFAULT_MAX_SIZE;
+        if metadata.len() > max_size {
+            return Err(DownloadError::TooLarge {
+                size: metadata.len(),
+                max: max_size,
+            }
+            .into());
+        }
+
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(max_size + 1)
+            .read_to_end(&mut bytes)
+            .map_err(DownloadError::IoError)?;
+
+        if bytes.len() as u64 > max_size {
+            return Err(DownloadError::TooLarge {
+                size: bytes.len() as u64,
+                max: max_size,
+            }
+            .into());
+        }
 
         let expected_hash = expected_hash.ok_or_else(|| {
             ResolveError::SerializationError(
@@ -255,6 +279,53 @@ mod tests {
             "server_url": server_url
         }))
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_too_large() {
+        let dir = tempdir().unwrap();
+        let manifest_path = dir.path().join("tsuzulint-rule.json");
+        let wasm_path = dir.path().join("rule.wasm");
+
+        let manifest = json!({
+            "rule": { "name": "too-large-rule", "version": "1.0.0" },
+            "wasm": [{
+                "path": "rule.wasm",
+                "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            }]
+        });
+        std::fs::write(&manifest_path, serde_json::to_string(&manifest).unwrap()).unwrap();
+
+        // Let's make the metadata report a large file size on Windows/Linux
+        // by actually writing it but sparse if possible.
+        // It's 50MB, which is only ~0.05 seconds to write on a modern SSD. Let's do that!
+        let file = std::fs::File::create(&wasm_path).unwrap();
+        // Seek past end to make a sparse file
+        file.set_len(crate::downloader::DEFAULT_MAX_SIZE + 10)
+            .unwrap();
+
+        let cache_dir = tempdir().unwrap();
+        let resolver = PluginResolver::new()
+            .unwrap()
+            .with_cache(PluginCache::with_dir(cache_dir.path()));
+
+        let spec = PluginSpec {
+            source: PluginSource::Path(dir.path().to_path_buf()),
+            alias: None,
+        };
+
+        let result = resolver.resolve(&spec).await;
+
+        match result {
+            Err(ResolveError::DownloadError(crate::downloader::DownloadError::TooLarge {
+                ..
+            })) => {
+                // Success!
+            }
+            other => {
+                panic!("Expected TooLarge error, got {:?}", other);
+            }
+        }
     }
 
     #[tokio::test]

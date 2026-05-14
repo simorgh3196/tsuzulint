@@ -6,7 +6,7 @@ use jsonc_parser::ast::ObjectPropName;
 use jsonc_parser::{CollectOptions, ParseOptions};
 use miette::{IntoDiagnostic, Result};
 use tracing::info;
-use tsuzulint_core::LinterConfig;
+use tsuzulint_core::{LinterConfig, MAX_CONFIG_SIZE};
 use tsuzulint_registry::manifest::ExternalRuleManifest;
 use tsuzulint_registry::resolver::PluginSpec;
 
@@ -40,8 +40,8 @@ pub fn update_config_with_plugin(
         ));
     }
 
-    let content =
-        crate::utils::read_to_string_with_limit(&path_to_use, 1024 * 1024).into_diagnostic()?;
+    let content = crate::utils::read_to_string_with_limit(&path_to_use, MAX_CONFIG_SIZE)
+        .map_err(|e| miette::miette!("Failed to read config {}: {}", path_to_use.display(), e))?;
 
     let parse_options = ParseOptions::default();
     let collect_options = CollectOptions::default();
@@ -311,7 +311,7 @@ mod tests {
 
         update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-        let content = crate::utils::read_to_string_with_limit(&path, 1024 * 1024).unwrap();
+        let content = crate::utils::read_to_string_with_limit(&path, MAX_CONFIG_SIZE).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
         let rules = json["rules"].as_array().expect("rules should be an array");
@@ -349,7 +349,7 @@ mod tests {
 
         update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-        let content = crate::utils::read_to_string_with_limit(&path, 1024 * 1024).unwrap();
+        let content = crate::utils::read_to_string_with_limit(&path, MAX_CONFIG_SIZE).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
         let rules = json["rules"].as_array().expect("rules should be an array");
@@ -385,7 +385,7 @@ mod tests {
 
         update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-        let content = crate::utils::read_to_string_with_limit(&path, 1024 * 1024).unwrap();
+        let content = crate::utils::read_to_string_with_limit(&path, MAX_CONFIG_SIZE).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
         assert_eq!(json["options"]["existing"], true);
@@ -420,7 +420,7 @@ mod tests {
 
         update_config_with_plugin(&spec, alias, &manifest, Some(path.clone())).unwrap();
 
-        let content = crate::utils::read_to_string_with_limit(&path, 1024 * 1024).unwrap();
+        let content = crate::utils::read_to_string_with_limit(&path, MAX_CONFIG_SIZE).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).expect("Invalid JSON");
 
         let rules = json["rules"].as_array().unwrap();

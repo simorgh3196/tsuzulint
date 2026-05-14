@@ -1,22 +1,21 @@
 //! Linter configuration.
 
 use std::collections::HashMap;
-use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+use jsonschema::Validator;
 use serde::{Deserialize, Serialize};
 
 use crate::LinterError;
-
-use jsonschema::Validator;
-use std::sync::OnceLock;
 
 // Embed the schema
 const SCHEMA_JSON: &str = include_str!("../../../schemas/v1/config.json");
 static CONFIG_SCHEMA: OnceLock<Validator> = OnceLock::new();
 
 /// Maximum allowed size for configuration files (1 MB).
-const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
+pub const MAX_CONFIG_SIZE: u64 = 1024 * 1024;
 
 /// Configuration for the linter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,7 +198,10 @@ impl LinterConfig {
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, LinterError> {
         let path = path.as_ref();
 
-        let metadata = fs::metadata(path).map_err(|e| {
+        let mut file = std::fs::File::open(path)
+            .map_err(|e| LinterError::config(format!("Failed to open config: {}", e)))?;
+
+        let metadata = file.metadata().map_err(|e| {
             LinterError::config(format!(
                 "Failed to read metadata for {}: {}",
                 path.display(),
@@ -215,8 +217,19 @@ impl LinterConfig {
             )));
         }
 
-        let content = fs::read_to_string(path)
+        let mut content =
+            String::with_capacity(std::cmp::min(metadata.len(), MAX_CONFIG_SIZE) as usize);
+        let bytes_read = (&mut file)
+            .take(MAX_CONFIG_SIZE + 1)
+            .read_to_string(&mut content)
             .map_err(|e| LinterError::config(format!("Failed to read config: {}", e)))?;
+
+        if bytes_read > MAX_CONFIG_SIZE as usize {
+            return Err(LinterError::config(format!(
+                "Config file too large: {} bytes exceeds limit of {} bytes",
+                bytes_read, MAX_CONFIG_SIZE
+            )));
+        }
 
         let mut config = Self::from_json(&content)?;
 
@@ -493,12 +506,11 @@ mod tests {
 
     #[test]
     fn test_config_from_file_sets_base_dir() {
-        use std::fs;
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".tsuzulint.json");
-        fs::write(&config_path, r#"{"cache": true}"#).unwrap();
+        std::fs::write(&config_path, r#"{"cache": true}"#).unwrap();
 
         let config = LinterConfig::from_file(&config_path).unwrap();
         assert_eq!(config.base_dir, Some(temp_dir.path().to_path_buf()));
@@ -506,12 +518,11 @@ mod tests {
 
     #[test]
     fn test_config_from_file_handles_root_directory() {
-        use std::fs;
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join(".tsuzulint.json");
-        fs::write(&config_path, r#"{}"#).unwrap();
+        std::fs::write(&config_path, r#"{}"#).unwrap();
 
         let config = LinterConfig::from_file(&config_path).unwrap();
         assert!(config.base_dir.is_some());
@@ -523,7 +534,7 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("Failed to read config")
+            err_msg.contains("Failed to open config")
                 || err_msg.contains("Failed to read metadata"),
             "Error message '{}' does not contain expected text",
             err_msg
@@ -532,12 +543,11 @@ mod tests {
 
     #[test]
     fn test_config_from_file_invalid_json() {
-        use std::fs;
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join("invalid.json");
-        fs::write(&config_path, "{ invalid json }").unwrap();
+        std::fs::write(&config_path, "{ invalid json }").unwrap();
 
         let result = LinterConfig::from_file(&config_path);
         assert!(result.is_err());
@@ -546,7 +556,6 @@ mod tests {
 
     #[test]
     fn test_config_from_file_jsonc_support() {
-        use std::fs;
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
@@ -555,7 +564,7 @@ mod tests {
             // Comment
             "cache": false
         }"#;
-        fs::write(&config_path, content).unwrap();
+        std::fs::write(&config_path, content).unwrap();
 
         let config = LinterConfig::from_file(&config_path).unwrap();
         assert!(!config.cache.is_enabled());
@@ -676,7 +685,6 @@ mod tests {
 
     #[test]
     fn test_config_from_file_too_large() {
-        use std::fs;
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
@@ -685,7 +693,7 @@ mod tests {
         // Create a file slightly larger than MAX_CONFIG_SIZE
         let size = MAX_CONFIG_SIZE as usize + 1;
         let content = " ".repeat(size); // Valid JSON whitespace
-        fs::write(&config_path, content).unwrap();
+        std::fs::write(&config_path, content).unwrap();
 
         let result = LinterConfig::from_file(&config_path);
         assert!(result.is_err());
@@ -695,5 +703,178 @@ mod tests {
                 .to_string()
                 .contains("Config file too large")
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_config_from_file_fifo_size_limit() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("fifo_config.json");
+
+        // Create a FIFO inside the directory to trick the `file.metadata().len()` check
+        // because a FIFO has a size of 0.
+        let status = std::process::Command::new("mkfifo")
+            .arg(&config_path)
+            .status();
+
+        if status.is_err() || !status.unwrap().success() {
+            // mkfifo might not be available, skip test gracefully
+            return;
+        }
+
+        let config_path_clone = config_path.clone();
+        std::thread::spawn(move || {
+            if let Ok(mut file) = std::fs::File::create(&config_path_clone) {
+                // Write slightly more than the limit to trigger the post-read check
+                let chunk = vec![b' '; 1024 * 64];
+                let limit = MAX_CONFIG_SIZE as usize + 1024;
+                let mut written = 0;
+                while written < limit {
+                    if file.write_all(&chunk).is_err() {
+                        break;
+                    }
+                    written += chunk.len();
+                }
+            }
+        });
+
+        let result = LinterConfig::from_file(&config_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Config file too large") || err_msg.contains("exceeds"),
+            "Expected error about config size limit from post-read check, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_config_from_file_empty_file() {
+        // A zero-sized config file has no valid JSON and should fail parsing,
+        // exercising the read_to_string path with zero bytes.
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("empty.json");
+        std::fs::write(&config_path, "").unwrap();
+
+        let result = LinterConfig::from_file(&config_path);
+        assert!(result.is_err());
+        // Empty content should trigger JSONC parse or validation error, not a read error.
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            !err_msg.contains("Failed to open config")
+                && !err_msg.contains("Failed to read config"),
+            "Empty file should not produce an IO error, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_config_from_file_invalid_utf8() {
+        // Non-UTF-8 bytes should trigger the read_to_string error path.
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("non_utf8.json");
+        // Write a few invalid UTF-8 bytes.
+        std::fs::write(&config_path, [0xFF, 0xFE, 0xFD, 0x00]).unwrap();
+
+        let result = LinterConfig::from_file(&config_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to read config"),
+            "Expected 'Failed to read config' for invalid UTF-8, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_config_from_file_directory_path() {
+        // Passing a directory as the config path should fail at the
+        // metadata/read-to-string stage, exercising the error branches.
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let dir_as_path = temp_dir.path().to_path_buf();
+
+        let result = LinterConfig::from_file(&dir_as_path);
+        assert!(result.is_err(), "Expected error when passing a directory");
+        // Error should come from open/metadata/read path (Is a directory),
+        // or from JSON parsing of empty content.
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            !err_msg.is_empty(),
+            "Expected non-empty error message, got empty"
+        );
+    }
+
+    #[test]
+    fn test_config_from_file_jsonc_only_comments() {
+        // A file containing only comments yields a null JSON value after
+        // jsonc parsing, which should fail schema validation.  This exercises
+        // the from_json -> validation error branch through from_file.
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("comments_only.jsonc");
+        std::fs::write(&config_path, "// just a comment\n").unwrap();
+
+        let result = LinterConfig::from_file(&config_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_from_file_exact_max_size_boundary() {
+        // A file exactly at MAX_CONFIG_SIZE bytes of whitespace is technically
+        // invalid JSONC but must pass the size check (boundary condition).
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("boundary.json");
+        // Exactly MAX_CONFIG_SIZE bytes — note that whitespace-only is not
+        // valid JSON so we wrap an empty object padded with spaces.
+        let mut content = String::with_capacity(MAX_CONFIG_SIZE as usize);
+        content.push('{');
+        let padding = MAX_CONFIG_SIZE as usize - 2;
+        content.extend(std::iter::repeat_n(' ', padding));
+        content.push('}');
+        assert_eq!(content.len() as u64, MAX_CONFIG_SIZE);
+        std::fs::write(&config_path, &content).unwrap();
+
+        // At exactly the limit the size check should allow it; the parsed
+        // result must therefore be an empty config (base_dir excluded).
+        let config = LinterConfig::from_file(&config_path).unwrap();
+        assert!(config.options.is_empty());
+        assert!(config.rules.is_empty());
+    }
+
+    #[test]
+    fn test_config_from_file_one_byte_over_limit() {
+        // A file exactly one byte over MAX_CONFIG_SIZE must be rejected by
+        // the metadata size check before reading.
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("over_limit.json");
+        let size = MAX_CONFIG_SIZE as usize + 1;
+        let content = " ".repeat(size);
+        std::fs::write(&config_path, content).unwrap();
+
+        let result = LinterConfig::from_file(&config_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Config file too large"),
+            "Expected size error, got: {}",
+            err_msg
+        );
+        // And the error should reference MAX_CONFIG_SIZE.
+        assert!(err_msg.contains(&MAX_CONFIG_SIZE.to_string()));
     }
 }
