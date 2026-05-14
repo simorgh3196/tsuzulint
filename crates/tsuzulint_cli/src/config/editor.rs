@@ -1,12 +1,13 @@
 //! Configuration file editing logic
 
+use std::io::Read;
 use std::path::PathBuf;
 
 use jsonc_parser::ast::ObjectPropName;
 use jsonc_parser::{CollectOptions, ParseOptions};
 use miette::{IntoDiagnostic, Result};
 use tracing::info;
-use tsuzulint_core::LinterConfig;
+use tsuzulint_core::{LinterConfig, MAX_CONFIG_SIZE};
 use tsuzulint_registry::manifest::ExternalRuleManifest;
 use tsuzulint_registry::resolver::PluginSpec;
 
@@ -40,7 +41,40 @@ pub fn update_config_with_plugin(
         ));
     }
 
-    let content = std::fs::read_to_string(&path_to_use).into_diagnostic()?;
+    // Open the file once and perform metadata checks via the file descriptor to
+    // avoid a TOCTOU window where the file could be swapped between the size
+    // check and the subsequent read.
+    let mut file = std::fs::File::open(&path_to_use)
+        .map_err(|e| miette::miette!("Failed to open config {}: {}", path_to_use.display(), e))?;
+    let metadata = file.metadata().map_err(|e| {
+        miette::miette!(
+            "Failed to read metadata for {}: {}",
+            path_to_use.display(),
+            e
+        )
+    })?;
+
+    if metadata.len() > MAX_CONFIG_SIZE {
+        return Err(miette::miette!(
+            "Config file too large: {} bytes exceeds limit of {} bytes",
+            metadata.len(),
+            MAX_CONFIG_SIZE
+        ));
+    }
+
+    let mut content = String::with_capacity(metadata.len() as usize);
+    let bytes_read = (&mut file)
+        .take(MAX_CONFIG_SIZE + 1)
+        .read_to_string(&mut content)
+        .map_err(|e| miette::miette!("Failed to read config {}: {}", path_to_use.display(), e))?;
+
+    if bytes_read > MAX_CONFIG_SIZE as usize {
+        return Err(miette::miette!(
+            "Config file too large: {} bytes exceeds limit of {} bytes",
+            bytes_read,
+            MAX_CONFIG_SIZE
+        ));
+    }
 
     let parse_options = ParseOptions::default();
     let collect_options = CollectOptions::default();
