@@ -173,12 +173,12 @@ fn strip_urls(text: &str) -> String {
             i += url_end;
             continue;
         }
-        let ch = text[i..]
-            .chars()
-            .next()
-            .expect("i is a valid char boundary");
-        out.push(ch);
-        i += ch.len_utf8();
+        if let Some(ch) = text[i..].chars().next() {
+            out.push(ch);
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
     }
     out
 }

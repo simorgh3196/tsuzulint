@@ -134,8 +134,12 @@ mod tests {
         let mut paragraphs = Vec::with_capacity(texts.len());
         for text in texts {
             // Advance past any whitespace/separator bytes in `source`.
-            while !source[cursor..].starts_with(*text) {
-                cursor += source[cursor..].chars().next().unwrap().len_utf8();
+            while cursor < source.len() && !source[cursor..].starts_with(*text) {
+                if let Some(ch) = source[cursor..].chars().next() {
+                    cursor += ch.len_utf8();
+                } else {
+                    break;
+                }
             }
             let start = cursor;
             let end = start + text.len();
