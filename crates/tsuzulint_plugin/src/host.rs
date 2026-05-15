@@ -43,8 +43,15 @@ struct LintValueRequest<'a> {
     tokens: &'a [Token],
     /// Sentences in the text.
     sentences: &'a [Sentence],
-    /// The node to lint (as serde_json::Value).
+    /// The node to lint (as serde_json::Value). For a batch request this is
+    /// the first element of `nodes`, kept for PDK backward compatibility.
     node: &'a serde_json::Value,
+    /// Batch of nodes to lint in a single call. Empty for a single-node
+    /// request; the PDK's `LintRequest::all_nodes()` falls back to `node`
+    /// in that case. Sending N nodes in one request collapses N WASM
+    /// boundary crossings (and N copies of `source`) into one.
+    #[serde(skip_serializing_if = "<[serde_json::Value]>::is_empty")]
+    nodes: &'a [serde_json::Value],
     /// Source text.
     source: &'a str,
     /// File path (if available).
@@ -345,6 +352,78 @@ impl PluginHost {
 
         let request = LintValueRequest {
             node: &node_value,
+            nodes: &[],
+            source,
+            tokens,
+            sentences,
+            file_path,
+            config: Some(config_bytes),
+        };
+
+        let request_bytes = rmp_serde::to_vec_named(&request)
+            .map_err(|e| PluginError::call(format!("Failed to serialize request: {}", e)))?;
+
+        let response_bytes = self.executor.call_lint(real_name, &request_bytes)?;
+
+        let response: LintResponse = rmp_serde::from_slice(&response_bytes)
+            .map_err(|e| PluginError::call(format!("Invalid response from '{}': {}", name, e)))?;
+
+        let mut diagnostics = response.diagnostics;
+
+        if name != real_name {
+            for diag in &mut diagnostics {
+                if diag.rule_id == real_name {
+                    diag.rule_id = name.to_string();
+                }
+            }
+        }
+
+        Ok(diagnostics)
+    }
+
+    /// Runs a rule once over a batch of nodes.
+    ///
+    /// Equivalent to calling [`run_rule_with_parts`] for each node, but the
+    /// request — including the (potentially large) `source` — is serialized
+    /// and pushed across the WASM boundary exactly once. Rules consume the
+    /// batch via the PDK's `LintRequest::all_nodes()`; rules built before the
+    /// batch protocol still work because `node` carries the first element.
+    ///
+    /// This is the dispatch path for manifest `node_types` filters: a block
+    /// can contain many `Str` descendants, and sending them individually made
+    /// cost scale with `node_count * source_len` (quadratic on a single large
+    /// file). Batching makes it linear.
+    ///
+    /// [`run_rule_with_parts`]: Self::run_rule_with_parts
+    pub fn run_rule_batch<T: Serialize>(
+        &mut self,
+        name: &str,
+        nodes: &[T],
+        source: &str,
+        tokens: &[Token],
+        sentences: &[Sentence],
+        file_path: Option<&str>,
+    ) -> Result<Vec<Diagnostic>, PluginError> {
+        if nodes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let real_name = self.aliases.get(name).map(|s| s.as_str()).unwrap_or(name);
+
+        let node_values: Vec<serde_json::Value> = nodes
+            .iter()
+            .map(convert_node_to_value)
+            .collect::<Result<_, _>>()?;
+
+        let config_bytes = self
+            .configs
+            .get(name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[0x80]);
+
+        let request = LintValueRequest {
+            node: &node_values[0],
+            nodes: &node_values,
             source,
             tokens,
             sentences,
@@ -404,6 +483,7 @@ impl PluginHost {
 
         let request = LintValueRequest {
             node: &node_value,
+            nodes: &[],
             source,
             tokens,
             sentences,
@@ -524,6 +604,7 @@ impl PluginHost {
             // Serialize LintRequest with rule-specific config
             let request = LintValueRequest {
                 node: &node_value,
+                nodes: &[],
                 source,
                 tokens,
                 sentences,
@@ -672,6 +753,7 @@ mod tests {
         // Host side
         let host_request = LintValueRequest {
             node: &node_data,
+            nodes: &[],
             source,
             tokens: &tokens,
             sentences: &sentences,

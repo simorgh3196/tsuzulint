@@ -239,26 +239,33 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
                                 );
                             }
 
-                            for target in targets {
-                                let start = Instant::now();
-                                match host.run_rule_with_parts(
-                                    rule,
-                                    target,
-                                    &content,
-                                    &tokens,
-                                    &sentences,
-                                    path.to_str(),
-                                ) {
-                                    Ok(diags) => block_diagnostics.extend(diags),
-                                    Err(e) => warn!("Rule '{}' failed: {}", rule, e),
-                                }
-                                if timings_enabled {
-                                    let elapsed = start.elapsed();
-                                    if let Some(d) = timings.get_mut(*rule) {
-                                        *d += elapsed;
-                                    } else {
-                                        timings.insert(rule.to_string(), elapsed);
-                                    }
+                            if targets.is_empty() {
+                                continue;
+                            }
+
+                            // One WASM call per (block, rule) carrying every
+                            // target node, instead of one call per node. The
+                            // request — including `source` — is serialized
+                            // once; cost is now linear in document size rather
+                            // than node_count * document_size.
+                            let start = Instant::now();
+                            match host.run_rule_batch(
+                                rule,
+                                &targets,
+                                &content,
+                                &tokens,
+                                &sentences,
+                                path.to_str(),
+                            ) {
+                                Ok(diags) => block_diagnostics.extend(diags),
+                                Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                            }
+                            if timings_enabled {
+                                let elapsed = start.elapsed();
+                                if let Some(d) = timings.get_mut(*rule) {
+                                    *d += elapsed;
+                                } else {
+                                    timings.insert(rule.to_string(), elapsed);
                                 }
                             }
                         }
