@@ -1,0 +1,12 @@
+# Generated on demand by benches/scripts/setup.sh
+node_modules/
+package-lock.json
+
+# Generated corpora — re-create with benches/scripts/gen-corpus.sh
+corpus/small/
+corpus/medium/
+corpus/large/
+corpus/monolithic/
+
+# Bench-local rule manifests with freshly computed hashes
+configs/tsuzulint/rules/

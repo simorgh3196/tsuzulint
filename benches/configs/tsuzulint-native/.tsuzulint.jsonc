@@ -1,0 +1,12 @@
+// Benchmark config: native-only variant. No WASM rules loaded; the linter
+// resolves the rule names via the built-in registry.
+{
+  "rules": [],
+  "options": {
+    "no-todo": true,
+    "sentence-length": { "max": 100 }
+  },
+  "cache": {
+    "enabled": false
+  }
+}
