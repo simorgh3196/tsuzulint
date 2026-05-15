@@ -323,8 +323,6 @@ impl LinterConfig {
 
     /// Computes a hash of the configuration for cache invalidation.
     pub fn hash(&self) -> Result<[u8; 32], LinterError> {
-        let json = serde_json::to_string(self)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize config: {}", e)))?;
         // Mix the tsuzulint crate version into the hash so that native rule
         // behaviour changes between binary versions invalidate the cache.
         // Native rule versions are not tracked in the per-rule
@@ -335,7 +333,12 @@ impl LinterConfig {
         let mut hasher = blake3::Hasher::new();
         hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
         hasher.update(b"\0");
-        hasher.update(json.as_bytes());
+
+        // Serialize the configuration directly to the hasher using the `std::io::Write` trait,
+        // avoiding a large heap allocation for the resulting JSON string.
+        serde_json::to_writer(&mut hasher, self)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize config: {}", e)))?;
+
         Ok(hasher.finalize().into())
     }
 }
