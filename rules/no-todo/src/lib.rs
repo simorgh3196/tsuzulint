@@ -81,28 +81,28 @@ pub fn get_manifest() -> FnResult<RuleManifest> {
 pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
     let mut diagnostics = Vec::new();
 
-    // Only process Str nodes
-    if !is_node_type(&request.node, "Str") {
-        return Ok(LintResponse { diagnostics });
-    }
-
     let config: Config = request.get_config().unwrap_or_default();
-
-    // Get patterns to check
     let patterns = config.effective_patterns();
 
-    // Extract text from node
-    if let Some((start, _end, text)) = extract_node_text(&request.node, &request.source) {
-        // Use PDK helper to find matches
-        let matches = find_matches(text, &patterns, config.case_sensitive);
+    // `all_nodes()` yields the batch when the host sent one, or a single
+    // element wrapping `request.node` for the legacy single-node protocol.
+    // Either way we only act on Str nodes; the host already filters by the
+    // manifest's `node_types`, but staying defensive keeps the rule correct
+    // if it is ever invoked with a wider node set.
+    for node in request.all_nodes() {
+        if !is_node_type(node, "Str") {
+            continue;
+        }
 
-        for m in matches {
-            // Check if we should ignore this match (using the exact matched text)
+        let Some((start, _end, text)) = extract_node_text(node, &request.source) else {
+            continue;
+        };
+
+        for m in find_matches(text, &patterns, config.case_sensitive) {
             if config.should_ignore(&m.matched_text) {
                 continue;
             }
 
-            // Calculate absolute positions
             let match_start = start + m.start;
             let match_end = start + m.end;
 
