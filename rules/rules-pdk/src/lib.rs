@@ -19,6 +19,14 @@ pub struct AstNode {
     /// Byte range [start, end] in source text.
     #[serde(default)]
     pub range: Option<[u32; 2]>,
+    /// The node's own text, when it is a leaf/text node.
+    ///
+    /// The host serializes this for text nodes. Capturing it here lets
+    /// `extract_node_text` (and `get_text`) return the node's text without
+    /// indexing `source`, so the host can omit the full document from a
+    /// batch request — the dominant payload on large files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }
 
 impl AstNode {
@@ -27,7 +35,14 @@ impl AstNode {
         Self {
             type_: type_.into(),
             range,
+            value: None,
         }
+    }
+
+    /// Sets the node's text value (used in tests).
+    pub fn with_value(mut self, value: impl Into<String>) -> Self {
+        self.value = Some(value.into());
+        self
     }
 }
 
@@ -759,10 +774,22 @@ impl ToBytes<'_> for RuleManifest {
 /// Helper to extract text range from a node.
 ///
 /// Returns `(start, end, text)` where `start` and `end` are byte offsets.
-pub fn extract_node_text<'a>(node: &AstNode, source: &'a str) -> Option<(usize, usize, &'a str)> {
+pub fn extract_node_text<'a>(
+    node: &'a AstNode,
+    source: &'a str,
+) -> Option<(usize, usize, &'a str)> {
     let [start, end] = node.range?;
     let (start, end) = (start as usize, end as usize);
-    if end <= source.len() && start <= end {
+    if start > end {
+        return None;
+    }
+    // Prefer the node's own value: it is exactly `source[start..end]` but
+    // does not require `source` to be present (the host omits the full
+    // document when every batched node carries its value).
+    if let Some(value) = node.value.as_deref() {
+        return Some((start, end, value));
+    }
+    if end <= source.len() {
         Some((start, end, &source[start..end]))
     } else {
         None

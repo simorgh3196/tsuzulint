@@ -421,6 +421,18 @@ impl PluginHost {
             .map(|v| v.as_slice())
             .unwrap_or(&[0x80]);
 
+        // If every batched node already carries its own non-empty `value`,
+        // the PDK's `extract_node_text`/`get_text` resolve text from the node
+        // alone, so the full document is dead weight. Dropping it here turns
+        // the residual O(block_count * source_len) cost left after batching
+        // into O(total node text) — linear in the document, once.
+        let nodes_self_describing = node_values.iter().all(|v| {
+            v.get("value")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|s| !s.is_empty())
+        });
+        let source = if nodes_self_describing { "" } else { source };
+
         let request = LintValueRequest {
             node: &node_values[0],
             nodes: &node_values,
