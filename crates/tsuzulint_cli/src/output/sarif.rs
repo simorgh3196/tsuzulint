@@ -16,6 +16,7 @@ pub(crate) fn output_sarif_to<W: std::io::Write>(
 ) -> Result<()> {
     tsuzulint_core::generate_sarif_to(results, &mut writer).into_diagnostic()?;
     writeln!(writer).into_diagnostic()?;
+    writer.flush().into_diagnostic()?;
     Ok(())
 }
 
