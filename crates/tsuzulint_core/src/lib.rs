@@ -53,7 +53,7 @@ pub use context::{CodeBlockInfo, DocumentStructure, HeadingInfo, LineInfo, LinkI
 pub use error::LinterError;
 pub use fix::{DependencyGraph, FixCoordinator, FixResult};
 pub use fixer::{FixerResult, apply_fixes_to_content, apply_fixes_to_file};
-pub use formatters::generate_sarif;
+pub use formatters::{generate_sarif, generate_sarif_to};
 pub use linter::{LintFilesResult, Linter};
 pub use pool::{PluginHostPool, PooledHost};
 pub use result::LintResult;

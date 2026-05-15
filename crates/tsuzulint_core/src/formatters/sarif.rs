@@ -22,6 +22,15 @@ pub fn generate_sarif(results: &[LintResult]) -> Result<String, serde_json::Erro
     serde_json::to_string_pretty(&sarif_log)
 }
 
+/// Generates SARIF output from lint results and streams it to a writer
+pub fn generate_sarif_to<W: std::io::Write>(
+    results: &[LintResult],
+    writer: W,
+) -> Result<(), serde_json::Error> {
+    let sarif_log = SarifLog::from_results(results);
+    serde_json::to_writer_pretty(writer, &sarif_log)
+}
+
 /// Root SARIF log structure
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -291,6 +300,43 @@ mod tests {
         assert_eq!(parsed["runs"].as_array().unwrap().len(), 1);
         assert!(parsed["runs"][0]["results"].as_array().unwrap().is_empty());
         assert_eq!(parsed["runs"][0]["tool"]["driver"]["name"], "tsuzulint");
+    }
+
+    #[test]
+    fn test_sarif_to_writer_single_error() {
+        let diagnostic = create_test_diagnostic("no-todo", "Found TODO", Severity::Error, 10, 14);
+        let result = LintResult::new(PathBuf::from("test.md"), vec![diagnostic]);
+
+        let mut buf = Vec::new();
+        generate_sarif_to(&[result], &mut buf).unwrap();
+
+        let sarif = String::from_utf8(buf).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
+
+        assert_eq!(parsed["version"], "2.1.0");
+        assert_eq!(parsed["runs"].as_array().unwrap().len(), 1);
+
+        let run = &parsed["runs"][0];
+        assert_eq!(run["tool"]["driver"]["name"], "tsuzulint");
+        assert_eq!(run["results"].as_array().unwrap().len(), 1);
+
+        let result = &run["results"][0];
+        assert_eq!(result["ruleId"], "no-todo");
+        assert_eq!(result["level"], "error");
+        assert_eq!(result["message"]["text"], "Found TODO");
+    }
+
+    #[test]
+    fn test_sarif_to_writer_empty_results() {
+        let results: Vec<LintResult> = vec![];
+        let mut buf = Vec::new();
+        generate_sarif_to(&results, &mut buf).unwrap();
+
+        let sarif = String::from_utf8(buf).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&sarif).unwrap();
+        assert_eq!(parsed["version"], "2.1.0");
+        assert_eq!(parsed["runs"].as_array().unwrap().len(), 1);
+        assert!(parsed["runs"][0]["results"].as_array().unwrap().is_empty());
     }
 
     #[test]
