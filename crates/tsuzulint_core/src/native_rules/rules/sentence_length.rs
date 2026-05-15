@@ -164,7 +164,9 @@ fn strip_urls(text: &str) -> String {
     let mut i = 0usize;
     let bytes = text.as_bytes();
     while i < bytes.len() {
-        let rest = &text[i..];
+        let Some(rest) = text.get(i..) else {
+            break;
+        };
         if rest.starts_with("http://") || rest.starts_with("https://") {
             out.push('・');
             let url_end = rest
@@ -173,10 +175,7 @@ fn strip_urls(text: &str) -> String {
             i += url_end;
             continue;
         }
-        let ch = text[i..]
-            .chars()
-            .next()
-            .expect("i is a valid char boundary");
+        let ch = rest.chars().next().unwrap_or(' ');
         out.push(ch);
         i += ch.len_utf8();
     }
