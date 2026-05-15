@@ -62,3 +62,12 @@ benches/
 - `benches/configs/tsuzulint/` (WASM 版) は現状のディスパッチ問題 (ノードタイプ
   フィルタが効いていない) により diagnostic が出ないため、計測から除外しています。
   Native Rule Engine 側で性能証明を先にやり、WASM 側は別途デバッグする方針です。
+
+## 結果の更新
+
+ベンチ結果 (`results/*.{md,json}`) を更新する際は以下に注意してください。
+
+- 計測機 (CPU/RAM/OS) と日付を Markdown 出力のヘッダにメモする。
+- `docs/benchmarks.md` の文中に書かれた絶対値 (例: monolithic 約 24s、large 170x)
+  は `results/*.json` の hyperfine 値から派生しているので、計測し直した場合は
+  両方を同期する。
