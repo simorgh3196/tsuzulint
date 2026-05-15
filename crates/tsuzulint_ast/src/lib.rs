@@ -40,4 +40,4 @@ pub use node_type::NodeType;
 pub use span::{Location, Position, Span};
 
 // Re-export commonly used visitor items for convenience
-pub use visitor::{MutVisitor, VisitResult, Visitor};
+pub use visitor::{MutVisitor, VisitResult, Visitor, collect_nodes_by_type};

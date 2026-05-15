@@ -63,7 +63,7 @@ run_size() {
     --export-markdown "${result_md}" \
     --export-json "${result_json}" \
     --command-name "tzlint (preset:ja-technical-writing)" \
-    "'${TZLINT_BIN}' --no-cache -c '${TZLINT_CONFIG}' lint $(printf "'%s' " "${files[@]}") --format compact >/dev/null 2>&1 || true" \
+    "'${TZLINT_BIN}' --no-cache -c '${TZLINT_CONFIG}' lint $(printf "'%s' " "${files[@]}") --format text >/dev/null 2>&1 || true" \
     --command-name "textlint (preset-ja-technical-writing)" \
     "cd '${TEXTLINT_DIR}' && ./node_modules/.bin/textlint '${corpus}' --format compact >/dev/null 2>&1 || true"
 }
