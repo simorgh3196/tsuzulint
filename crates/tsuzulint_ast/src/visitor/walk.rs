@@ -100,6 +100,32 @@ where
     ControlFlow::Continue(())
 }
 
+/// Recursively collects every descendant node (including `root` itself) whose
+/// `node_type` matches one of `types`.
+///
+/// Used by the plugin dispatch layer to honour a WASM rule manifest's
+/// `node_types` filter: when the parser hands the dispatcher a block-level
+/// node, the dispatcher needs the descendants of that block whose type the
+/// rule actually wants to see (e.g. all `Str` descendants of a `Paragraph`).
+/// Without this, `node.type == "Str"`-style rules receive the block itself,
+/// take the early-return path, and silently produce zero diagnostics.
+///
+/// `types` is matched against `NodeType`'s `Display` form so the comparison
+/// agrees with the textlint-compatible names used in rule manifests
+/// (`"Str"`, `"Paragraph"`, `"Header"`, ...).
+pub fn collect_nodes_by_type<'a, 'tree>(
+    root: &'tree TxtNode<'a>,
+    types: &[String],
+    out: &mut Vec<&'tree TxtNode<'a>>,
+) {
+    if types.iter().any(|t| t == &root.node_type.to_string()) {
+        out.push(root);
+    }
+    for child in root.children {
+        collect_nodes_by_type(child, types, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +353,94 @@ mod tests {
             tracker.events,
             vec!["enter:Paragraph", "enter:Str", "exit:Str", "exit:Paragraph"]
         );
+    }
+}
+
+#[cfg(test)]
+mod collect_tests {
+    use super::*;
+    use crate::{AstArena, Span};
+
+    fn doc<'a>(arena: &'a AstArena) -> TxtNode<'a> {
+        // Document
+        //   Header [Str("title")]
+        //   Paragraph [Str("hello"), Emphasis [Str("world")]]
+        let title_str = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(2, 7), "title"));
+        let hdr = arena.alloc(TxtNode::new_parent(
+            NodeType::Header,
+            Span::new(0, 7),
+            arena.alloc_slice_copy(&[*title_str]),
+        ));
+        let hello = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(9, 14), "hello"));
+        let world = arena.alloc(TxtNode::new_text(NodeType::Str, Span::new(16, 21), "world"));
+        let em = arena.alloc(TxtNode::new_parent(
+            NodeType::Emphasis,
+            Span::new(15, 22),
+            arena.alloc_slice_copy(&[*world]),
+        ));
+        let para = arena.alloc(TxtNode::new_parent(
+            NodeType::Paragraph,
+            Span::new(8, 22),
+            arena.alloc_slice_copy(&[*hello, *em]),
+        ));
+        TxtNode::new_parent(
+            NodeType::Document,
+            Span::new(0, 22),
+            arena.alloc_slice_copy(&[*hdr, *para]),
+        )
+    }
+
+    #[test]
+    fn collect_str_descendants_of_paragraph() {
+        let arena = AstArena::new();
+        let document = doc(&arena);
+        let paragraph = &document.children[1];
+
+        let mut out = Vec::new();
+        collect_nodes_by_type(paragraph, &["Str".to_string()], &mut out);
+
+        assert_eq!(out.len(), 2, "expected both Str leaves under Paragraph");
+        for node in out {
+            assert_eq!(node.node_type, NodeType::Str);
+        }
+    }
+
+    #[test]
+    fn collect_includes_root_when_matching() {
+        let arena = AstArena::new();
+        let document = doc(&arena);
+        let paragraph = &document.children[1];
+
+        let mut out = Vec::new();
+        collect_nodes_by_type(paragraph, &["Paragraph".to_string()], &mut out);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].node_type, NodeType::Paragraph);
+    }
+
+    #[test]
+    fn collect_multiple_types() {
+        let arena = AstArena::new();
+        let document = doc(&arena);
+
+        let mut out = Vec::new();
+        collect_nodes_by_type(
+            &document,
+            &["Header".to_string(), "Emphasis".to_string()],
+            &mut out,
+        );
+
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn collect_empty_filter_yields_nothing() {
+        let arena = AstArena::new();
+        let document = doc(&arena);
+
+        let mut out = Vec::new();
+        collect_nodes_by_type(&document, &[], &mut out);
+
+        assert!(out.is_empty());
     }
 }

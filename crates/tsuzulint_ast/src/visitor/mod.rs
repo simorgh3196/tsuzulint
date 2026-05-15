@@ -66,4 +66,4 @@ mod walk;
 
 pub use visit::{VisitResult, Visitor};
 pub use visit_mut::{MutVisitor, VisitMutResult, walk_children_mut, walk_node_mut};
-pub use walk::{walk_children, walk_node};
+pub use walk::{collect_nodes_by_type, walk_children, walk_node};

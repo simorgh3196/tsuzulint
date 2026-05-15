@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Compare tzlint (native-rule mode) vs textlint across the generated corpus
-# using hyperfine.
+# Compare tzlint (native rule engine) vs tzlint (WASM rule pipeline)
+# vs textlint across the generated corpus using hyperfine.
 #
-# Assumes benches/scripts/setup.sh has been run. Writes Markdown + JSON
-# results to benches/results/.
+# Assumes benches/scripts/setup.sh has been run, so:
+#   - target/release/tzlint exists
+#   - benches/configs/tsuzulint/rules/ has fresh WASM rule manifests
+#   - benches/corpus/{small,medium,large,monolithic}/ exists
+#   - benches/configs/textlint/node_modules/ is populated
 #
-# Why native-only? The WASM plugin dispatch pipeline currently has a
-# dispatch-level bug where rules that filter on `node.type == "Str"` never
-# receive Str nodes (they get blocks instead) and therefore return zero
-# diagnostics. That would make a WASM-vs-textlint comparison meaningless.
-# Measuring native is what actually matches the textlint behaviour today,
-# and pragmatically it is also where we want to be — native is how we
-# outrun textlint on speed.
+# Compares three commands per corpus size:
+#   1. tzlint native rules (built-in Rust rules)
+#   2. tzlint WASM rules   (loaded from rules/no-todo/...)
+#   3. textlint            (reference implementation)
 
 set -euo pipefail
 
@@ -20,7 +20,8 @@ BENCHES_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${BENCHES_DIR}/.." && pwd)"
 
 TZLINT_BIN="${REPO_ROOT}/target/release/tzlint"
-TZLINT_NATIVE_DIR="${BENCHES_DIR}/configs/tsuzulint-native"
+TZLINT_NATIVE_CFG="${BENCHES_DIR}/configs/tsuzulint-native/.tsuzulint.jsonc"
+TZLINT_WASM_CFG="${BENCHES_DIR}/configs/tsuzulint/.tsuzulint.jsonc"
 TEXTLINT_DIR="${BENCHES_DIR}/configs/textlint"
 
 if [[ ! -x "${TZLINT_BIN}" ]]; then
@@ -63,23 +64,20 @@ run_size() {
     return 0
   fi
 
-  local result_md="${BENCHES_DIR}/results/${size}.md"
-  local result_json="${BENCHES_DIR}/results/${size}.json"
+  local result_md="${BENCHES_DIR}/results/wasm-${size}.md"
+  local result_json="${BENCHES_DIR}/results/wasm-${size}.json"
 
-  echo "==> Benchmarking ${size} (${n_files} files)"
+  echo "==> Benchmarking ${size} (${n_files} files) native vs WASM vs textlint"
 
-  # tzlint accepts multiple explicit paths as patterns, but passing 100+ long
-  # absolute paths on the command line gets unwieldy. Instead, lean on the
-  # walker: pass the corpus root directory to tzlint via a CLI pattern, with
-  # the config's include list pinned to "**/*.md".
-  local include_cfg="${BENCHES_DIR}/configs/tsuzulint-native/.tsuzulint.jsonc"
   hyperfine \
     --warmup "${WARMUP}" \
     --runs "${RUNS}" \
     --export-markdown "${result_md}" \
     --export-json "${result_json}" \
     --command-name "tzlint (native)" \
-    "'${TZLINT_BIN}' --no-cache -c '${include_cfg}' lint $(printf "'%s' " "${files[@]}") --format text >/dev/null 2>&1 || true" \
+    "'${TZLINT_BIN}' --no-cache -c '${TZLINT_NATIVE_CFG}' lint $(printf "'%s' " "${files[@]}") --format text >/dev/null 2>&1 || true" \
+    --command-name "tzlint (WASM)" \
+    "'${TZLINT_BIN}' --no-cache -c '${TZLINT_WASM_CFG}' lint $(printf "'%s' " "${files[@]}") --format text >/dev/null 2>&1 || true" \
     --command-name "textlint" \
     "cd '${TEXTLINT_DIR}' && ./node_modules/.bin/textlint '${corpus}' --format compact >/dev/null 2>&1 || true"
 }
@@ -94,5 +92,5 @@ for size in "${SIZES[@]}"; do
 done
 
 echo
-echo "Results written to ${BENCHES_DIR}/results/"
-ls -1 "${BENCHES_DIR}/results/"
+echo "Results written to ${BENCHES_DIR}/results/wasm-*.{md,json}"
+ls -1 "${BENCHES_DIR}/results/" | grep -E "^wasm-"

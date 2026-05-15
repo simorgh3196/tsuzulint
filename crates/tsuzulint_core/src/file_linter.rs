@@ -200,65 +200,67 @@ pub fn lint_file_internal(ctx: &mut LintContext<'_>) -> Result<LintResult, Linte
         }
 
         if !block_rule_names.is_empty() {
-            let single_block_rule = block_rule_names.len() == 1;
+            // Capture each rule's `node_types` filter up front so the dispatch
+            // closure can iterate without re-borrowing `host` (which it needs
+            // mutably for `run_rule_with_parts`).
+            //
+            // A manifest with an empty `node_types` means "the rule wants the
+            // block itself" — same behaviour as before. A non-empty filter
+            // (e.g. `["Str"]` on `no-todo`) means the rule wants those
+            // descendants of the block, which we collect via
+            // `collect_nodes_by_type`. Without this expansion, rules that
+            // early-return when `node.type != "Str"` would silently produce
+            // zero diagnostics whenever the dispatcher handed them a
+            // `Paragraph`.
+            let rule_filters: Vec<(&str, Vec<String>)> = block_rule_names
+                .iter()
+                .map(|&r| {
+                    let types = host
+                        .get_manifest(r)
+                        .map(|m| m.node_types.clone())
+                        .unwrap_or_default();
+                    (r, types)
+                })
+                .collect();
+
             let mut block_index = 0;
             visit_blocks(&ast, &mut |node| {
                 if block_index < matched_mask.len() {
                     if !matched_mask[block_index] {
-                        if single_block_rule {
-                            let rule = &block_rule_names[0];
-                            let start = Instant::now();
-                            match host.run_rule_with_parts(
-                                rule,
-                                node,
-                                &content,
-                                &tokens,
-                                &sentences,
-                                path.to_str(),
-                            ) {
-                                Ok(diags) => block_diagnostics.extend(diags),
-                                Err(e) => warn!("Rule '{}' failed: {}", rule, e),
+                        for (rule, node_types) in &rule_filters {
+                            let mut targets: Vec<&tsuzulint_ast::TxtNode<'_>> = Vec::new();
+                            if node_types.is_empty() {
+                                targets.push(node);
+                            } else {
+                                tsuzulint_ast::collect_nodes_by_type(
+                                    node,
+                                    node_types,
+                                    &mut targets,
+                                );
                             }
-                            if timings_enabled {
-                                let elapsed = start.elapsed();
-                                if let Some(d) = timings.get_mut(*rule) {
-                                    *d += elapsed;
-                                } else {
-                                    timings.insert(rule.to_string(), elapsed);
+
+                            for target in targets {
+                                let start = Instant::now();
+                                match host.run_rule_with_parts(
+                                    rule,
+                                    target,
+                                    &content,
+                                    &tokens,
+                                    &sentences,
+                                    path.to_str(),
+                                ) {
+                                    Ok(diags) => block_diagnostics.extend(diags),
+                                    Err(e) => warn!("Rule '{}' failed: {}", rule, e),
                                 }
-                            }
-                        } else if let Ok(node_raw) = to_raw_value(node, "block node") {
-                            // Serialize request once for all rules running on this block
-                            match host.prepare_lint_request(
-                                &node_raw,
-                                &content,
-                                &tokens,
-                                &sentences,
-                                path.to_str(),
-                            ) {
-                                Ok(request_bytes) => {
-                                    for rule in &block_rule_names {
-                                        let start = Instant::now();
-                                        match host.run_rule_with_prepared(rule, &request_bytes) {
-                                            Ok(diags) => block_diagnostics.extend(diags),
-                                            Err(e) => warn!("Rule '{}' failed: {}", rule, e),
-                                        }
-                                        if timings_enabled {
-                                            let elapsed = start.elapsed();
-                                            if let Some(d) = timings.get_mut(*rule) {
-                                                *d += elapsed;
-                                            } else {
-                                                timings.insert(rule.to_string(), elapsed);
-                                            }
-                                        }
+                                if timings_enabled {
+                                    let elapsed = start.elapsed();
+                                    if let Some(d) = timings.get_mut(*rule) {
+                                        *d += elapsed;
+                                    } else {
+                                        timings.insert(rule.to_string(), elapsed);
                                     }
                                 }
-                                Err(e) => {
-                                    warn!("Failed to prepare lint request for block node: {}", e)
-                                }
                             }
-                        } else {
-                            warn!("Failed to serialize/create RawValue for block node");
                         }
                     }
                     block_index += 1;
