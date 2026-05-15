@@ -2,4 +2,4 @@
 
 pub mod sarif;
 
-pub use sarif::generate_sarif;
+pub use sarif::{generate_sarif, generate_sarif_to};

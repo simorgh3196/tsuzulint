@@ -22,6 +22,15 @@ pub fn generate_sarif(results: &[LintResult]) -> Result<String, serde_json::Erro
     serde_json::to_string_pretty(&sarif_log)
 }
 
+/// Generates SARIF output from lint results and streams it to a writer
+pub fn generate_sarif_to<W: std::io::Write>(
+    results: &[LintResult],
+    writer: W,
+) -> Result<(), serde_json::Error> {
+    let sarif_log = SarifLog::from_results(results);
+    serde_json::to_writer_pretty(writer, &sarif_log)
+}
+
 /// Root SARIF log structure
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
