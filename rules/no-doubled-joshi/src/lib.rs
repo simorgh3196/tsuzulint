@@ -239,14 +239,22 @@ fn is_single_ka_douka_pair(p1: &ParticleInfo, p2: &ParticleInfo, all_tokens: &[T
 fn calculate_interval(
     prev: &ParticleInfo,
     curr: &ParticleInfo,
-    source: &str,
+    node_text: &str,
+    node_start: usize,
     config: &Config,
 ) -> usize {
     if curr.byte_start <= prev.byte_end {
         return 0;
     }
 
-    let text_between = &source[prev.byte_end..curr.byte_start];
+    // Token spans are absolute; `node_text` is the node's own slice starting
+    // at `node_start`. Rebase to index into it (the host may not send the
+    // full document).
+    let lo = prev.byte_end.saturating_sub(node_start);
+    let hi = curr.byte_start.saturating_sub(node_start);
+    let Some(text_between) = node_text.get(lo..hi) else {
+        return 0;
+    };
     let mut interval = 0;
 
     for c in text_between.chars() {
@@ -289,7 +297,8 @@ fn create_error_message(particle_name: &str, matches: &[&ParticleInfo]) -> Strin
 fn check_doubled_particles<'a>(
     particles: &'a [ParticleInfo],
     all_tokens: &[Token],
-    source: &str,
+    node_text: &str,
+    node_start: usize,
     config: &Config,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -324,7 +333,7 @@ fn check_doubled_particles<'a>(
                 continue;
             }
 
-            let interval = calculate_interval(prev, curr, source, config);
+            let interval = calculate_interval(prev, curr, node_text, node_start, config);
 
             if interval < config.min_interval {
                 // PERFORMANCE: Pass `&curr.surface` directly to `create_error_message` to avoid cloning the String
@@ -373,7 +382,7 @@ pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
     let config: Config = request.get_config().unwrap_or_default();
     let tokens = request.get_tokens();
 
-    let (node_start, node_end, _text) =
+    let (node_start, node_end, node_text) =
         if let Some((s, e, t)) = extract_node_text(&request.node, &request.source) {
             (s, e, t)
         } else {
@@ -397,7 +406,7 @@ pub fn lint(request: LintRequest) -> FnResult<LintResponse> {
     let mut particles = extract_particles_from_tokens(&node_tokens, &config);
     particles = concat_adjacent_particles(particles);
 
-    diagnostics = check_doubled_particles(&particles, &node_tokens, &request.source, &config);
+    diagnostics = check_doubled_particles(&particles, &node_tokens, node_text, node_start, &config);
 
     Ok(LintResponse { diagnostics })
 }
@@ -512,7 +521,7 @@ mod tests {
             pos_subtype: Some("係助詞".into()),
         };
 
-        let interval = calculate_interval(&prev, &curr, source, &config);
+        let interval = calculate_interval(&prev, &curr, source, 0, &config);
         assert!(interval >= 1);
     }
 
@@ -674,7 +683,7 @@ mod tests {
         let prev = create_particle("が", "が:助詞.格助詞", 6, 9, 0, "これ", Some("格助詞"));
         let curr = create_particle("が", "が:助詞.格助詞", 21, 24, 1, "これ", Some("格助詞"));
 
-        let interval = calculate_interval(&prev, &curr, source, &config);
+        let interval = calculate_interval(&prev, &curr, source, 0, &config);
         assert!(interval >= 1); // 読点が間隔に加算される
     }
 
@@ -711,7 +720,7 @@ mod tests {
         let particles = extract_particles_from_tokens(&tokens, &config);
         assert_eq!(particles.len(), 3);
 
-        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, 0, &config);
         assert!(
             diagnostics.is_empty(),
             "3個の並立助詞はエラーにならないべき"
@@ -776,10 +785,13 @@ mod tests {
         );
 
         // 1つ目と2つ目の「か」はエラーになる（「かどうか」パターンではないため）
-        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, 0, &config);
 
         // Only consider diagnostics for "か" since other things might be caught (like "に" doing 2 times)
-        let ka_diagnostics: Vec<_> = diagnostics.into_iter().filter(|d| d.message.contains("\"か\"")).collect();
+        let ka_diagnostics: Vec<_> = diagnostics
+            .into_iter()
+            .filter(|d| d.message.contains("\"か\""))
+            .collect();
         assert_eq!(
             ka_diagnostics.len(),
             1,
@@ -803,7 +815,7 @@ mod tests {
         ];
 
         let particles = extract_particles_from_tokens(&tokens, &config);
-        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, 0, &config);
         assert!(
             diagnostics.is_empty(),
             "「かどうか」パターンはエラーにならないべき"
@@ -870,7 +882,7 @@ mod tests {
         let particles = extract_particles_from_tokens(&tokens, &config);
         assert_eq!(particles.len(), 2);
 
-        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, 0, &config);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("は"));
         assert!(diagnostics[0].message.contains("私\"は\""));
@@ -894,7 +906,7 @@ mod tests {
         let particles = extract_particles_from_tokens(&tokens, &config);
         assert_eq!(particles.len(), 2);
 
-        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, 0, &config);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("で"));
     }
@@ -918,7 +930,7 @@ mod tests {
         assert_eq!(particles.len(), 2); // strictモードでは「の」はフィルタされない
 
         let source = "既存のコードの利用";
-        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, 0, &config);
         assert_eq!(diagnostics.len(), 1);
     }
 
@@ -947,7 +959,7 @@ mod tests {
             particles.iter().filter(|p| p.surface == "で").collect();
         assert_eq!(de_particles.len(), 2);
 
-        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, 0, &config);
         // strictモードでは「で」が検出される（読点なし）
         assert!(diagnostics.iter().any(|d| d.message.contains("で")));
     }
@@ -970,7 +982,7 @@ mod tests {
         ];
 
         let particles = extract_particles_from_tokens(&tokens, &config);
-        let diagnostics = check_doubled_particles(&particles, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&particles, &tokens, source, 0, &config);
         assert!(diagnostics.len() >= 1);
     }
 
@@ -995,7 +1007,7 @@ mod tests {
         assert_eq!(concatenated[0].surface, "には");
         assert_eq!(concatenated[1].surface, "には");
 
-        let diagnostics = check_doubled_particles(&concatenated, &tokens, source, &config);
+        let diagnostics = check_doubled_particles(&concatenated, &tokens, source, 0, &config);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("には"));
     }
@@ -1035,7 +1047,7 @@ mod tests {
         // 2つ目の「は」: 「♪」+「これ」の後ろ → 9+12+3+6 = 30-32
         let curr = create_particle("は", "は:助詞.係助詞", 30, 33, 1, "これ", Some("係助詞"));
 
-        let interval = calculate_interval(&prev, &curr, source, &config);
+        let interval = calculate_interval(&prev, &curr, source, 0, &config);
         // 「♪」が間にあるため、文境界としてMAX間隔を返す
         assert_eq!(interval, usize::MAX);
     }
@@ -1051,7 +1063,7 @@ mod tests {
         let prev = create_particle("が", "が:助詞.格助詞", 6, 9, 0, "これ", Some("格助詞"));
         let curr = create_particle("が", "が:助詞.格助詞", 21, 24, 1, "これ", Some("格助詞"));
 
-        let interval = calculate_interval(&prev, &curr, source, &config);
+        let interval = calculate_interval(&prev, &curr, source, 0, &config);
         // 読点がない場合、間隔は0（間の文字: "iPhone"）
         assert_eq!(interval, 0);
     }
