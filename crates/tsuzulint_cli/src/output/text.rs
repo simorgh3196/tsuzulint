@@ -91,7 +91,7 @@ fn output_timings_to<W: std::io::Write>(
         writeln!(writer, "{:-<30}-+-{:-<15}-+-{:-<10}", "", "", "")?;
 
         let mut sorted_timings: Vec<_> = rule_timings.into_iter().collect();
-        sorted_timings.sort_by_key(|b| std::cmp::Reverse(b.1));
+        sorted_timings.sort_by(|a, b| b.1.cmp(&a.1));
 
         for (rule, duration) in sorted_timings {
             let percentage = if total_duration.as_secs_f64() > 0.0 {

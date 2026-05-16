@@ -54,7 +54,7 @@ fn add_fix_all_actions(
     let mut edits = Vec::new();
     let mut fixable_diags: Vec<_> = diagnostics.iter().filter(|d| d.fix.is_some()).collect();
 
-    fixable_diags.sort_by_key(|b| std::cmp::Reverse(b.span.start));
+    fixable_diags.sort_by(|a, b| b.span.start.cmp(&a.span.start));
 
     for diag in fixable_diags {
         if let Some(ref fix) = diag.fix

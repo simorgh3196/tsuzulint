@@ -323,7 +323,8 @@ impl LinterConfig {
 
     /// Computes a hash of the configuration for cache invalidation.
     pub fn hash(&self) -> Result<[u8; 32], LinterError> {
-        let mut hasher = blake3::Hasher::new();
+        let json = serde_json::to_string(self)
+            .map_err(|e| LinterError::Internal(format!("Failed to serialize config: {}", e)))?;
         // Mix the tsuzulint crate version into the hash so that native rule
         // behaviour changes between binary versions invalidate the cache.
         // Native rule versions are not tracked in the per-rule
@@ -331,12 +332,10 @@ impl LinterConfig {
         // version), so without this the cache would happily serve stale
         // diagnostics after a binary upgrade that changed a native rule's
         // semantics.
+        let mut hasher = blake3::Hasher::new();
         hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
         hasher.update(b"\0");
-
-        serde_json::to_writer(&mut hasher, self)
-            .map_err(|e| LinterError::Internal(format!("Failed to serialize config: {}", e)))?;
-
+        hasher.update(json.as_bytes());
         Ok(hasher.finalize().into())
     }
 }
@@ -537,19 +536,6 @@ mod tests {
 
         // Same configs should produce same hash
         assert_eq!(config1.hash().unwrap(), config2.hash().unwrap());
-    }
-
-    #[test]
-    fn test_config_hash_serialization_failure() {
-        // Technically, `serde_json::to_writer` should not fail for a valid struct
-        // like `LinterConfig` where all fields derive `Serialize` unless there's an I/O error
-        // or a mutex deadlock. However, we can simulate an issue if needed, but since it's
-        // hard to force `serde_json::to_writer` to fail on a `Hasher`, we will just
-        // ensure the code path is covered by normal operations.
-
-        let config = LinterConfig::new();
-        let hash_result = config.hash();
-        assert!(hash_result.is_ok());
     }
 
     #[test]
