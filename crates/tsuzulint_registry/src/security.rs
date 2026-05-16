@@ -35,11 +35,27 @@ pub fn check_ip(ip: std::net::IpAddr) -> Result<(), SecurityError> {
             if ipv6.is_loopback() || ipv6.is_unspecified() {
                 return Err(SecurityError::LoopbackDenied(ipv6.to_string()));
             }
-            // Check for IPv6-mapped and IPv4-compatible addresses
+            // Check for IPv6-mapped, IPv4-compatible, and NAT64 addresses
             // These must be checked as IPv4 to prevent SSRF bypass
-            if let Some(ipv4) = ipv6.to_ipv4() {
+            let ipv4 = if let Some(v4) = ipv6.to_ipv4() {
+                Some(v4)
+            } else {
+                match ipv6.segments() {
+                    // NAT64 well-known prefix: 64:ff9b::/96
+                    [0x0064, 0xff9b, 0, 0, 0, 0, a, b] => Some(std::net::Ipv4Addr::new(
+                        (a >> 8) as u8,
+                        a as u8,
+                        (b >> 8) as u8,
+                        b as u8,
+                    )),
+                    _ => None,
+                }
+            };
+
+            if let Some(ipv4) = ipv4 {
                 return check_ip(std::net::IpAddr::V4(ipv4));
             }
+
             // Unique local (fc00::/7)
             if (ipv6.segments()[0] & 0xfe00) == 0xfc00 || ipv6.is_unicast_link_local() {
                 return Err(SecurityError::PrivateIpDenied(ipv6.to_string()));
@@ -370,6 +386,37 @@ mod tests {
         assert!(
             matches!(check_ip(ip), Err(SecurityError::PrivateIpDenied(_))),
             "::10.0.0.1 should be denied as private"
+        );
+    }
+
+    #[test]
+    fn test_check_ip_nat64_ipv6() {
+        // NAT64 translated loopback
+        let ip: std::net::IpAddr = "64:ff9b::127.0.0.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::LoopbackDenied(_))),
+            "64:ff9b::127.0.0.1 should be denied as loopback"
+        );
+
+        // NAT64 translated private (10.0.0.0/8)
+        let ip: std::net::IpAddr = "64:ff9b::10.0.0.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::PrivateIpDenied(_))),
+            "64:ff9b::10.0.0.1 should be denied as private"
+        );
+
+        // NAT64 translated private (192.168.0.0/16)
+        let ip: std::net::IpAddr = "64:ff9b::192.168.1.1".parse().unwrap();
+        assert!(
+            matches!(check_ip(ip), Err(SecurityError::PrivateIpDenied(_))),
+            "64:ff9b::192.168.1.1 should be denied as private"
+        );
+
+        // NAT64 translated public
+        let ip: std::net::IpAddr = "64:ff9b::8.8.8.8".parse().unwrap();
+        assert!(
+            check_ip(ip).is_ok(),
+            "64:ff9b::8.8.8.8 should be allowed as public"
         );
     }
 
