@@ -7,8 +7,14 @@ default:
 build:
     cargo build --workspace
 
+# Tests run via nextest; doctests run separately (nextest does not execute doctests).
 test:
-    cargo test --workspace
+    cargo nextest run --workspace
+    cargo test --workspace --doc
+
+# Just the doctests.
+test-doc:
+    cargo test --workspace --doc
 
 fmt:
     cargo fmt --all
@@ -22,6 +28,16 @@ wasm:
 
 bench:
     cargo bench --workspace
+
+# Coverage (requires cargo-llvm-cov: `cargo install cargo-llvm-cov`).
+# HTML report -> target/llvm-cov/html/index.html. Measured over the nextest-run tests;
+# doctest line coverage needs nightly (`--doctests`) and is omitted on stable.
+coverage:
+    cargo llvm-cov nextest --workspace --html
+
+# lcov output for CI / Codecov.
+coverage-lcov:
+    cargo llvm-cov nextest --workspace --lcov --output-path lcov.info
 
 # CI-equivalent gate.
 check: lint test

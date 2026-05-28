@@ -73,3 +73,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-deny
       - run: cargo deny check
+
+  coverage:
+    name: coverage (llvm-cov + nextest -> codecov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+      # Coverage is measured over the nextest-run tests (stable toolchain). Doctests are
+      # exercised for pass/fail in the `test` job; doctest *line* coverage requires nightly
+      # (`cargo llvm-cov --doctests`) and is intentionally omitted here.
+      - name: Generate coverage (lcov)
+        run: cargo llvm-cov nextest --workspace --lcov --output-path lcov.info
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }} # required for private repos / protected branches
+          files: lcov.info
+          fail_ci_if_error: false # coverage is informational, not a gate
