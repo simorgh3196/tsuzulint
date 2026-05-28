@@ -1,0 +1,15 @@
+[package]
+name = "tzlint_abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "TsuzuLint plugin ABI: host + guest sides, bytecheck boundaries, interface versioning, calling convention."
+
+[lints]
+workspace = true
+
+[dependencies]
+tzlint_ast = { path = "../tzlint_ast" }

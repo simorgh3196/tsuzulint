@@ -1,0 +1,15 @@
+[package]
+name = "tzlint_lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "TsuzuLint LSP server (scaffold only in v1; full build is a later milestone)."
+
+[lints]
+workspace = true
+
+[dependencies]
+tzlint_core = { path = "../tzlint_core" }

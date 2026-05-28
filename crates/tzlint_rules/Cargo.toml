@@ -1,0 +1,16 @@
+[package]
+name = "tzlint_rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Built-in native rules for TsuzuLint (Rule impls + scheduler registration)."
+
+[lints]
+workspace = true
+
+[dependencies]
+tzlint_ast = { path = "../tzlint_ast" }
+tzlint_core = { path = "../tzlint_core" }

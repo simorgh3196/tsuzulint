@@ -1,0 +1,11 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local-only tooling state (not the lockfile — Cargo.lock is committed for the binary)

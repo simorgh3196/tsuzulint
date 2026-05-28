@@ -1,0 +1,35 @@
+# TsuzuLint workspace (binary/command name: `tzlint`; brand: TsuzuLint).
+[workspace]
+resolver = "2"
+members = [
+    "crates/tzlint_ast",
+    "crates/tzlint_core",
+    "crates/tzlint_rules",
+    "crates/tzlint_pdk",
+    "crates/tzlint_abi",
+    "crates/tzlint_cli",
+    "crates/tzlint_lsp",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["simorgh3196 <simorgh3196@gmail.com>"]
+repository = "https://github.com/simorgh3196/tsuzulint"
+description = "TsuzuLint — a high-performance natural-language linter for CJK, written in Rust."
+
+# Lints applied workspace-wide. `unwrap`/`expect`/`panic` are denied in library code
+# (per the design's error-handling rules); the io-guard CI job adds the disallowed-methods
+# checks via clippy.toml.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[profile.release]
+# Per-rule native fault isolation relies on std::panic::catch_unwind, which requires unwinding.
+panic = "unwind"

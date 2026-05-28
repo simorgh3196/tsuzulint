@@ -1,0 +1,15 @@
+[package]
+name = "tzlint_core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "TsuzuLint core: parser + lint engine + config + cache + centralized io. Native and wasm32."
+
+[lints]
+workspace = true
+
+[dependencies]
+tzlint_ast = { path = "../tzlint_ast" }

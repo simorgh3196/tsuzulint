@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  check:
+    name: rustfmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      # clippy denies unwrap/expect (workspace lints) and disallowed-methods (clippy.toml).
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: test (nextest + doctest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo nextest run --workspace
+      - run: cargo test --workspace --doc
+
+  wasm:
+    name: wasm32 build (browser-readiness from day one)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown, wasm32-wasip1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p tzlint_core --target wasm32-unknown-unknown
+
+  io-guard:
+    name: io-guard (no raw fs/network/serde_json on the AST)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Belt-and-suspenders next to clippy disallowed-methods: a grep guard.
+      - name: reject raw fs::read*/serde_json in non-io modules
+        run: |
+          ! git grep -nE 'std::fs::(read|write)' -- 'crates/*/src/**.rs' \
+            ':!crates/tzlint_core/src/io*' || (echo "raw fs outside io module"; exit 1)
+
+  msrv:
+    name: MSRV 1.85
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace
+
+  security:
+    name: cargo-audit / cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-deny
+      - run: cargo deny check

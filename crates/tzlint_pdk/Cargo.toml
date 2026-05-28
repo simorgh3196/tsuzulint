@@ -1,0 +1,15 @@
+[package]
+name = "tzlint_pdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "TsuzuLint rule-author SDK: macros, types, and a rule test harness."
+
+[lints]
+workspace = true
+
+[dependencies]
+tzlint_ast = { path = "../tzlint_ast" }
