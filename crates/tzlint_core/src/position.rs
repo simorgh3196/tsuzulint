@@ -38,12 +38,19 @@ impl LineIndex {
     /// `text` must be the same source passed to [`LineIndex::new`]. An out-of-range or
     /// non-char-boundary offset is clamped, never panics.
     pub fn position(&self, text: &str, offset: u32) -> (u32, u32) {
-        let line_idx = match self.line_starts.binary_search(&offset) {
+        // Clamp into range and down to a char boundary: the slice below then can't panic,
+        // and an offset that lands inside a multibyte char maps to the column of the char
+        // that contains it (a multibyte char never straddles a newline, so this stays on
+        // the same line).
+        let mut end = (offset as usize).min(text.len());
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let line_idx = match self.line_starts.binary_search(&(end as u32)) {
             Ok(idx) => idx,
             Err(idx) => idx.saturating_sub(1),
         };
         let line_start = self.line_starts.get(line_idx).copied().unwrap_or(0) as usize;
-        let end = (offset as usize).min(text.len());
         let start = line_start.min(end);
         let column = text
             .get(start..end)
@@ -112,5 +119,15 @@ mod tests {
         let idx = LineIndex::new(text);
         assert_eq!(idx.line_count(), 2);
         assert_eq!(idx.position(text, 2), (2, 1));
+    }
+
+    #[test]
+    fn non_char_boundary_offset_clamps_to_its_char() {
+        let text = "あい"; // 2 chars, 6 bytes; boundaries at 0, 3, 6
+        let idx = LineIndex::new(text);
+        assert_eq!(idx.position(text, 0), (1, 1)); // start of あ
+        assert_eq!(idx.position(text, 1), (1, 1)); // inside あ → floors to 0 → column 1
+        assert_eq!(idx.position(text, 3), (1, 2)); // start of い
+        assert_eq!(idx.position(text, 4), (1, 2)); // inside い → floors to 3 → column 2
     }
 }

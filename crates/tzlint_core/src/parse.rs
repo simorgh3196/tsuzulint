@@ -34,6 +34,22 @@ impl std::error::Error for ParseError {}
 /// the tree is always [`NodeId(0)`](NodeId), a `Root` node spanning the whole document.
 pub fn parse(source: &str) -> Result<Ast, ParseError> {
     let text = source.strip_prefix('\u{feff}').unwrap_or(source);
+    // Spans are u32 byte offsets; a >= 4 GiB source would truncate them. Reject rather than
+    // silently emit wrong spans. (A smaller MAX_FILE cap arrives with the io layer.)
+    if text.len() > u32::MAX as usize {
+        return Err(ParseError {
+            message: "source exceeds the 4 GiB span-offset limit".to_string(),
+        });
+    }
+    // markdown-rs's `to_mdast` recurses on block-container nesting and *aborts* (stack
+    // overflow, which is uncatchable) on pathological input like `"> ".repeat(5000)` — only
+    // ~10 KB, so a byte-size cap would not catch it. Reject excessive nesting up front so it
+    // degrades to a `ParseError`, never an abort. (Our own transform is iterative.)
+    if max_container_marker_depth(text) > MAX_NESTING_DEPTH {
+        return Err(ParseError {
+            message: "input nests block containers too deeply".to_string(),
+        });
+    }
     let root = to_mdast(text, &parse_options()).map_err(|message| ParseError {
         message: message.to_string(),
     })?;
@@ -45,6 +61,65 @@ fn parse_options() -> ParseOptions {
     let mut options = ParseOptions::gfm();
     options.constructs.frontmatter = true;
     options
+}
+
+/// Maximum block-container nesting depth accepted by [`parse`]. Far below the recursive
+/// markdown-rs parser's stack-overflow threshold, and far above any real document (which
+/// nests only a handful of levels).
+const MAX_NESTING_DEPTH: usize = 1000;
+
+/// A cheap, conservative upper bound on block-container nesting: the most container
+/// "openers" (`>` blockquote markers and `-`/`+`/`*`/`N.`/`N)` list bullets) leading any
+/// single line. A `"> ".repeat(n)` or `"- ".repeat(n)` line nests `n` deep in only ~2n
+/// bytes, so this guards the cheap-bytes / deep-nesting vector that a byte-size cap cannot.
+/// It only over-counts on already-pathological lines, so it never rejects real prose.
+fn max_container_marker_depth(source: &str) -> usize {
+    let mut max = 0usize;
+    for line in source.lines() {
+        let bytes = line.as_bytes();
+        let mut depth = 0usize;
+        let mut i = 0usize;
+        loop {
+            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+                i += 1;
+            }
+            if i >= bytes.len() {
+                break;
+            }
+            let b = bytes[i];
+            if b == b'>' {
+                depth += 1;
+                i += 1;
+            } else if matches!(b, b'-' | b'+' | b'*')
+                && i + 1 < bytes.len()
+                && (bytes[i + 1] == b' ' || bytes[i + 1] == b'\t')
+            {
+                depth += 1;
+                i += 2;
+            } else if b.is_ascii_digit() {
+                let mut j = i;
+                while j < bytes.len() && bytes[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if j + 1 < bytes.len()
+                    && matches!(bytes[j], b'.' | b')')
+                    && (bytes[j + 1] == b' ' || bytes[j + 1] == b'\t')
+                {
+                    depth += 1;
+                    i = j + 2;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        max = max.max(depth);
+        if max > MAX_NESTING_DEPTH {
+            return max; // early-out: no need to scan the rest
+        }
+    }
+    max
 }
 
 /// Map an mdast node to its frozen [`NodeKind`].
@@ -101,44 +176,88 @@ fn span_of(node: &mdast::Node, fallback: Span) -> Span {
     }
 }
 
-/// Flatten the mdast pointer tree into the contiguous index-AST.
+/// Flatten the mdast pointer tree into the contiguous index-AST (pre-order ids,
+/// `parent`/`first_child`/`next_sibling` links, absolute spans).
+///
+/// **Iterative** (explicit work stack) so a deeply nested tree cannot overflow the stack
+/// here; [`parse`] separately bounds nesting so markdown-rs's own recursion can't abort
+/// before this runs.
 fn transform(root: &mdast::Node, text: &str) -> Ast {
     let mut nodes: Vec<Node> = Vec::new();
     let root_span = Span::new(0, text.len() as u32);
-    visit(root, NodeId(0), root_span, &mut nodes);
+    // The root's parent is itself, by the AstCoreV1 convention.
+    nodes.push(Node {
+        kind: map_kind(root),
+        span: span_of(root, root_span),
+        parent: NodeId(0),
+        first_child: OptionNodeId::NONE,
+        next_sibling: OptionNodeId::NONE,
+    });
+
+    // One frame per open node: iterate its children, remembering that node's id/span and the
+    // previous child's id (to chain `next_sibling`).
+    struct Frame<'a> {
+        children: core::slice::Iter<'a, mdast::Node>,
+        parent: NodeId,
+        parent_span: Span,
+        last_child: Option<NodeId>,
+    }
+
+    let mut stack: Vec<Frame> = Vec::new();
+    if let Some(children) = root.children() {
+        stack.push(Frame {
+            children: children.iter(),
+            parent: NodeId(0),
+            parent_span: nodes[0].span,
+            last_child: None,
+        });
+    }
+
+    loop {
+        // Pull the next child off the top frame without holding the stack borrow across the
+        // `stack.push` below (the yielded `child` borrows the mdast tree, not the stack).
+        let (child, parent, parent_span, prev) = match stack.last_mut() {
+            None => break,
+            Some(frame) => match frame.children.next() {
+                None => {
+                    stack.pop();
+                    continue;
+                }
+                Some(child) => (child, frame.parent, frame.parent_span, frame.last_child),
+            },
+        };
+
+        let id = NodeId(nodes.len() as u32);
+        let span = span_of(child, parent_span);
+        nodes.push(Node {
+            kind: map_kind(child),
+            span,
+            parent,
+            first_child: OptionNodeId::NONE,
+            next_sibling: OptionNodeId::NONE,
+        });
+        match prev {
+            Some(p) => nodes[p.0 as usize].next_sibling = OptionNodeId::some(id),
+            None => nodes[parent.0 as usize].first_child = OptionNodeId::some(id),
+        }
+        if let Some(frame) = stack.last_mut() {
+            frame.last_child = Some(id);
+        }
+        if let Some(grandchildren) = child.children() {
+            stack.push(Frame {
+                children: grandchildren.iter(),
+                parent: id,
+                parent_span: span,
+                last_child: None,
+            });
+        }
+    }
+
     Ast {
         nodes,
         text: text.to_string(),
         root: NodeId(0),
     }
-}
-
-/// Append `node` (pre-order), recurse into children, and wire up the
-/// `first_child`/`next_sibling` links. Returns the new node's id.
-fn visit(node: &mdast::Node, parent: NodeId, parent_span: Span, nodes: &mut Vec<Node>) -> NodeId {
-    let id = NodeId(nodes.len() as u32);
-    let span = span_of(node, parent_span);
-    // The root's parent is itself, by the AstCoreV1 convention.
-    nodes.push(Node {
-        kind: map_kind(node),
-        span,
-        parent,
-        first_child: OptionNodeId::NONE,
-        next_sibling: OptionNodeId::NONE,
-    });
-
-    if let Some(children) = node.children() {
-        let mut prev: Option<NodeId> = None;
-        for child in children {
-            let child_id = visit(child, id, span, nodes);
-            match prev {
-                Some(p) => nodes[p.0 as usize].next_sibling = OptionNodeId::some(child_id),
-                None => nodes[id.0 as usize].first_child = OptionNodeId::some(child_id),
-            }
-            prev = Some(child_id);
-        }
-    }
-    id
 }
 
 #[cfg(test)]
@@ -309,5 +428,68 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn deeply_nested_input_is_rejected_not_aborted() {
+        // ~10 KB each, but thousands of nesting levels — would stack-overflow (abort)
+        // markdown-rs's recursive parser. parse() must reject these as a recoverable Err.
+        for bomb in [
+            "> ".repeat(5000) + "x\n",  // blockquotes
+            "- ".repeat(5000) + "x\n",  // unordered lists
+            "1. ".repeat(3000) + "x\n", // ordered lists
+        ] {
+            assert!(parse(&bomb).is_err(), "deep nesting should be a ParseError");
+        }
+    }
+
+    #[test]
+    fn moderate_nesting_parses_iteratively() {
+        // 500 levels: under MAX_NESTING_DEPTH and within markdown-rs's own limit, so it
+        // parses — and the iterative transform reproduces every level without overflowing.
+        let src = "> ".repeat(500) + "deep\n";
+        let ast = parse(&src).unwrap();
+        let blockquotes = ast
+            .nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::BLOCKQUOTE)
+            .count();
+        assert_eq!(blockquotes, 500);
+        assert!(kinds(&ast).contains(&NodeKind::TEXT));
+    }
+
+    #[test]
+    fn nested_blockquote_contains_list() {
+        // `> - a` → Blockquote → List → ListItem (container nesting links via first_child).
+        let ast = parse("> - a\n").unwrap();
+        let bq = ast
+            .nodes
+            .iter()
+            .position(|n| n.kind == NodeKind::BLOCKQUOTE)
+            .unwrap();
+        let list = ast.nodes[bq].first_child.get().unwrap();
+        assert_eq!(ast.nodes[list.0 as usize].kind, NodeKind::LIST);
+        let item = ast.nodes[list.0 as usize].first_child.get().unwrap();
+        assert_eq!(ast.nodes[item.0 as usize].kind, NodeKind::LIST_ITEM);
+        assert_eq!(ast.nodes[item.0 as usize].parent, list);
+    }
+
+    #[test]
+    fn multiple_top_level_blocks_chain_as_siblings() {
+        let ast = parse("# H\n\npara\n\n- x\n").unwrap();
+        let first = ast.nodes[0].first_child.get().unwrap();
+        assert_eq!(ast.nodes[first.0 as usize].kind, NodeKind::HEADING);
+        let second = ast.nodes[first.0 as usize].next_sibling.get().unwrap();
+        assert_eq!(ast.nodes[second.0 as usize].kind, NodeKind::PARAGRAPH);
+        let third = ast.nodes[second.0 as usize].next_sibling.get().unwrap();
+        assert_eq!(ast.nodes[third.0 as usize].kind, NodeKind::LIST);
+        assert_eq!(ast.nodes[third.0 as usize].next_sibling, OptionNodeId::NONE);
+    }
+
+    #[test]
+    fn hard_line_break_is_a_break_node() {
+        // A backslash at end of line is a hard break.
+        let ast = parse("foo\\\nbar\n").unwrap();
+        assert!(kinds(&ast).contains(&NodeKind::BREAK));
     }
 }
