@@ -34,6 +34,6 @@ cargo test           # or: just test
 just check           # rustfmt + clippy + tests (CI-equivalent)
 ```
 
-MSRV: Rust **1.85** (edition 2024). License: **MIT**.
+MSRV: Rust **1.85** (edition 2024). License: **Apache-2.0**.
 
 Documentation lives under [`docs/`](docs/) and is written in English.

@@ -10,7 +10,7 @@ ignore = []
 [licenses]
 # Require high confidence when inferring a license from crate text.
 confidence-threshold = 0.93
-# Permissive licenses compatible with this MIT-licensed project.
+# Permissive licenses compatible with this Apache-2.0-licensed project.
 allow = [
     "MIT",
     "Apache-2.0",
