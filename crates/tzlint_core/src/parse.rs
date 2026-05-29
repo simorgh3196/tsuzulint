@@ -42,10 +42,11 @@ pub fn parse(source: &str) -> Result<Ast, ParseError> {
         });
     }
     // markdown-rs's `to_mdast` recurses on block-container nesting and *aborts* (stack
-    // overflow, which is uncatchable) on pathological input like `"> ".repeat(5000)` — only
-    // ~10 KB, so a byte-size cap would not catch it. Reject excessive nesting up front so it
-    // degrades to a `ParseError`, never an abort. (Our own transform is iterative.)
-    if max_container_marker_depth(text) > MAX_NESTING_DEPTH {
+    // overflow, which is uncatchable) on pathological input — e.g. `"> ".repeat(5000)`
+    // (~10 KB) or an indent-nested list — so a byte-size cap alone would not catch it.
+    // Reject excessive nesting up front so it degrades to a `ParseError`, never an abort.
+    // (Our own transform is iterative, so only `to_mdast` needs this guard.)
+    if estimate_max_nesting_depth(text) > MAX_NESTING_DEPTH {
         return Err(ParseError {
             message: "input nests block containers too deeply".to_string(),
         });
@@ -68,17 +69,31 @@ fn parse_options() -> ParseOptions {
 /// nests only a handful of levels).
 const MAX_NESTING_DEPTH: usize = 1000;
 
-/// A cheap, conservative upper bound on block-container nesting: the most container
-/// "openers" (`>` blockquote markers and `-`/`+`/`*`/`N.`/`N)` list bullets) leading any
-/// single line. A `"> ".repeat(n)` or `"- ".repeat(n)` line nests `n` deep in only ~2n
-/// bytes, so this guards the cheap-bytes / deep-nesting vector that a byte-size cap cannot.
-/// It only over-counts on already-pathological lines, so it never rejects real prose.
-fn max_container_marker_depth(source: &str) -> usize {
+/// A cheap, conservative upper bound on block-container nesting depth, scanning each line's
+/// leading structure. Two sources of nesting are counted:
+///
+/// - **markers on the line** — `>` blockquote markers and `-`/`+`/`*`/`N.`/`N)` list
+///   bullets, e.g. `"> ".repeat(n)` or `"- ".repeat(n)` nests `n` deep in ~2n bytes; and
+/// - **leading indentation** — each list nesting level needs ≥2 columns, so an indent of
+///   `c` columns admits up to `c / 2` ancestor levels (a tab counts as 4 columns). This
+///   catches the indent-driven form `"  ".repeat(n) + "- x"` that markers alone miss.
+///
+/// It deliberately *over*-counts (e.g. a deeply space-indented code line), so it can reject
+/// pathological input early but never under-counts real nesting. Real prose stays far below
+/// the limit, so it is false-positive free in practice.
+fn estimate_max_nesting_depth(source: &str) -> usize {
     let mut max = 0usize;
     for line in source.lines() {
         let bytes = line.as_bytes();
-        let mut depth = 0usize;
         let mut i = 0usize;
+        // Leading indentation = ancestor container depth (>= 2 columns per list level).
+        let mut indent_cols = 0usize;
+        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+            indent_cols += if bytes[i] == b'\t' { 4 } else { 1 };
+            i += 1;
+        }
+        let mut depth = indent_cols / 2;
+        // Container openers on this line (spaces between markers are allowed).
         loop {
             while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
                 i += 1;
@@ -441,6 +456,18 @@ mod tests {
         ] {
             assert!(parse(&bomb).is_err(), "deep nesting should be a ParseError");
         }
+    }
+
+    #[test]
+    fn indent_nested_list_is_rejected() {
+        // Indent-driven nesting: one marker per line, growing indentation. Counting markers
+        // alone sees depth 1 per line, so the indentation term must catch it.
+        let mut deep_indent = String::new();
+        for level in 0..1100 {
+            deep_indent.push_str(&" ".repeat(level * 2));
+            deep_indent.push_str("- x\n");
+        }
+        assert!(parse(&deep_indent).is_err());
     }
 
     #[test]
