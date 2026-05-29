@@ -8,8 +8,9 @@ constraint from day one (the core compiles to `wasm32`, CI builds it); the first
   skeleton, CI (incl. `wasm` + `io-guard` + `msrv`), skills, docs templates, LICENSE.
   Spike: rkyv vs MsgPack vs FlatBuffers on the **real** wasmtime path; go/no-go = adopt
   rkyv only if ≥1.5× over MsgPack on real-path throughput, else MsgPack. Record before
-  freezing the ABI. **DONE: rkyv wins ≈11.6× over MsgPack (≈5.0× over FlatBuffers) on the
-  real path → GO (rkyv); encoding no longer provisional. See `benchmarks.md`.**
+  freezing the ABI. **DONE: rkyv wins ≈11.3× over MsgPack (≈4.6× over FlatBuffers) on the
+  real path → GO (rkyv); encoding no longer provisional. See
+  [`research/encoding-spike.md`](research/encoding-spike.md).**
 - **M1 — Lean core**: `tzlint_ast` (frozen AST), `tzlint_core` (markdown-rs parser +
   mdast→index transform, multi-format config + presets, document-level cache,
   single-traversal engine, position mapper, `io` + `Host` abstraction), Diagnostic/Fix
