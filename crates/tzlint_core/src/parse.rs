@@ -519,4 +519,141 @@ mod tests {
         let ast = parse("foo\\\nbar\n").unwrap();
         assert!(kinds(&ast).contains(&NodeKind::BREAK));
     }
+
+    #[test]
+    fn maps_more_reachable_kinds() {
+        // One document exercising the CommonMark/GFM kinds not covered above: thematic
+        // break, raw HTML, image, link/image references + their definition, footnotes, and
+        // a numeric-prefixed prose line (which is *not* an ordered-list marker).
+        let src = "\
+para
+
+---
+
+2024 was a fine year.
+
+<div>raw html</div>
+
+![alt](https://e.x/i.png)
+
+[ref][r] and ![img][r]
+
+[r]: https://e.x
+
+text[^fn]
+
+[^fn]: a footnote.
+";
+        let ks = kinds(&parse(src).unwrap());
+        for expected in [
+            NodeKind::THEMATIC_BREAK,
+            NodeKind::HTML,
+            NodeKind::IMAGE,
+            NodeKind::LINK_REFERENCE,
+            NodeKind::IMAGE_REFERENCE,
+            NodeKind::DEFINITION,
+            NodeKind::FOOTNOTE_REFERENCE,
+            NodeKind::FOOTNOTE_DEFINITION,
+        ] {
+            assert!(ks.contains(&expected), "missing {expected:?} in {ks:?}");
+        }
+    }
+
+    #[test]
+    fn map_kind_covers_parser_disabled_constructs() {
+        // MDX, math, and TOML frontmatter are disabled in `parse_options`, so the parser
+        // never emits these nodes — but the frozen, lossless mapping is still defined.
+        // Exercise it directly so the (otherwise unreachable) arms stay verified.
+        use mdast::{
+            InlineMath, Math, MdxFlowExpression, MdxJsxFlowElement, MdxJsxTextElement,
+            MdxTextExpression, MdxjsEsm, Node, Toml,
+        };
+        let cases = [
+            (
+                Node::Toml(Toml {
+                    value: String::new(),
+                    position: None,
+                }),
+                NodeKind::TOML,
+            ),
+            (
+                Node::Math(Math {
+                    value: String::new(),
+                    position: None,
+                    meta: None,
+                }),
+                NodeKind::MATH,
+            ),
+            (
+                Node::InlineMath(InlineMath {
+                    value: String::new(),
+                    position: None,
+                }),
+                NodeKind::INLINE_MATH,
+            ),
+            (
+                Node::MdxFlowExpression(MdxFlowExpression {
+                    value: String::new(),
+                    position: None,
+                    stops: vec![],
+                }),
+                NodeKind::MDX_FLOW_EXPRESSION,
+            ),
+            (
+                Node::MdxTextExpression(MdxTextExpression {
+                    value: String::new(),
+                    position: None,
+                    stops: vec![],
+                }),
+                NodeKind::MDX_TEXT_EXPRESSION,
+            ),
+            (
+                Node::MdxJsxFlowElement(MdxJsxFlowElement {
+                    children: vec![],
+                    position: None,
+                    name: None,
+                    attributes: vec![],
+                }),
+                NodeKind::MDX_JSX_FLOW_ELEMENT,
+            ),
+            (
+                Node::MdxJsxTextElement(MdxJsxTextElement {
+                    children: vec![],
+                    position: None,
+                    name: None,
+                    attributes: vec![],
+                }),
+                NodeKind::MDX_JSX_TEXT_ELEMENT,
+            ),
+            (
+                Node::MdxjsEsm(MdxjsEsm {
+                    value: String::new(),
+                    position: None,
+                    stops: vec![],
+                }),
+                NodeKind::MDXJS_ESM,
+            ),
+        ];
+        for (node, expected) in &cases {
+            assert_eq!(map_kind(node), *expected);
+        }
+    }
+
+    #[test]
+    fn parse_error_displays_its_reason() {
+        let err = parse(&"> ".repeat(5000)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "parse error: input nests block containers too deeply"
+        );
+    }
+
+    #[test]
+    fn node_without_position_inherits_the_fallback_span() {
+        // mdast nodes from the parser always carry a position; the fallback is exercised
+        // directly with a synthetic position-less node.
+        let fallback = Span::new(3, 9);
+        let node = mdast::Node::Break(mdast::Break { position: None });
+        assert_eq!(span_of(&node, fallback), fallback);
+    }
 }
