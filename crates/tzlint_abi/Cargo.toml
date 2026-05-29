@@ -12,4 +12,4 @@ description = "TsuzuLint plugin ABI: host + guest sides, bytecheck boundaries, i
 workspace = true
 
 [dependencies]
-tzlint_ast = { path = "../tzlint_ast" }
+tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }

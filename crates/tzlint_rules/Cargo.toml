@@ -12,5 +12,5 @@ description = "Built-in native rules for TsuzuLint (Rule impls + scheduler regis
 workspace = true
 
 [dependencies]
-tzlint_ast = { path = "../tzlint_ast" }
-tzlint_core = { path = "../tzlint_core" }
+tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
+tzlint_core = { path = "../tzlint_core", version = "0.0.0" }

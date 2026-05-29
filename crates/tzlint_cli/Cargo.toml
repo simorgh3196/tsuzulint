@@ -16,5 +16,5 @@ name = "tzlint"
 path = "src/main.rs"
 
 [dependencies]
-tzlint_core = { path = "../tzlint_core" }
-tzlint_rules = { path = "../tzlint_rules" }
+tzlint_core = { path = "../tzlint_core", version = "0.0.0" }
+tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
