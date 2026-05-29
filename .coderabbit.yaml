@@ -5,7 +5,7 @@
 # markdownlint, shellcheck, and gitleaks — are all enabled by default, so they need no
 # entry here. This file only overrides defaults and adds project-specific review guidance.
 
-language: en-US # language of reviews/summaries (set to "ja-JP" for Japanese)
+language: ja-JP # language of reviews/summaries (set to "en-US" for English)
 
 reviews:
   profile: chill # fewer nitpicks; switch to "assertive" for stricter review
