@@ -14,7 +14,7 @@ members = [
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.94" # MSRV policy: latest stable − 2 (matches wasmtime's "last 3 stables"); bump each Rust release. Develop on latest stable.
 license = "Apache-2.0"
 authors = ["simorgh3196 <simorgh3196@gmail.com>"]
 repository = "https://github.com/simorgh3196/tsuzulint"
