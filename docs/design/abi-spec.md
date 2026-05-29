@@ -29,6 +29,25 @@
 - **Calling convention (TODO M3):** guest exports `tzlint_abi_version`, `tzlint_meta`,
   `tzlint_alloc`/`tzlint_free`, `tzlint_lint(dir_ptr,dir_len) -> (ptr,len)`. Interface
   directory = fixed-layout header (not rkyv) of `{name,ver,off,len}` entries.
-- **Boundary safety:** untrusted plugin **output** → checked `rkyv::access`; host-written
-  AST read by a plugin → `access_unchecked` (justified). Encoding (rkyv/MsgPack) confirmed
-  by the M0 spike.
+- **Boundary safety — reads are checked by default.** Every read of bytes the host did
+  **not** produce in-process — plugin **output**, an on-disk cache, any external archive —
+  goes through the checked `rkyv::access` (bytecheck), so a malformed or adversarial buffer
+  is a recoverable `Err`, never UB. This is the default for **all** `Ast` (and additive
+  table) reads, and it matches the reading policy of the `AstCoreV1` implementation in
+  `tzlint_ast`: its tests read the archive via `rkyv::access`, and the crate contains no
+  hand-written `unsafe`.
+
+  The **only** carve-out is `access_unchecked`, permitted strictly under this precondition:
+  - **Who may call it:** only a plugin (guest) reading the **host-written `Ast` archive**
+    (the frozen `AstCoreV1` core plus any additive tables) that the host handed it for the
+    current file.
+  - **What validation stands in for the check:** none is re-run on the guest — the host
+    produced those exact bytes in-process with `rkyv::to_bytes` from a valid `Ast`, so the
+    layout is correct **by construction**. A corruption there would be a host bug, not
+    attacker input; the host's own serialization is the validation.
+  - **Which data it covers:** **only** that host-produced AST/table payload. It does **not**
+    extend to plugin output, cached archives, or any bytes crossing an untrusted boundary —
+    those stay on the checked `rkyv::access` path above.
+  - **Why:** it skips an O(N)-per-plugin re-validation of an already-trusted archive.
+
+  Encoding (rkyv) was confirmed by the M0 spike.
