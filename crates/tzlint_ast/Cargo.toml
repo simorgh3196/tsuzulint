@@ -12,3 +12,4 @@ description = "Frozen ABI types for TsuzuLint: index-based AST (NodeId(u32)) and
 workspace = true
 
 [dependencies]
+rkyv = { workspace = true }

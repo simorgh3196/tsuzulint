@@ -20,6 +20,21 @@ authors = ["simorgh3196 <simorgh3196@gmail.com>"]
 repository = "https://github.com/simorgh3196/tsuzulint"
 description = "TsuzuLint — a high-performance natural-language linter for CJK, written in Rust."
 
+# Shared dependency versions. Internal crates reference these via `{ workspace = true }`.
+[workspace.dependencies]
+# Zero-copy archival for the frozen AST / plugin ABI. The wire layout is pinned
+# little-endian with 32-bit relative pointers so a single archive is portable across
+# hosts and readable in-place on `wasm32` (32-bit) and native (64-bit) alike. `no_std`
+# (alloc only). The golden-byte test in `tzlint_ast` gates any layout drift — including
+# drift introduced by an rkyv upgrade — so this acts as the ABI lock.
+rkyv = { version = "0.8.16", default-features = false, features = [
+    "alloc",            # no_std: alloc-backed Vec/String archival + high-level to_bytes
+    "bytecheck",        # checked `rkyv::access` for untrusted boundaries (see abi-spec.md)
+    "little_endian",    # pin byte order (overrides the internal default; conflicts with big_endian)
+    "aligned",          # pin aligned archived layout (conflicts with unaligned)
+    "pointer_width_32", # pin 32-bit relative pointers → portable native(64)/wasm32(32) archive
+] }
+
 # Lints applied workspace-wide. `unwrap`/`expect`/`panic` are denied in library code
 # (per the design's error-handling rules); the io-guard CI job adds the disallowed-methods
 # checks via clippy.toml.

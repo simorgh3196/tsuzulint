@@ -1,3 +1,8 @@
+# `.unwrap()`/`.expect()` are denied in library code (workspace clippy lints) but allowed
+# in test code, where an unexpected `Err`/`None` *should* fail the test loudly.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
 # Centralized-I/O guard: raw file/network APIs are disallowed outside the single
 # `tzlint_core::io` wrappers (which opt out with a justified `#[allow(...)]`).
 # This makes the most frequent past bug class (the same I/O mistake repeated across
