@@ -8,4 +8,11 @@
 //!   atomic writes), behind a `Host` provider abstraction so embedders inject their
 //!   environment (native fs / Node / browser).
 //!
-//! TODO(M1): implement the engine, parser transform, config, cache, io, position mapper.
+//! Landed so far (M1b): the [`parse`] function (markdown-rs + mdast → index-AST transform)
+//! and the [`LineIndex`] position mapper. TODO(M1): the engine, config, cache, and io.
+
+pub mod parse;
+pub mod position;
+
+pub use parse::{ParseError, parse};
+pub use position::LineIndex;
