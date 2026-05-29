@@ -34,13 +34,10 @@ impl std::error::Error for ParseError {}
 /// the tree is always [`NodeId(0)`](NodeId), a `Root` node spanning the whole document.
 pub fn parse(source: &str) -> Result<Ast, ParseError> {
     let text = source.strip_prefix('\u{feff}').unwrap_or(source);
-    // Spans are u32 byte offsets; a >= 4 GiB source would truncate them. Reject rather than
-    // silently emit wrong spans. (A smaller MAX_FILE cap arrives with the io layer.)
-    if text.len() > u32::MAX as usize {
-        return Err(ParseError {
-            message: "source exceeds the 4 GiB span-offset limit".to_string(),
-        });
-    }
+    // Span offsets are u32, so the source must fit in `MAX_SOURCE_LEN`. Reject oversize
+    // input rather than silently truncating offsets. (A smaller MAX_FILE cap arrives with
+    // the io layer.)
+    check_source_len(text.len())?;
     // markdown-rs's `to_mdast` recurses on block-container nesting and *aborts* (stack
     // overflow, which is uncatchable) on pathological input — e.g. `"> ".repeat(5000)`
     // (~10 KB) or an indent-nested list — so a byte-size cap alone would not catch it.
@@ -51,6 +48,10 @@ pub fn parse(source: &str) -> Result<Ast, ParseError> {
             message: "input nests block containers too deeply".to_string(),
         });
     }
+    // `to_mdast` only returns `Err` for MDX syntax errors, and MDX is disabled in
+    // `parse_options`, so CommonMark/GFM/frontmatter never errors here. The `?` is kept
+    // because the signature is fallible (and MDX could be enabled later); the branch is
+    // therefore unreachable under the current configuration.
     let root = to_mdast(text, &parse_options()).map_err(|message| ParseError {
         message: message.to_string(),
     })?;
@@ -62,6 +63,23 @@ fn parse_options() -> ParseOptions {
     let mut options = ParseOptions::gfm();
     options.constructs.frontmatter = true;
     options
+}
+
+/// Maximum source length whose byte offsets still fit in a `u32` [`Span`]: `u32::MAX`
+/// bytes (one byte shy of 4 GiB). Larger input is rejected so offsets never truncate.
+const MAX_SOURCE_LEN: usize = u32::MAX as usize;
+
+/// Reject a source whose length would overflow the `u32` span offsets. The message is
+/// derived from [`MAX_SOURCE_LEN`] so it can't drift from the actual bound.
+fn check_source_len(len: usize) -> Result<(), ParseError> {
+    if len > MAX_SOURCE_LEN {
+        return Err(ParseError {
+            message: format!(
+                "source is {len} bytes, over the {MAX_SOURCE_LEN}-byte limit (span offsets must fit in u32)"
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// Maximum block-container nesting depth accepted by [`parse`]. Far below the recursive
@@ -646,6 +664,16 @@ text[^fn]
             err.to_string(),
             "parse error: input nests block containers too deeply"
         );
+    }
+
+    #[test]
+    fn rejects_source_over_the_u32_offset_limit() {
+        // Exercised via the length helper so we don't allocate a >4 GiB string.
+        assert!(check_source_len(0).is_ok());
+        assert!(check_source_len(MAX_SOURCE_LEN).is_ok());
+        let err = check_source_len(MAX_SOURCE_LEN + 1).unwrap_err();
+        // The message reports the actual byte limit (no hard-coded "4 GiB").
+        assert!(err.message.contains(&MAX_SOURCE_LEN.to_string()));
     }
 
     #[test]
