@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit configuration. Reference: https://docs.coderabbit.ai/reference/configuration
+# CodeRabbit's built-in linters — clippy (Rust), actionlint (GitHub Actions), yamllint,
+# markdownlint, shellcheck, and gitleaks — are all enabled by default, so they need no
+# entry here. This file only overrides defaults and adds project-specific review guidance.
+
+language: ja-JP # language of reviews/summaries (set to "en-US" for English)
+
+reviews:
+  profile: chill # fewer nitpicks; switch to "assertive" for stricter review
+  high_level_summary: true
+  poem: false # skip the summary haiku
+  request_changes_workflow: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!target/**"
+    - "!**/Cargo.lock" # dependency lockfile churn (Dependabot) is not worth reviewing
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: >-
+        Enforce the project rules in AGENTS.md / CLAUDE.md. Library crates must NOT use
+        .unwrap(), .expect(), or panic! (CI denies them) — flag any such call outside of
+        #[cfg(test)] code. All filesystem and network I/O must go through tzlint_core::io;
+        flag raw std::fs or network calls made elsewhere. AstCoreV1 (the frozen tzlint_ast
+        AST) may only be extended via additive tables — flag any change to the frozen Node
+        field set, its field order/types, or its archived (rkyv) layout, since that breaks
+        the ABI and the golden-byte test. Untrusted boundary bytes must be read with the
+        checked rkyv::access, never access_unchecked. Rustdoc and code comments are written
+        in English.
+    - path: "**/*.md"
+      instructions: >-
+        Documentation (docs/, README, design notes) is written in English. Flag committed
+        prose that is not in English.

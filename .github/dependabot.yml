@@ -1,0 +1,38 @@
+# Dependabot version updates.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Note: these PRs are opened by `dependabot[bot]`, not by a human, so they are not subject
+# to the project's commit-time conventions. A bumped `rkyv` is caught by the AstCoreV1
+# golden-byte test (CI), so dependency updates that would silently change the frozen ABI
+# fail loudly rather than slipping through.
+version: 2
+updates:
+  # Rust dependencies for the Cargo workspace at the repo root.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: saturday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Batch low-risk updates into one PR; majors still get their own for careful review.
+      cargo-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions used by the CI workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: saturday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
