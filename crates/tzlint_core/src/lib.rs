@@ -8,4 +8,6 @@
 //!   atomic writes), behind a `Host` provider abstraction so embedders inject their
 //!   environment (native fs / Node / browser).
 //!
-//! TODO(M1): implement the engine, parser transform, config, cache, io, position mapper.
+//! TODO(M1): implement the engine, parser transform, config, cache, position mapper.
+
+pub mod io;
