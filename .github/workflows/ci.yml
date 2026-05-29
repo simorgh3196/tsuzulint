@@ -31,7 +31,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
-      - run: cargo nextest run --workspace
+      # `--no-tests=warn`: a workspace with no tests yet (early milestones) or a docs/config
+      # -only PR must not fail this job — nextest otherwise errors on zero tests to run.
+      - run: cargo nextest run --workspace --no-tests=warn
       - run: cargo test --workspace --doc
 
   wasm:
@@ -89,7 +91,7 @@ jobs:
       # exercised for pass/fail in the `test` job; doctest *line* coverage requires nightly
       # (`cargo llvm-cov --doctests`) and is intentionally omitted here.
       - name: Generate coverage (lcov)
-        run: cargo llvm-cov nextest --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --workspace --no-tests=warn --lcov --output-path lcov.info
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
