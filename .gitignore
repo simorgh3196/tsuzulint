@@ -9,3 +9,4 @@
 .vscode/
 
 # Local-only tooling state (not the lockfile — Cargo.lock is committed for the binary)
+.jules/

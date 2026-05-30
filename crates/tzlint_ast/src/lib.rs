@@ -1,4 +1,4 @@
-//! `tzlint_ast` — the permanently-frozen `AstCoreV1` ABI for TsuzuLint.
+//! `tzlint_ast` — the permanently-frozen `AstCoreV1` ABI for `TsuzuLint`.
 //!
 //! This crate defines the on-the-wire AST that every rule (native or plugin) reads. It is
 //! **index-based**: an [`Ast`] owns a contiguous `Vec<`[`Node`]`>` and the full source
@@ -54,18 +54,21 @@ pub struct Span {
 impl Span {
     /// A span covering `[start, end)`.
     #[inline]
+    #[must_use]
     pub const fn new(start: u32, end: u32) -> Self {
         Self { start, end }
     }
 
     /// Length in bytes (saturating; an inverted span reports `0`).
     #[inline]
+    #[must_use]
     pub const fn len(self) -> u32 {
         self.end.saturating_sub(self.start)
     }
 
     /// Whether the span covers zero bytes.
     #[inline]
+    #[must_use]
     pub const fn is_empty(self) -> bool {
         self.end <= self.start
     }
@@ -86,17 +89,19 @@ pub struct OptionNodeId(pub u32);
 
 impl OptionNodeId {
     /// The `None` sentinel (`u32::MAX`).
-    pub const NONE: OptionNodeId = OptionNodeId(u32::MAX);
+    pub const NONE: Self = Self(u32::MAX);
 
     /// Wrap a present [`NodeId`]. (A real tree never has `u32::MAX` nodes, so the index
     /// can never collide with the sentinel.)
     #[inline]
+    #[must_use]
     pub const fn some(id: NodeId) -> Self {
-        OptionNodeId(id.0)
+        Self(id.0)
     }
 
     /// Decode to an [`Option<NodeId>`].
     #[inline]
+    #[must_use]
     pub const fn get(self) -> Option<NodeId> {
         if self.0 == u32::MAX {
             None
@@ -107,6 +112,7 @@ impl OptionNodeId {
 
     /// Whether this is the `None` sentinel.
     #[inline]
+    #[must_use]
     pub const fn is_none(self) -> bool {
         self.0 == u32::MAX
     }
@@ -129,81 +135,81 @@ pub struct NodeKind(u32);
 impl NodeKind {
     // ── Root ────────────────────────────────────────────────────────────────────────
     /// `mdast::Root` — the document root.
-    pub const ROOT: NodeKind = NodeKind(0);
+    pub const ROOT: Self = Self(0);
 
     // ── Block / flow content ─────────────────────────────────────────────────────────
     /// `mdast::Paragraph`.
-    pub const PARAGRAPH: NodeKind = NodeKind(1);
+    pub const PARAGRAPH: Self = Self(1);
     /// `mdast::Heading`.
-    pub const HEADING: NodeKind = NodeKind(2);
+    pub const HEADING: Self = Self(2);
     /// `mdast::ThematicBreak` (`---`).
-    pub const THEMATIC_BREAK: NodeKind = NodeKind(3);
+    pub const THEMATIC_BREAK: Self = Self(3);
     /// `mdast::Blockquote`.
-    pub const BLOCKQUOTE: NodeKind = NodeKind(4);
+    pub const BLOCKQUOTE: Self = Self(4);
     /// `mdast::List`.
-    pub const LIST: NodeKind = NodeKind(5);
+    pub const LIST: Self = Self(5);
     /// `mdast::ListItem`.
-    pub const LIST_ITEM: NodeKind = NodeKind(6);
+    pub const LIST_ITEM: Self = Self(6);
     /// `mdast::Code` — a fenced or indented code block.
-    pub const CODE: NodeKind = NodeKind(7);
+    pub const CODE: Self = Self(7);
     /// `mdast::Html` — raw HTML (flow or phrasing; mdast uses one node type for both).
-    pub const HTML: NodeKind = NodeKind(8);
+    pub const HTML: Self = Self(8);
     /// `mdast::Definition` — a link reference definition.
-    pub const DEFINITION: NodeKind = NodeKind(9);
+    pub const DEFINITION: Self = Self(9);
     /// `mdast::FootnoteDefinition` (GFM).
-    pub const FOOTNOTE_DEFINITION: NodeKind = NodeKind(10);
+    pub const FOOTNOTE_DEFINITION: Self = Self(10);
     /// `mdast::Table` (GFM).
-    pub const TABLE: NodeKind = NodeKind(11);
+    pub const TABLE: Self = Self(11);
     /// `mdast::TableRow` (GFM).
-    pub const TABLE_ROW: NodeKind = NodeKind(12);
+    pub const TABLE_ROW: Self = Self(12);
     /// `mdast::TableCell` (GFM).
-    pub const TABLE_CELL: NodeKind = NodeKind(13);
+    pub const TABLE_CELL: Self = Self(13);
     /// `mdast::Yaml` — YAML frontmatter.
-    pub const YAML: NodeKind = NodeKind(14);
+    pub const YAML: Self = Self(14);
     /// `mdast::Toml` — TOML frontmatter.
-    pub const TOML: NodeKind = NodeKind(15);
+    pub const TOML: Self = Self(15);
     /// `mdast::Math` — a block math expression.
-    pub const MATH: NodeKind = NodeKind(16);
+    pub const MATH: Self = Self(16);
 
     // ── Inline / phrasing content ────────────────────────────────────────────────────
     /// `mdast::Text` — literal text (the primary prose carrier).
-    pub const TEXT: NodeKind = NodeKind(17);
+    pub const TEXT: Self = Self(17);
     /// `mdast::Emphasis` (`*…*`).
-    pub const EMPHASIS: NodeKind = NodeKind(18);
+    pub const EMPHASIS: Self = Self(18);
     /// `mdast::Strong` (`**…**`).
-    pub const STRONG: NodeKind = NodeKind(19);
+    pub const STRONG: Self = Self(19);
     /// `mdast::Delete` — strikethrough (GFM).
-    pub const DELETE: NodeKind = NodeKind(20);
+    pub const DELETE: Self = Self(20);
     /// `mdast::InlineCode`.
-    pub const INLINE_CODE: NodeKind = NodeKind(21);
+    pub const INLINE_CODE: Self = Self(21);
     /// `mdast::InlineMath`.
-    pub const INLINE_MATH: NodeKind = NodeKind(22);
+    pub const INLINE_MATH: Self = Self(22);
     /// `mdast::Break` — a hard line break.
-    pub const BREAK: NodeKind = NodeKind(23);
+    pub const BREAK: Self = Self(23);
     /// `mdast::Link`.
-    pub const LINK: NodeKind = NodeKind(24);
+    pub const LINK: Self = Self(24);
     /// `mdast::LinkReference`.
-    pub const LINK_REFERENCE: NodeKind = NodeKind(25);
+    pub const LINK_REFERENCE: Self = Self(25);
     /// `mdast::Image`.
-    pub const IMAGE: NodeKind = NodeKind(26);
+    pub const IMAGE: Self = Self(26);
     /// `mdast::ImageReference`.
-    pub const IMAGE_REFERENCE: NodeKind = NodeKind(27);
+    pub const IMAGE_REFERENCE: Self = Self(27);
     /// `mdast::FootnoteReference` (GFM).
-    pub const FOOTNOTE_REFERENCE: NodeKind = NodeKind(28);
+    pub const FOOTNOTE_REFERENCE: Self = Self(28);
 
     // ── MDX ──────────────────────────────────────────────────────────────────────────
     // Only produced when MDX parsing is enabled. Defined here so the transform is lossless
     // over the *entire* mdast vocabulary even if MDX is turned on later.
     /// `mdast::MdxFlowExpression`.
-    pub const MDX_FLOW_EXPRESSION: NodeKind = NodeKind(29);
+    pub const MDX_FLOW_EXPRESSION: Self = Self(29);
     /// `mdast::MdxTextExpression`.
-    pub const MDX_TEXT_EXPRESSION: NodeKind = NodeKind(30);
+    pub const MDX_TEXT_EXPRESSION: Self = Self(30);
     /// `mdast::MdxJsxFlowElement`.
-    pub const MDX_JSX_FLOW_ELEMENT: NodeKind = NodeKind(31);
+    pub const MDX_JSX_FLOW_ELEMENT: Self = Self(31);
     /// `mdast::MdxJsxTextElement`.
-    pub const MDX_JSX_TEXT_ELEMENT: NodeKind = NodeKind(32);
+    pub const MDX_JSX_TEXT_ELEMENT: Self = Self(32);
     /// `mdast::MdxjsEsm`.
-    pub const MDXJS_ESM: NodeKind = NodeKind(33);
+    pub const MDXJS_ESM: Self = Self(33);
 
     /// Number of known kinds. Discriminants `< COUNT` are known; anything `>= COUNT` is an
     /// unknown/opaque kind from a newer producer.
@@ -211,6 +217,7 @@ impl NodeKind {
 
     /// The raw wire discriminant.
     #[inline]
+    #[must_use]
     pub const fn as_u32(self) -> u32 {
         self.0
     }
@@ -218,12 +225,14 @@ impl NodeKind {
     /// Wrap a raw wire discriminant. Total: unknown values are preserved (see the type docs
     /// on forward compatibility).
     #[inline]
+    #[must_use]
     pub const fn from_u32(value: u32) -> Self {
-        NodeKind(value)
+        Self(value)
     }
 
     /// Whether this is one of the known [`NodeKind`] constants.
     #[inline]
+    #[must_use]
     pub const fn is_known(self) -> bool {
         self.0 < Self::COUNT
     }
@@ -273,7 +282,8 @@ pub struct Ast {
 impl ArchivedSpan {
     /// Decode to a native [`Span`].
     #[inline]
-    pub fn get(&self) -> Span {
+    #[must_use]
+    pub const fn get(&self) -> Span {
         Span {
             start: self.start.to_native(),
             end: self.end.to_native(),
@@ -284,7 +294,8 @@ impl ArchivedSpan {
 impl ArchivedNodeId {
     /// Decode to a native [`NodeId`].
     #[inline]
-    pub fn get(&self) -> NodeId {
+    #[must_use]
+    pub const fn get(&self) -> NodeId {
         NodeId(self.0.to_native())
     }
 }
@@ -292,7 +303,8 @@ impl ArchivedNodeId {
 impl ArchivedOptionNodeId {
     /// Decode to an [`Option<NodeId>`], honoring the `u32::MAX` sentinel.
     #[inline]
-    pub fn get(&self) -> Option<NodeId> {
+    #[must_use]
+    pub const fn get(&self) -> Option<NodeId> {
         let raw = self.0.to_native();
         if raw == u32::MAX {
             None
@@ -305,7 +317,8 @@ impl ArchivedOptionNodeId {
 impl ArchivedNodeKind {
     /// Decode to a native [`NodeKind`].
     #[inline]
-    pub fn get(&self) -> NodeKind {
+    #[must_use]
+    pub const fn get(&self) -> NodeKind {
         NodeKind(self.0.to_native())
     }
 }
@@ -313,27 +326,32 @@ impl ArchivedNodeKind {
 impl ArchivedNode {
     /// The node's [`NodeKind`].
     #[inline]
-    pub fn kind(&self) -> NodeKind {
+    #[must_use]
+    pub const fn kind(&self) -> NodeKind {
         self.kind.get()
     }
     /// The node's absolute [`Span`].
     #[inline]
-    pub fn span(&self) -> Span {
+    #[must_use]
+    pub const fn span(&self) -> Span {
         self.span.get()
     }
     /// The parent [`NodeId`].
     #[inline]
-    pub fn parent(&self) -> NodeId {
+    #[must_use]
+    pub const fn parent(&self) -> NodeId {
         self.parent.get()
     }
     /// The first child, if any.
     #[inline]
-    pub fn first_child(&self) -> Option<NodeId> {
+    #[must_use]
+    pub const fn first_child(&self) -> Option<NodeId> {
         self.first_child.get()
     }
     /// The next sibling, if any.
     #[inline]
-    pub fn next_sibling(&self) -> Option<NodeId> {
+    #[must_use]
+    pub const fn next_sibling(&self) -> Option<NodeId> {
         self.next_sibling.get()
     }
 }
@@ -341,30 +359,35 @@ impl ArchivedNode {
 impl ArchivedAst {
     /// The root node's [`NodeId`].
     #[inline]
-    pub fn root(&self) -> NodeId {
+    #[must_use]
+    pub const fn root(&self) -> NodeId {
         self.root.get()
     }
 
     /// The full source text.
     #[inline]
+    #[must_use]
     pub fn text(&self) -> &str {
         self.text.as_ref()
     }
 
     /// The number of nodes.
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
     /// Whether there are no nodes.
     #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
     /// The node with the given id, or `None` if out of range.
     #[inline]
+    #[must_use]
     pub fn node(&self, id: NodeId) -> Option<&ArchivedNode> {
         self.nodes.get(id.0 as usize)
     }
@@ -372,6 +395,7 @@ impl ArchivedAst {
     /// The source text covered by `span`, or `None` if the span is out of range or does
     /// not fall on UTF-8 boundaries.
     #[inline]
+    #[must_use]
     pub fn text_of(&self, span: Span) -> Option<&str> {
         self.text().get(span.start as usize..span.end as usize)
     }
