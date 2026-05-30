@@ -377,6 +377,23 @@ impl ArchivedAst {
     }
 }
 
+// ── Archive bridge ───────────────────────────────────────────────────────────────────
+// The one place that serializes/accesses the frozen archive, so the rkyv configuration
+// (pinned little-endian, 32-bit pointers, bytecheck) stays centralized here.
+
+/// Serialize an [`Ast`] into its frozen archive. The returned buffer is correctly aligned
+/// for [`access`].
+pub fn to_archive(ast: &Ast) -> Result<rkyv::util::AlignedVec, rkyv::rancor::Error> {
+    rkyv::to_bytes::<rkyv::rancor::Error>(ast)
+}
+
+/// Access an archived [`Ast`] in place (zero-copy), validating the bytes (`bytecheck`) so a
+/// malformed or misaligned buffer is a recoverable `Err`, never UB. Use this for any bytes
+/// the current process did not just produce with [`to_archive`].
+pub fn access(bytes: &[u8]) -> Result<&ArchivedAst, rkyv::rancor::Error> {
+    rkyv::access::<ArchivedAst, rkyv::rancor::Error>(bytes)
+}
+
 // ── Frozen-layout guards ─────────────────────────────────────────────────────────────
 // Compile-time assertions on the archived layout. These fail the build (not just a test)
 // if a field type or order changes the size/alignment of the frozen records.
@@ -547,5 +564,27 @@ mod tests {
             bytes.len(),
             bytes.as_slice(),
         );
+    }
+
+    #[test]
+    fn archive_bridge_roundtrips() {
+        let ast = canonical_ast();
+        let bytes = to_archive(&ast).unwrap();
+        let archived = access(&bytes).unwrap();
+        assert_eq!(archived.root(), NodeId(0));
+        assert_eq!(archived.len(), 3);
+        assert_eq!(archived.text(), "Hi");
+    }
+
+    #[test]
+    fn span_and_archive_size_helpers() {
+        assert_eq!(Span::new(2, 7).len(), 5);
+        assert_eq!(Span::new(7, 2).len(), 0); // inverted → saturating 0
+        assert!(Span::new(3, 3).is_empty());
+        assert!(!Span::new(3, 4).is_empty());
+
+        let bytes = to_archive(&canonical_ast()).unwrap();
+        let archived = access(&bytes).unwrap();
+        assert!(!archived.is_empty());
     }
 }
