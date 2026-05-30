@@ -35,6 +35,11 @@ rkyv = { version = "0.8.16", default-features = false, features = [
     "pointer_width_32", # pin 32-bit relative pointers → portable native(64)/wasm32(32) archive
 ] }
 
+# CommonMark/GFM parser producing an mdast tree with byte-offset positions. Pure parsing
+# (no I/O), so it builds for `wasm32` too. `tzlint_core` transforms its mdast into the
+# frozen index-AST. Stable since 1.0 (2025-04).
+markdown = "1.0"
+
 # Lints applied workspace-wide. `unwrap`/`expect`/`panic` are denied in library code
 # (per the design's error-handling rules); the io-guard CI job adds the disallowed-methods
 # checks via clippy.toml.
