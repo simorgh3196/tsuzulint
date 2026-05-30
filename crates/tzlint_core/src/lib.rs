@@ -11,6 +11,8 @@
 //! Landed so far (M1b): the [`parse`] function (markdown-rs + mdast → index-AST transform)
 //! and the [`LineIndex`] position mapper. TODO(M1): the engine, config, cache, and io.
 
+pub mod io;
+pub mod net;
 pub mod parse;
 pub mod position;
 
