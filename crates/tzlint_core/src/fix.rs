@@ -24,15 +24,19 @@ pub struct FixPass {
 /// starting at the same offset the **longest wins**. Non-overlapping fixes apply; a fix
 /// overlapping an already-applied one is **deferred** for a later pass, as is any fix whose
 /// span is inverted, out of range, or not on UTF-8 char boundaries. Spans are absolute byte
-/// offsets into `source`.
+/// offsets into `source`. Zero-width insertions (`start == end`) at the same offset do not
+/// overlap, so they all apply, concatenated in the deterministic sort order.
 #[must_use]
 pub fn apply_fixes(source: &str, diagnostics: &[Diagnostic]) -> FixPass {
     let mut fixes: Vec<&Fix> = diagnostics.iter().flat_map(|d| d.fixes.iter()).collect();
+    // Order: start asc, then end desc (longest-at-a-start wins), then replacement — the last
+    // key makes the order a deterministic *total* order, independent of input/rule order.
     fixes.sort_by(|a, b| {
         a.span
             .start
             .cmp(&b.span.start)
             .then(b.span.end.cmp(&a.span.end))
+            .then_with(|| a.replacement.cmp(&b.replacement))
     });
 
     let mut output = String::with_capacity(source.len());
@@ -135,6 +139,19 @@ mod tests {
         let pass = apply_fixes("hello", &diags);
         assert_eq!(pass.output, "hello"); // unchanged
         assert_eq!((pass.applied, pass.deferred), (0, 2));
+    }
+
+    #[test]
+    fn zero_width_insertions_at_same_offset_all_apply_in_sort_order() {
+        // Two pure insertions at offset 1 (empty spans). Neither overlaps, so both apply;
+        // the order is deterministic by replacement ("A" before "B").
+        let diags = [
+            diag_with_fix(Span::new(1, 1), "B"),
+            diag_with_fix(Span::new(1, 1), "A"),
+        ];
+        let pass = apply_fixes("xy", &diags);
+        assert_eq!(pass.output, "xABy");
+        assert_eq!((pass.applied, pass.deferred), (2, 0));
     }
 
     /// Replaces each Text node's content with `find`→`replace` (a whole-span swap).

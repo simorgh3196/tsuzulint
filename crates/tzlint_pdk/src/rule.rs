@@ -72,7 +72,10 @@ impl<'ast> Context<'ast> {
 /// node whose kind is in [`RuleMeta::node_kinds`]. [`finish`](Rule::finish) runs once after
 /// the walk, for cross-node rules that accumulate in the [`Context`]. `&self` is immutable
 /// (rule instances are shared across workers); all per-file state lives in the `Context`.
-pub trait Rule {
+///
+/// The `Send + Sync` bound expresses that sharing: rule instances are `Arc`-shared across
+/// the (future) rayon workers that lint files in parallel.
+pub trait Rule: Send + Sync {
     /// Static metadata: id, the node kinds to visit, and default severity.
     fn meta(&self) -> &RuleMeta;
 

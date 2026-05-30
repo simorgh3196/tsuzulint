@@ -18,36 +18,43 @@ impl Engine {
     /// cannot overflow the stack here.
     #[must_use]
     pub fn lint(ast: &ArchivedAst, rules: &[&dyn Rule]) -> Vec<Diagnostic> {
-        // One context per rule (rule-scoped accumulation).
-        let mut contexts: Vec<Context> = rules
+        // Hoist metadata once (not per node × rule); one context per rule.
+        let metas: Vec<&tzlint_pdk::RuleMeta> = rules.iter().map(|rule| rule.meta()).collect();
+        let mut contexts: Vec<Context> = metas
             .iter()
-            .map(|rule| {
-                let meta = rule.meta();
-                Context::new(ast, meta.id.clone(), meta.default_severity)
-            })
+            .map(|meta| Context::new(ast, meta.id.clone(), meta.default_severity))
             .collect();
 
-        // Single pre-order walk; dispatch each node to the rules that registered its kind.
+        // Single pre-order walk. A `visited` bitmap makes it cycle-safe and bounds total
+        // work to the node count, so a malformed archive — whose links `access` validates as
+        // bytes but not as a graph — can neither loop nor OOM here.
         if let Some(root) = NodeRef::root(ast) {
+            let mut visited = vec![false; ast.len()];
+            if let Some(slot) = visited.get_mut(root.id().0 as usize) {
+                *slot = true;
+            }
             let mut stack = vec![root];
             while let Some(node) = stack.pop() {
                 let kind = node.kind();
-                for (rule, cx) in rules.iter().zip(contexts.iter_mut()) {
-                    if rule.meta().visits(kind) {
-                        rule.check(node, cx);
+                for (index, cx) in contexts.iter_mut().enumerate() {
+                    if metas[index].visits(kind) {
+                        rules[index].check(node, cx);
                     }
                 }
-                // Push children reversed so they pop in document order.
-                let children: Vec<NodeRef> = node.children().collect();
-                for child in children.into_iter().rev() {
-                    stack.push(child);
+                for child in node.children() {
+                    if let Some(slot) = visited.get_mut(child.id().0 as usize)
+                        && !*slot
+                    {
+                        *slot = true;
+                        stack.push(child);
+                    }
                 }
             }
         }
 
         // Cross-node finalize, then aggregate and sort into the stable total order.
-        for (rule, cx) in rules.iter().zip(contexts.iter_mut()) {
-            rule.finish(cx);
+        for (index, cx) in contexts.iter_mut().enumerate() {
+            rules[index].finish(cx);
         }
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
         for cx in contexts {

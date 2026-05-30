@@ -68,6 +68,11 @@ impl<'ast> NodeRef<'ast> {
     pub fn children(&self) -> Children<'ast> {
         Children {
             next: self.first_child(),
+            // A valid sibling chain can never exceed the node count. This bounds the
+            // iterator so a malformed (e.g. cyclic) `next_sibling` link — possible in an
+            // arbitrary archive, since `access` validates byte types but not the link graph
+            // — cannot loop forever.
+            remaining: self.ast.len(),
         }
     }
 }
@@ -90,15 +95,23 @@ impl core::fmt::Debug for NodeRef<'_> {
 }
 
 /// Iterator over a node's direct children (see [`NodeRef::children`]).
+///
+/// Bounded: it yields at most `ast.len()` items, so a cyclic `next_sibling` link in a
+/// malformed archive terminates the iterator instead of looping forever.
 #[derive(Clone)]
 pub struct Children<'ast> {
     next: Option<NodeRef<'ast>>,
+    remaining: usize,
 }
 
 impl<'ast> Iterator for Children<'ast> {
     type Item = NodeRef<'ast>;
     fn next(&mut self) -> Option<Self::Item> {
         let current = self.next?;
+        if self.remaining == 0 {
+            return None; // hit the node-count bound → the chain must be cyclic
+        }
+        self.remaining -= 1;
         self.next = current.next_sibling();
         Some(current)
     }
@@ -206,5 +219,36 @@ mod tests {
         let shown = alloc::format!("{heading:?}");
         assert!(shown.contains("NodeRef"), "{shown}");
         assert!(shown.contains("NodeId(1)"), "{shown}"); // the heading's id
+    }
+
+    #[test]
+    fn children_is_bounded_on_a_cyclic_archive() {
+        // A malformed (but byte-valid) archive whose sibling chain is cyclic must not loop
+        // forever: node 1's `next_sibling` points back to itself.
+        let ast = Ast {
+            nodes: vec![
+                Node {
+                    kind: NodeKind::ROOT,
+                    span: Span::new(0, 1),
+                    parent: NodeId(0),
+                    first_child: OptionNodeId::some(NodeId(1)),
+                    next_sibling: OptionNodeId::NONE,
+                },
+                Node {
+                    kind: NodeKind::TEXT,
+                    span: Span::new(0, 1),
+                    parent: NodeId(0),
+                    first_child: OptionNodeId::NONE,
+                    next_sibling: OptionNodeId::some(NodeId(1)), // self-cycle
+                },
+            ],
+            text: alloc::string::String::from("x"),
+            root: NodeId(0),
+        };
+        let bytes = tzlint_ast::to_archive(&ast).unwrap();
+        let archived = tzlint_ast::access(&bytes).unwrap();
+        let root = NodeRef::root(archived).unwrap();
+        // Terminates (no hang) and is capped at the node count.
+        assert!(root.children().count() <= archived.len());
     }
 }
