@@ -575,4 +575,16 @@ mod tests {
         assert_eq!(archived.len(), 3);
         assert_eq!(archived.text(), "Hi");
     }
+
+    #[test]
+    fn span_and_archive_size_helpers() {
+        assert_eq!(Span::new(2, 7).len(), 5);
+        assert_eq!(Span::new(7, 2).len(), 0); // inverted → saturating 0
+        assert!(Span::new(3, 3).is_empty());
+        assert!(!Span::new(3, 4).is_empty());
+
+        let bytes = to_archive(&canonical_ast()).unwrap();
+        let archived = access(&bytes).unwrap();
+        assert!(!archived.is_empty());
+    }
 }

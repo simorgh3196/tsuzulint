@@ -134,6 +134,8 @@ mod tests {
         assert_eq!(id.as_str(), "sentence-length");
         assert_eq!(id.to_string(), "sentence-length");
         assert_eq!(RuleId::new(String::from("acme/x")).as_str(), "acme/x");
+        // From<String> (owned) as well as From<&str> above.
+        assert_eq!(RuleId::from(String::from("acme/y")).as_str(), "acme/y");
     }
 
     #[test]

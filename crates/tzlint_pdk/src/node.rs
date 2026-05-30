@@ -188,4 +188,23 @@ mod tests {
         let ast = tzlint_ast::access(&bytes).unwrap();
         assert!(NodeRef::at(ast, NodeId(99)).is_none());
     }
+
+    #[test]
+    fn span_equality_and_debug() {
+        let bytes = tzlint_ast::to_archive(&sample()).unwrap();
+        let ast = tzlint_ast::access(&bytes).unwrap();
+        let root = NodeRef::root(ast).unwrap();
+        let heading = root.first_child().unwrap();
+        let para = heading.next_sibling().unwrap();
+
+        assert_eq!(heading.span(), Span::new(0, 4));
+
+        // Equality is same-node-of-same-archive.
+        assert_eq!(heading, NodeRef::at(ast, NodeId(1)).unwrap());
+        assert_ne!(heading, para);
+
+        let shown = alloc::format!("{heading:?}");
+        assert!(shown.contains("NodeRef"), "{shown}");
+        assert!(shown.contains("NodeId(1)"), "{shown}"); // the heading's id
+    }
 }
