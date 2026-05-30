@@ -13,8 +13,12 @@ pub fn read_with_limit(path: impl AsRef<Path>, limit: u64) -> io::Result<String>
     let file = std::fs::File::open(path)?;
     let mut buffer = String::new();
 
+    let read_limit = limit
+        .checked_add(1)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "read limit overflow"))?;
+
     // Read up to limit + 1 bytes. If we read limit + 1, the file is too large.
-    file.take(limit + 1).read_to_string(&mut buffer)?;
+    file.take(read_limit).read_to_string(&mut buffer)?;
 
     if buffer.len() as u64 > limit {
         return Err(io::Error::new(
@@ -24,4 +28,48 @@ pub fn read_with_limit(path: impl AsRef<Path>, limit: u64) -> io::Result<String>
     }
 
     Ok(buffer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_with_limit_success() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "hello world").unwrap();
+
+        let content = read_with_limit(temp_file.path(), 100).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn test_read_with_limit_file_too_large() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "hello world").unwrap();
+
+        let result = read_with_limit(temp_file.path(), 5);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::FileTooLarge);
+    }
+
+    #[test]
+    fn test_read_with_limit_exact_limit() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "12345").unwrap();
+
+        let content = read_with_limit(temp_file.path(), 5).unwrap();
+        assert_eq!(content, "12345");
+    }
+
+    #[test]
+    fn test_read_with_limit_overflow() {
+        let temp_file = NamedTempFile::new().unwrap();
+
+        let result = read_with_limit(temp_file.path(), u64::MAX);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
 }
