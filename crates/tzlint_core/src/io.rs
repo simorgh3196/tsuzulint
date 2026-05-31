@@ -78,6 +78,11 @@ pub trait Host {
     fn read_to_string(&self, path: &Path, limit: usize) -> Result<String, IoError>;
     /// Atomically replace `path` with `contents` (no torn file on crash).
     fn write_atomic(&self, path: &Path, contents: &[u8]) -> Result<(), IoError>;
+    /// Whether `path` exists. Best-effort: returns `false` when existence cannot be
+    /// determined (e.g. a permission error). Config discovery uses this to probe candidate
+    /// files cheaply without reading them — so checking presence still goes through the
+    /// boundary rather than touching `std::fs` directly.
+    fn exists(&self, path: &Path) -> bool;
 }
 
 // The real-filesystem host. Not compiled for `wasm32`, where the embedder injects its own
@@ -121,6 +126,12 @@ mod native {
             tmp.commit(path)?; // rename over the target (atomic on POSIX)
             fsync_parent(path);
             Ok(())
+        }
+
+        fn exists(&self, path: &Path) -> bool {
+            // `try_exists` follows symlinks and distinguishes "absent" from "couldn't tell";
+            // a permission/other error is treated as "not present" (best-effort discovery).
+            path.try_exists().unwrap_or(false)
         }
     }
 
@@ -364,6 +375,18 @@ mod native {
             );
             assert_eq!(host.read_to_string(&link, MAX_FILE).unwrap(), "new");
             assert_eq!(host.read_to_string(&target, MAX_FILE).unwrap(), "original");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn exists_reports_presence() {
+            let dir = temp_dir();
+            let path = dir.join("present");
+            let host = NativeHost;
+            assert!(!host.exists(&path), "absent before creation");
+            host.write_atomic(&path, b"x").unwrap();
+            assert!(host.exists(&path), "present after creation");
+            assert!(!host.exists(&dir.join("never")), "unrelated path absent");
             std::fs::remove_dir_all(&dir).ok();
         }
 

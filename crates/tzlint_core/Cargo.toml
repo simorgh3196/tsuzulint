@@ -15,3 +15,6 @@ workspace = true
 tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
 tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
 markdown = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+yaml_serde = { workspace = true }

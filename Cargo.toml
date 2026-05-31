@@ -40,6 +40,16 @@ rkyv = { version = "0.8.16", default-features = false, features = [
 # frozen index-AST. Stable since 1.0 (2025-04).
 markdown = "1.0"
 
+# Config (de)serialization. `serde` derives the config model; `serde_json` handles `.json`
+# and (after a small comment/trailing-comma strip) `.jsonc`/`.tzlintrc`, and is the canonical
+# representation for rule-specific `options`. `yaml_serde` is the YAML Organization's maintained,
+# permissively licensed (MIT/Apache-2.0) fork of the now-archived `serde_yaml` for `.yaml`/`.yml`;
+# its `libyaml-rs` backend is libyaml transpiled to pure Rust (no C/FFI), so it builds for
+# `wasm32` too. All are config-only — they never touch the frozen AST (guarded by `io-guard`).
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+yaml_serde = "0.10"
+
 # Lints applied workspace-wide. `unwrap`/`expect`/`panic` are denied in library code
 # (per the design's error-handling rules); the io-guard CI job adds the disallowed-methods
 # checks via clippy.toml.
