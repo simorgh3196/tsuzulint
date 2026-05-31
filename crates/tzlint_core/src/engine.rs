@@ -69,7 +69,7 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::parse;
-    use tzlint_ast::{NodeKind, Span};
+    use tzlint_ast::{Ast, NodeId, NodeKind, Span};
     use tzlint_pdk::{RuleMeta, Severity};
 
     /// Reports `message` at every node of `kind`.
@@ -94,9 +94,10 @@ mod tests {
         }
     }
 
-    /// A document-level rule: registers for no node kind, then in `finish` walks the whole
-    /// tree from `cx.ast()` (the subtree-self-traversal pattern) and reports the count once.
-    /// State lives in locals, never in `&self`.
+    /// A document-level rule: registers for `ROOT` (its `check` is a no-op — the work is
+    /// cross-node), then in `finish` walks the whole tree from `cx.ast()` (the
+    /// subtree-self-traversal pattern) and reports the count once. State lives in locals,
+    /// never in `&self`.
     struct CountNodes {
         meta: RuleMeta,
     }
@@ -159,10 +160,11 @@ mod tests {
         let bytes = archive("# H\n\nbody");
         let ast = tzlint_ast::access(&bytes).unwrap();
         let counter = CountNodes {
-            meta: RuleMeta::new("count", Severity::Info, Vec::<NodeKind>::new()),
+            meta: RuleMeta::new("count", Severity::Info, vec![NodeKind::ROOT]),
         };
         let diags = Engine::lint(ast, &[&counter]);
-        // `finish` walks the whole tree: Root + Heading + Text + Paragraph + Text = 5.
+        // check() is a no-op called once at the root; finish() walks the whole tree:
+        // Root + Heading + Text + Paragraph + Text = 5.
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].message, "5 nodes");
     }
@@ -172,5 +174,19 @@ mod tests {
         let bytes = archive("text");
         let ast = tzlint_ast::access(&bytes).unwrap();
         assert!(Engine::lint(ast, &[]).is_empty());
+    }
+
+    #[test]
+    fn lint_on_a_rootless_archive_is_safe() {
+        // A degenerate archive whose root index has no node: the walk is skipped, no panic.
+        let bytes = tzlint_ast::to_archive(&Ast {
+            nodes: vec![],
+            text: String::new(),
+            root: NodeId(0),
+        })
+        .unwrap();
+        let ast = tzlint_ast::access(&bytes).unwrap();
+        let rule = FlagKind::new("flag-text", NodeKind::TEXT, "text");
+        assert!(Engine::lint(ast, &[&rule]).is_empty());
     }
 }

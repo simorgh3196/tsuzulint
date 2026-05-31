@@ -154,6 +154,16 @@ mod tests {
         assert_eq!((pass.applied, pass.deferred), (2, 0));
     }
 
+    #[test]
+    fn fix_splitting_a_multibyte_char_is_deferred() {
+        // "あ" is 3 bytes; the span [0,1) ends inside the char (not a UTF-8 boundary), so the
+        // fix can't be sliced and is deferred rather than corrupting the output.
+        let diags = [diag_with_fix(Span::new(0, 1), "x")];
+        let pass = apply_fixes("あ", &diags);
+        assert_eq!(pass.output, "あ");
+        assert_eq!((pass.applied, pass.deferred), (0, 1));
+    }
+
     /// Replaces each Text node's content with `find`→`replace` (a whole-span swap).
     struct Rewrite {
         meta: RuleMeta,
