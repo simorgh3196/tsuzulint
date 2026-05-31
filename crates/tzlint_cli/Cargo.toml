@@ -16,5 +16,16 @@ name = "tzlint"
 path = "src/main.rs"
 
 [dependencies]
+# The lint pipeline: parser, engine, autofix, config (+ discovery), document cache, the
+# position mapper, and the centralized `Host` I/O boundary (the CLI does all of its file
+# access through `Host`, never raw `std::fs` — enforced by clippy + the io-guard CI job).
 tzlint_core = { path = "../tzlint_core", version = "0.0.0" }
-tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
+# The diagnostic model and `Rule` trait the engine works in terms of.
+tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
+# `to_archive`/`access` (the parse → archive → lint bridge for the no-cache path) and `Span`.
+tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
+# Argument parsing (derive API).
+clap = { workspace = true }
+# JSON output. The diagnostic model is serde-free (it is `no_std`/ABI-frozen), so the CLI
+# builds the JSON document itself from the diagnostic fields rather than deriving `Serialize`.
+serde_json = { workspace = true }

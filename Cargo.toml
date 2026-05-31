@@ -58,6 +58,11 @@ yaml_serde = "0.10"
 # job greps that the `pure` feature stays set.)
 blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
 
+# Argument parsing for the native `tzlint` CLI (the `derive` API: `Parser`/`Subcommand`/
+# `ValueEnum`). CLI-only — it never reaches the AST or the `wasm32` core (the wasm CI job
+# builds `tzlint_core` lib-only), so a native-only dependency here is fine.
+clap = { version = "4", features = ["derive"] }
+
 # Lints applied workspace-wide. `unwrap`/`expect`/`panic` are denied in library code
 # (per the design's error-handling rules); the io-guard CI job adds the disallowed-methods
 # checks via clippy.toml.
