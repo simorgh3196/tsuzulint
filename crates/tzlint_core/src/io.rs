@@ -313,6 +313,61 @@ mod native {
         }
 
         #[test]
+        fn read_rejects_invalid_utf8() {
+            // Raw non-UTF-8 bytes surface as `Other("invalid UTF-8: ...")`, not a panic.
+            let dir = temp_dir();
+            let path = dir.join("bin");
+            let host = NativeHost;
+            host.write_atomic(&path, &[0xff, 0xfe, 0x00]).unwrap();
+            let err = host.read_to_string(&path, MAX_FILE).unwrap_err();
+            assert!(
+                matches!(&err, IoError::Other(m) if m.contains("invalid UTF-8")),
+                "got {err:?}"
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn oversize_is_reported_before_utf8_validation() {
+            // Bytes that are BOTH invalid UTF-8 and over the limit must report `TooLarge`
+            // (the size check runs before UTF-8 validation).
+            let dir = temp_dir();
+            let path = dir.join("bigbin");
+            let host = NativeHost;
+            host.write_atomic(&path, &[0xff; 10]).unwrap();
+            assert!(matches!(
+                host.read_to_string(&path, 4),
+                Err(IoError::TooLarge { limit: 4 })
+            ));
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn write_atomic_replaces_symlink_without_following_it() {
+            // Writing through a symlink replaces the LINK with a regular file; the link
+            // target is left untouched (the symlink-TOCTOU hardening claim).
+            use std::os::unix::fs::symlink;
+            let dir = temp_dir();
+            let target = dir.join("real-target");
+            let link = dir.join("link");
+            let host = NativeHost;
+            host.write_atomic(&target, b"original").unwrap();
+            symlink(&target, &link).unwrap();
+            host.write_atomic(&link, b"new").unwrap();
+            assert!(
+                !std::fs::symlink_metadata(&link)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink(),
+                "the symlink should have been replaced by a regular file"
+            );
+            assert_eq!(host.read_to_string(&link, MAX_FILE).unwrap(), "new");
+            assert_eq!(host.read_to_string(&target, MAX_FILE).unwrap(), "original");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
         fn read_with_no_practical_cap() {
             // `usize::MAX` means "no practical cap": reads fully without overflow (no debug
             // panic, no release wrap-to-empty).
