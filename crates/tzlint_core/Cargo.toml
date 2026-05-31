@@ -18,3 +18,10 @@ markdown = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 yaml_serde = { workspace = true }
+
+[dev-dependencies]
+# Reference Draft 2020-12 validator used ONLY by `tests/config_schema.rs` to prove the published
+# `CONFIG_SCHEMA` matches the loader. Dev-only: never shipped, never in the wasm32 lib build or
+# the MSRV `cargo build --workspace`. Pinned because its API churns across minor versions.
+jsonschema = "=0.46.5"
+serde_json = { workspace = true }

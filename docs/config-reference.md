@@ -1,7 +1,8 @@
 # Configuration reference
 
-> Status: M1d-2 implemented the loader (`tzlint_core::config`). A published JSON Schema and
-> per-file `overrides` are planned (see *Planned* below).
+> Status: the loader (`tzlint_core::config`, M1d-2) and the published JSON Schema
+> (`tzlint_core::CONFIG_SCHEMA`, M1d-3) are implemented. Per-file `overrides` are planned (see
+> *Planned* below).
 
 - **Files:** `.tzlintrc.jsonc` → `.tzlintrc.json` → `.tzlintrc.yaml` → `.tzlintrc.yml` →
   `.tzlintrc` (parsed as JSONC). Discovery walks upward from a start directory; the first
@@ -25,11 +26,17 @@
   `extends` key is **reserved** and currently rejected with a clear error.
 - **Language:** `language` (e.g. `ja`) and `message_language` (the diagnostic locale,
   independent of the document language). Config file keys are kebab-case (`message-language`).
+- **JSON Schema:** a Draft 2020-12 schema is published as `tzlint_core::CONFIG_SCHEMA`
+  (`$id` `https://tsuzulint.dev/schema/config/v1.json`) for editor completion/validation and
+  CLI emission. It describes the **JSON-level** contract and is intentionally stricter than the
+  loader on one point: it accepts only real booleans for a rule, whereas the loader also accepts
+  the YAML string spellings (`"on"`/`"yes"`/…). A differential test pins schema↔loader agreement
+  (and that one deliberate asymmetry) so they cannot drift.
 - **Cache key:** `blake3(content)` + config + rule versions + parser/engine version +
   morphology dictionary fingerprint. *(Cache lands in M1e.)*
 
 ## Planned
 
-- A **published JSON Schema** for editor completion/validation (M1d-3).
 - Per-file **`overrides`** (glob-scoped `language`/rule settings).
 - `extends` for composing configs and pulling in presets from config.
+- Per-rule **`options`** schemas once rules land (M1f), evolving the schema to a `v2` `$id`.

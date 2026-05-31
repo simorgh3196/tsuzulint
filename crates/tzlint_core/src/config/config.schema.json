@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsuzulint.dev/schema/config/v1.json",
+  "title": "TsuzuLint configuration",
+  "description": "Schema for .tzlintrc and .tzlintrc.{json,jsonc,yaml,yml} files. This is the JSON-level contract; YAML-only leniency (yes/no/on/off booleans, comments, a leading BOM) and the empty-file-means-default behavior are intentionally not modeled here.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "language": {
+      "description": "Document language tag (e.g. \"ja\"). null or absent leaves it unset.",
+      "type": ["string", "null"]
+    },
+    "message-language": {
+      "description": "Diagnostic-message locale, independent of the document language.",
+      "type": ["string", "null"]
+    },
+    "rules": {
+      "$ref": "#/$defs/rules"
+    },
+    "extends": {
+      "description": "Reserved for a future milestone and not yet supported. Only null (equivalent to absent) is accepted; any non-null value is rejected by the loader as a reserved key.",
+      "type": "null"
+    }
+  },
+  "$defs": {
+    "rules": {
+      "description": "Map of rule id to its setting. Rule ids are arbitrary strings; they are not validated against a known-rule set yet (that arrives with the rules crate).",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ruleSetting"
+      }
+    },
+    "ruleSetting": {
+      "description": "false disables the rule; true enables it with defaults; an object overrides its severity and/or passes rule-specific options.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/ruleObject"
+        }
+      ]
+    },
+    "ruleObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "options": {
+          "$ref": "#/$defs/options"
+        }
+      }
+    },
+    "severity": {
+      "description": "Overrides the rule's default severity.",
+      "enum": ["error", "warning", "info", "hint"]
+    },
+    "options": {
+      "description": "Rule-specific options, passed through verbatim. Any JSON value is accepted."
+    }
+  }
+}
