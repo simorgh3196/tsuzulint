@@ -17,3 +17,23 @@ Three deliberate, semver'd surfaces:
   `tzlint_core` free of native-only hard deps (it must compile to `wasm32`).
 - **Dynamic plugins degrade gracefully** without COOP/COEP → fall back to the bundled
   canonical ruleset; the API exposes whether dynamic plugins are available.
+
+## Dictionary distribution (web)
+
+> Status: design intent (M2/M4). The code-only wasm is light (~157 KiB brotli, measured);
+> the morphology dictionary (tens of MB for Japanese) is the only real bandwidth term and is
+> delivered separately. See [`morphology.md`](morphology.md) for the dictionary model.
+
+- **Default: dictionary fetched at runtime, never embedded.** Hash-pinned, compressed,
+  IndexedDB-cached, per-enabled-language. The npm/wasm artifact ships code only, so a code
+  update never re-downloads the dictionary and a dictionary update never re-downloads the
+  code. Rule sets that need no morphology fetch no dictionary at all.
+- **`preloadDictionary(lang) -> Promise<void>` is part of the JS surface.** A first-class
+  warm-up hook so apps can fetch the dictionary during idle/splash time rather than on the
+  first lint. Pairs with `<link rel="prefetch">` and a Service Worker precache (recommended
+  patterns, not requirements).
+- **Opt-in bundled variant** (e.g. a `@tsuzulint/dict-ja-*` sidecar package, or an
+  all-in-one build) for offline / air-gapped / Electron / zero-config embedders. It is an
+  explicit opt-in, never the default: bundling into the main artifact would force the
+  dictionary on every embedder, break cache granularity, and entangle dictionary licenses
+  with the binary.
