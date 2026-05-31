@@ -11,9 +11,11 @@
 //! Landed so far: the [`parse`] function + [`LineIndex`] position mapper (M1b), the
 //! single-traversal [`Engine`] + autofix [`fix`]/[`apply_fixes`] (M1c-2), the centralized
 //! [`io`] boundary ([`Host`] + size limits + atomic writes, M1d-1), the multi-format
-//! [`config`] loader (discovery + presets + strict validation, M1d-2), and the published
-//! [`CONFIG_SCHEMA`] (M1d-3). TODO(M1): cache.
+//! [`config`] loader (discovery + presets + strict validation, M1d-2), the published
+//! [`CONFIG_SCHEMA`] (M1d-3), and the in-memory document [`cache`] (M1e; persistence is
+//! deferred to M1g behind a `Host`-backed seam).
 
+pub mod cache;
 pub mod config;
 pub mod engine;
 pub mod fix;
@@ -21,6 +23,9 @@ pub mod io;
 pub mod parse;
 pub mod position;
 
+pub use cache::{
+    CacheError, CacheKey, CacheKeyInput, DocumentCache, document_cache_key, lint_cached,
+};
 pub use config::{
     CONFIG_SCHEMA, Config, ConfigError, ConfigFormat, DiscoveredConfig, Preset, RuleSetting,
     ShadowedCandidate, discover, resolve,

@@ -50,6 +50,14 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 yaml_serde = "0.10"
 
+# Cryptographic content hash for the document-cache key. Collision-resistant (256-bit), which a
+# cache that gates correctness needs — a key collision would return another document's
+# diagnostics. `features = ["pure"]` is MANDATORY: without it `blake3` builds its SIMD backend
+# through a C compiler (`cc`), which breaks the uniform/reproducible build and `wasm32`. With
+# `pure` it is portable Rust and builds everywhere. Pinned exactly, like rkyv. (The io-guard CI
+# job greps that the `pure` feature stays set.)
+blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
+
 # Lints applied workspace-wide. `unwrap`/`expect`/`panic` are denied in library code
 # (per the design's error-handling rules); the io-guard CI job adds the disallowed-methods
 # checks via clippy.toml.
