@@ -16,8 +16,8 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  check:
-    name: rustfmt + clippy
+  lint:
+    name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -30,8 +30,16 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
-    name: test (nextest + doctest)
-    runs-on: ubuntu-latest
+    name: test
+    # Only `test` runs the OS matrix: tests exercise the filesystem, path separators, and line
+    # endings, where OS differences actually surface (Windows CRLF / `\`, macOS case-insensitive
+    # FS). fmt/clippy/wasm/msrv/security/coverage are host-independent, so they stay Linux-only —
+    # tripling them would be pure waste. `fail-fast: false` so one OS failing still reports the rest.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -40,10 +48,12 @@ jobs:
       # `--no-tests=warn`: a workspace with no tests yet (early milestones) or a docs/config
       # -only PR must not fail this job — nextest otherwise errors on zero tests to run.
       - run: cargo nextest run --workspace --no-tests=warn
+      # Doctests are host-independent; run them once (Linux) instead of tripling identical work.
       - run: cargo test --workspace --doc
+        if: matrix.os == 'ubuntu-latest'
 
   wasm:
-    name: wasm32 build (browser-readiness from day one)
+    name: wasm32 build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -54,7 +64,7 @@ jobs:
       - run: cargo build -p tzlint_core --target wasm32-unknown-unknown
 
   io-guard:
-    name: io-guard (no raw fs/network/serde_json on the AST)
+    name: io-guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -71,7 +81,7 @@ jobs:
             || (echo "blake3 must be configured with features = [\"pure\"]"; exit 1)
 
   msrv:
-    name: MSRV 1.94 (latest stable - 2)
+    name: MSRV 1.94
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -86,7 +96,7 @@ jobs:
       - run: cargo build --workspace
 
   security:
-    name: cargo-audit / cargo-deny
+    name: cargo-deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -95,7 +105,7 @@ jobs:
       - run: cargo deny check
 
   coverage:
-    name: coverage (llvm-cov + nextest -> codecov)
+    name: coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
