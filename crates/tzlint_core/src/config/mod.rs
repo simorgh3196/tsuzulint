@@ -21,6 +21,7 @@ mod discover;
 mod format;
 mod model;
 mod preset;
+mod schema;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -31,6 +32,7 @@ pub use discover::{DiscoveredConfig, ShadowedCandidate, discover};
 pub use format::ConfigFormat;
 pub use model::RuleSetting;
 pub use preset::{Preset, resolve};
+pub use schema::CONFIG_SCHEMA;
 
 use crate::io::IoError;
 

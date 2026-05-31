@@ -10,8 +10,9 @@
 //!
 //! Landed so far: the [`parse`] function + [`LineIndex`] position mapper (M1b), the
 //! single-traversal [`Engine`] + autofix [`fix`]/[`apply_fixes`] (M1c-2), the centralized
-//! [`io`] boundary ([`Host`] + size limits + atomic writes, M1d-1), and the multi-format
-//! [`config`] loader (discovery + presets + strict validation, M1d-2). TODO(M1): cache.
+//! [`io`] boundary ([`Host`] + size limits + atomic writes, M1d-1), the multi-format
+//! [`config`] loader (discovery + presets + strict validation, M1d-2), and the published
+//! [`CONFIG_SCHEMA`] (M1d-3). TODO(M1): cache.
 
 pub mod config;
 pub mod engine;
@@ -21,8 +22,8 @@ pub mod parse;
 pub mod position;
 
 pub use config::{
-    Config, ConfigError, ConfigFormat, DiscoveredConfig, Preset, RuleSetting, ShadowedCandidate,
-    discover, resolve,
+    CONFIG_SCHEMA, Config, ConfigError, ConfigFormat, DiscoveredConfig, Preset, RuleSetting,
+    ShadowedCandidate, discover, resolve,
 };
 pub use engine::Engine;
 pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
