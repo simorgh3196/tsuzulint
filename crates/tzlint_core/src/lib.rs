@@ -8,16 +8,18 @@
 //!   atomic writes), behind a `Host` provider abstraction so embedders inject their
 //!   environment (native fs / Node / browser).
 //!
-//! Landed so far: the [`parse`] function + [`LineIndex`] position mapper (M1b), and the
-//! single-traversal [`Engine`] + autofix [`fix`]/[`apply_fixes`] (M1c-2). TODO(M1): config,
-//! cache, and io.
+//! Landed so far: the [`parse`] function + [`LineIndex`] position mapper (M1b), the
+//! single-traversal [`Engine`] + autofix [`fix`]/[`apply_fixes`] (M1c-2), and the centralized
+//! [`io`] boundary ([`Host`] + size limits + atomic writes, M1d-1). TODO(M1): config, cache.
 
 pub mod engine;
 pub mod fix;
+pub mod io;
 pub mod parse;
 pub mod position;
 
 pub use engine::Engine;
 pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
+pub use io::{Host, IoError};
 pub use parse::{ParseError, parse};
 pub use position::LineIndex;
