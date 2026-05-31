@@ -14,8 +14,8 @@
 //!   `.tzlintrc.jsonc` → `.tzlintrc.json` → `.tzlintrc.yaml` → `.tzlintrc.yml` → `.tzlintrc`
 //!   (the extensionless file is parsed as JSONC).
 //! - **Presets** ([`Preset`], [`resolve`]) provide a base rule set that the user config
-//!   overrides by id. The `extends` key is reserved for a later milestone and is currently
-//!   rejected with a clear error rather than silently ignored.
+//!   overrides by id. The `extends` key is reserved for a later milestone and is rejected
+//!   with a clear error rather than silently ignored.
 
 mod discover;
 mod format;
