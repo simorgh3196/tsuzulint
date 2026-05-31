@@ -116,7 +116,7 @@ mod tests {
                 m
             },
         };
-        // Presets are empty in M1, so resolution is currently identity on the rule set.
+        // Presets are empty until rules land (M1f), so resolution is identity on the rule set.
         let resolved = resolve(Some(Preset::JaBasic), user.clone());
         assert_eq!(resolved, user);
         // No preset behaves the same.

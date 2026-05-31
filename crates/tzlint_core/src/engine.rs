@@ -3,7 +3,7 @@
 use tzlint_ast::ArchivedAst;
 use tzlint_pdk::{Context, Diagnostic, NodeRef, Rule};
 
-/// The lint engine. Stateless for now (config/rule-registry land later); the one dispatch
+/// The lint engine. Stateless (config/rule-registry land later); the one dispatch
 /// entry point for CLI, LSP, native, and (future) plugin rules.
 pub struct Engine;
 
