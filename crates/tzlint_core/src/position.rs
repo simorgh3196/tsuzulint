@@ -20,7 +20,8 @@ impl LineIndex {
     pub fn new(text: &str) -> Self {
         let mut line_starts = Vec::with_capacity(16);
         line_starts.push(0);
-        for (i, byte) in text.bytes().enumerate() {
+        let bytes = text.as_bytes();
+        for (i, &byte) in bytes.iter().enumerate() {
             if byte == b'\n' {
                 line_starts.push(i as u32 + 1);
             }
@@ -46,15 +47,24 @@ impl LineIndex {
         while end > 0 && !text.is_char_boundary(end) {
             end -= 1;
         }
-        let line_idx = match self.line_starts.binary_search(&(end as u32)) {
-            Ok(idx) => idx,
-            Err(idx) => idx.saturating_sub(1),
-        };
+        let end_u32 = end as u32;
+        let line_idx = self
+            .line_starts
+            .partition_point(|&x| x <= end_u32)
+            .saturating_sub(1);
         let line_start = self.line_starts.get(line_idx).copied().unwrap_or(0) as usize;
         let start = line_start.min(end);
-        let column = text
-            .get(start..end)
-            .map_or(0, |slice| slice.chars().count());
+        let column = text.get(start..end).map_or(0, |slice| {
+            let mut count = 0;
+            for &b in slice.as_bytes() {
+                // In UTF-8, any byte that is not a continuation byte (which is 10xxxxxx, i.e. 0x80..=0xBF)
+                // is the start of a character. We can identify these efficiently by casting to i8.
+                if (b as i8) >= -0x40 {
+                    count += 1;
+                }
+            }
+            count
+        });
         (line_idx as u32 + 1, column as u32 + 1)
     }
 }
