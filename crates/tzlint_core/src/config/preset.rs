@@ -37,10 +37,53 @@ impl Preset {
     }
 
     /// The rule settings this preset contributes as a base layer.
-    // TODO(M1f): populate once `tzlint_rules` defines the rule ids these presets enable.
+    ///
+    /// Rule ids are referenced as strings (no dependency on `tzlint_rules`); they MUST match the
+    /// ids in `tzlint_rules::RULE_IDS` verbatim. Rules whose detection needs morphology (M2),
+    /// such as `no-doubled-joshi`, are intentionally omitted until that lands — additively.
+    /// Options here are config-layer metadata; routing them into rule instances is a later step,
+    /// so a rule currently runs with its own defaults regardless of the value set here.
     fn rules(self) -> BTreeMap<RuleId, RuleSetting> {
-        BTreeMap::new()
+        match self {
+            Preset::JaBasic => ja_basic(),
+            Preset::JaTechnicalWriting => ja_technical_writing(),
+        }
     }
+}
+
+/// Enable a rule with the given options and no severity override.
+fn on(options: serde_json::Value) -> RuleSetting {
+    RuleSetting::On {
+        severity: None,
+        options,
+    }
+}
+
+/// The `ja-basic` preset: a small, broadly-applicable base.
+fn ja_basic() -> BTreeMap<RuleId, RuleSetting> {
+    use serde_json::Value;
+    [
+        ("no-hankaku-kana", on(Value::Null)),
+        ("no-mixed-zenkaku-hankaku-alphabet", on(Value::Null)),
+    ]
+    .into_iter()
+    .map(|(id, setting)| (RuleId::from(id), setting))
+    .collect()
+}
+
+/// The `ja-technical-writing` preset: stricter, with thresholds.
+fn ja_technical_writing() -> BTreeMap<RuleId, RuleSetting> {
+    use serde_json::{Value, json};
+    [
+        ("sentence-length", on(json!({ "max": 100 }))),
+        ("max-ten", on(json!({ "max": 3 }))),
+        ("max-kanji-continuous-len", on(json!({ "max": 6 }))),
+        ("no-hankaku-kana", on(Value::Null)),
+        ("no-mixed-zenkaku-hankaku-alphabet", on(Value::Null)),
+    ]
+    .into_iter()
+    .map(|(id, setting)| (RuleId::from(id), setting))
+    .collect()
 }
 
 /// Resolve a `user` config over an optional `preset` base.
@@ -106,20 +149,62 @@ mod tests {
     }
 
     #[test]
-    fn resolve_keeps_user_languages_and_rules() {
+    fn resolve_layers_preset_under_user() {
         let user = Config {
             language: Some("ja".into()),
             message_language: Some("en".into()),
             rules: {
                 let mut m = BTreeMap::new();
-                m.insert(RuleId::from("sentence-length"), RuleSetting::Off);
+                m.insert(RuleId::from("no-hankaku-kana"), RuleSetting::Off); // override a preset rule
+                m.insert(RuleId::from("custom-rule"), on()); // user-only
                 m
             },
         };
-        // Presets are empty until rules land (M1f), so resolution is identity on the rule set.
         let resolved = resolve(Some(Preset::JaBasic), user.clone());
-        assert_eq!(resolved, user);
-        // No preset behaves the same.
+        // Languages come from the user.
+        assert_eq!(resolved.language.as_deref(), Some("ja"));
+        assert_eq!(resolved.message_language.as_deref(), Some("en"));
+        // The user override wins on a shared id.
+        assert_eq!(
+            resolved.rules.get(&RuleId::from("no-hankaku-kana")),
+            Some(&RuleSetting::Off)
+        );
+        // The preset's other rule is present as the base layer; the user-only rule is kept.
+        assert!(
+            resolved
+                .rules
+                .contains_key(&RuleId::from("no-mixed-zenkaku-hankaku-alphabet"))
+        );
+        assert!(resolved.rules.contains_key(&RuleId::from("custom-rule")));
+        // No preset → identity.
         assert_eq!(resolve(None, user.clone()), user);
+    }
+
+    #[test]
+    fn presets_are_populated_with_kebab_ids() {
+        for preset in [Preset::JaBasic, Preset::JaTechnicalWriting] {
+            let rules = preset.rules();
+            assert!(!rules.is_empty(), "{} should have rules", preset.id());
+            for id in rules.keys() {
+                assert!(
+                    id.as_str()
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                    "non-kebab rule id: {}",
+                    id.as_str()
+                );
+            }
+        }
+        // ja-technical-writing carries thresholds (sentence-length); ja-basic does not.
+        assert!(
+            Preset::JaTechnicalWriting
+                .rules()
+                .contains_key(&RuleId::from("sentence-length"))
+        );
+        assert!(
+            !Preset::JaBasic
+                .rules()
+                .contains_key(&RuleId::from("sentence-length"))
+        );
     }
 }
