@@ -8,7 +8,7 @@ allow-expect-in-tests = true
 # This makes the most frequent past bug class (the same I/O mistake repeated across
 # many entry points) structurally impossible to reintroduce. Extended as crates land.
 disallowed-methods = [
-    { path = "std::fs::read", reason = "use tzlint_core::io::read_with_limit" },
-    { path = "std::fs::read_to_string", reason = "use tzlint_core::io::read_with_limit" },
-    { path = "std::fs::write", reason = "use the atomic-write helper in tzlint_core::io" },
+    { path = "std::fs::read", reason = "use tzlint_core::io::Host::read_to_string" },
+    { path = "std::fs::read_to_string", reason = "use tzlint_core::io::Host::read_to_string" },
+    { path = "std::fs::write", reason = "use tzlint_core::io::Host::write_atomic" },
 ]

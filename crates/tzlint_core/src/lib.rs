@@ -4,9 +4,9 @@
 //! - the markdown-rs parser + mdast → index-AST transform,
 //! - the single-traversal multi-visitor `Engine::lint` (the one dispatch entry point),
 //! - multi-format config loading (+ presets), the document-level cache,
-//! - the position mapper, and the centralized boundary `io` module (`read_with_limit`,
-//!   atomic writes), behind a `Host` provider abstraction so embedders inject their
-//!   environment (native fs / Node / browser).
+//! - the position mapper, and the centralized boundary `io` module (`Host::read_to_string`
+//!   with a size cap, `Host::write_atomic`), behind a `Host` provider abstraction so
+//!   embedders inject their environment (native fs / Node / browser).
 //!
 //! Landed so far: the [`parse`] function + [`LineIndex`] position mapper (M1b), the
 //! single-traversal [`Engine`] + autofix [`fix`]/[`apply_fixes`] (M1c-2), and the centralized
