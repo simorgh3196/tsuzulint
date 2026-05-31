@@ -8,11 +8,16 @@
 //!   atomic writes), behind a `Host` provider abstraction so embedders inject their
 //!   environment (native fs / Node / browser).
 //!
-//! Landed so far (M1b): the [`parse`] function (markdown-rs + mdast → index-AST transform)
-//! and the [`LineIndex`] position mapper. TODO(M1): the engine, config, cache, and io.
+//! Landed so far: the [`parse`] function + [`LineIndex`] position mapper (M1b), and the
+//! single-traversal [`Engine`] + autofix [`fix`]/[`apply_fixes`] (M1c-2). TODO(M1): config,
+//! cache, and io.
 
+pub mod engine;
+pub mod fix;
 pub mod parse;
 pub mod position;
 
+pub use engine::Engine;
+pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
 pub use parse::{ParseError, parse};
 pub use position::LineIndex;

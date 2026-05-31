@@ -13,4 +13,5 @@ workspace = true
 
 [dependencies]
 tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
+tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
 markdown = { workspace = true }

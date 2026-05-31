@@ -11,7 +11,10 @@ use crate::{RuleId, Severity};
 ///
 /// The engine applies the `node_kinds` filter itself (a rule is invoked only at matching
 /// nodes), so a rule cannot silently observe nothing because it forgot to filter. A
-/// cross-node rule registers for [`NodeKind::ROOT`] and walks its subtree via `NodeRef`.
+/// cross-node (document-level) rule self-traverses via `NodeRef`: it either registers for
+/// [`NodeKind::ROOT`] and walks the subtree from its [`check`](crate::Rule::check), or
+/// registers for no kind and walks from [`finish`](crate::Rule::finish) via
+/// [`Context::ast`](crate::Context::ast).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleMeta {
     pub id: RuleId,

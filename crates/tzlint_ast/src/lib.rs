@@ -405,9 +405,13 @@ impl ArchivedAst {
 // The one place that serializes/accesses the frozen archive, so the rkyv configuration
 // (pinned little-endian, 32-bit pointers, bytecheck) stays centralized here.
 
+/// The aligned byte buffer produced by [`to_archive`]. Re-exported so consumers (the cache,
+/// the CLI) can name and store an archive without depending on rkyv directly.
+pub use rkyv::util::AlignedVec;
+
 /// Serialize an [`Ast`] into its frozen archive. The returned buffer is correctly aligned
 /// for [`access`].
-pub fn to_archive(ast: &Ast) -> Result<rkyv::util::AlignedVec, rkyv::rancor::Error> {
+pub fn to_archive(ast: &Ast) -> Result<AlignedVec, rkyv::rancor::Error> {
     rkyv::to_bytes::<rkyv::rancor::Error>(ast)
 }
 
