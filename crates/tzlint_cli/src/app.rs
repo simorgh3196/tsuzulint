@@ -581,6 +581,26 @@ mod tests {
     }
 
     #[test]
+    fn extends_known_preset_loads_and_unknown_errors() {
+        // A config that extends a known preset loads cleanly; an unknown preset id is a fatal
+        // config error surfaced by the CLI.
+        let host = MockHost::new();
+        host.put("a.md", "ふつうの文。\n");
+        host.put("good.json", "{ \"extends\": \"ja-technical-writing\" }");
+        host.put("bad.json", "{ \"extends\": \"no-such-preset\" }");
+
+        let mut good = lint_cli("a.md", OutputFormat::Text);
+        good.config = Some(PathBuf::from("good.json"));
+        assert_eq!(run_capture(&good, &host).0, ExitStatus::Clean);
+
+        let mut bad = lint_cli("a.md", OutputFormat::Text);
+        bad.config = Some(PathBuf::from("bad.json"));
+        let (status, _out, err) = run_capture(&bad, &host);
+        assert_eq!(status, ExitStatus::Error);
+        assert!(err.contains("unknown preset"), "{err}");
+    }
+
+    #[test]
     fn unknown_config_rule_id_is_noted() {
         // A misspelled rule id in config is reported (not silently ignored).
         let host = MockHost::new();

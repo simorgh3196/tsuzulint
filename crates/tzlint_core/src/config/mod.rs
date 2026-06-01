@@ -14,8 +14,8 @@
 //!   `.tzlintrc.jsonc` → `.tzlintrc.json` → `.tzlintrc.yaml` → `.tzlintrc.yml` → `.tzlintrc`
 //!   (the extensionless file is parsed as JSONC).
 //! - **Presets** ([`Preset`], [`resolve`]) provide a base rule set that the user config
-//!   overrides by id. The `extends` key is reserved for a later milestone and is rejected
-//!   with a clear error rather than silently ignored.
+//!   overrides by id. A config selects them with `extends` (a preset id or a list of them);
+//!   they are layered under the file's own `rules`, and an unknown id is a clear error.
 
 mod discover;
 mod format;
@@ -54,14 +54,14 @@ pub struct Config {
 impl Config {
     /// Parse a config from `text` in the given [`ConfigFormat`].
     ///
-    /// Strict: unknown top-level keys, malformed values, or a (reserved) `extends` key are
-    /// errors. Rule-specific `options` are preserved verbatim as JSON values.
+    /// Strict: unknown top-level keys, malformed values, or an `extends` naming an unknown
+    /// preset are errors. Rule-specific `options` are preserved verbatim as JSON values.
     pub fn parse(text: &str, format: ConfigFormat) -> Result<Self, ConfigError> {
         format::parse(text, format)
     }
 }
 
-/// A configuration failure: an I/O error, a parse/validation error, or use of a reserved key.
+/// A configuration failure: an I/O error, a parse/validation error, or an unknown preset id.
 #[derive(Debug)]
 pub enum ConfigError {
     /// Reading a discovered config file failed.
@@ -73,8 +73,8 @@ pub enum ConfigError {
         /// A human-readable reason from the underlying deserializer.
         message: String,
     },
-    /// A key that is recognized but reserved for a future milestone (e.g. `extends`).
-    Reserved(&'static str),
+    /// `extends` referenced a preset id that is not a known [`Preset`].
+    UnknownPreset(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -84,8 +84,8 @@ impl fmt::Display for ConfigError {
             ConfigError::Parse { format, message } => {
                 write!(f, "failed to parse {format} config: {message}")
             }
-            ConfigError::Reserved(key) => {
-                write!(f, "`{key}` is reserved and not supported yet")
+            ConfigError::UnknownPreset(id) => {
+                write!(f, "`extends` references unknown preset `{id}`")
             }
         }
     }
@@ -125,8 +125,8 @@ mod tests {
             "failed to parse JSON config: boom"
         );
         assert_eq!(
-            ConfigError::Reserved("extends").to_string(),
-            "`extends` is reserved and not supported yet"
+            ConfigError::UnknownPreset("nope".into()).to_string(),
+            "`extends` references unknown preset `nope`"
         );
     }
 
@@ -134,7 +134,7 @@ mod tests {
     fn error_source_chains_io_only() {
         use std::error::Error;
         assert!(ConfigError::Io(IoError::NotFound).source().is_some());
-        assert!(ConfigError::Reserved("extends").source().is_none());
+        assert!(ConfigError::UnknownPreset("nope".into()).source().is_none());
     }
 
     #[test]

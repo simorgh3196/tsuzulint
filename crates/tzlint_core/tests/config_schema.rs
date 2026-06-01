@@ -64,9 +64,21 @@ const CORPUS: &[(&str, &str, Mode)] = &[
         r#"{"langauge":"ja"}"#,
         Mode::Reject,
     ),
-    // `extends` is reserved: only null (= absent) is accepted; any non-null value is rejected.
+    // `extends` selects preset(s): a known id (string or array) is accepted; null is a no-op;
+    // an unknown id or a non-string/array value is rejected by both schema and loader.
     ("extends null", r#"{"extends":null}"#, Mode::Accept),
-    ("extends array", r#"{"extends":["ja-basic"]}"#, Mode::Reject),
+    ("extends string", r#"{"extends":"ja-basic"}"#, Mode::Accept),
+    (
+        "extends array",
+        r#"{"extends":["ja-basic","ja-technical-writing"]}"#,
+        Mode::Accept,
+    ),
+    ("extends unknown id", r#"{"extends":"nope"}"#, Mode::Reject),
+    (
+        "extends array unknown id",
+        r#"{"extends":["nope"]}"#,
+        Mode::Reject,
+    ),
     ("extends number", r#"{"extends":42}"#, Mode::Reject),
     // Rules map.
     ("rules empty", r#"{"rules":{}}"#, Mode::Accept),
@@ -224,24 +236,23 @@ fn schema_matches_loader_with_documented_asymmetry() {
 }
 
 #[test]
-fn extends_rejection_is_reserved_not_parse() {
-    // The schema can only say accept/reject; the loader distinguishes a *reserved* key from a
-    // generic parse error. Pin that boundary so a refactor can't silently downgrade it.
-    for text in [r#"{"extends":["ja-basic"]}"#, r#"{"extends":42}"#] {
-        assert!(
-            matches!(
-                Config::parse(text, ConfigFormat::Json),
-                Err(ConfigError::Reserved("extends"))
-            ),
-            "{text} should be a reserved-key error"
-        );
-    }
-    // A generic bad value is a parse error, not reserved.
+fn extends_distinguishes_unknown_preset_from_parse_error() {
+    // The schema can only say accept/reject; the loader distinguishes an *unknown preset* from a
+    // generic parse error (a non-string/array value). Pin that boundary.
+    assert!(
+        matches!(
+            Config::parse(r#"{"extends":"nope"}"#, ConfigFormat::Json),
+            Err(ConfigError::UnknownPreset(id)) if id == "nope"
+        ),
+        "an unknown preset id should be UnknownPreset"
+    );
+    // A non-string/array `extends` is a serde type error → Parse, not UnknownPreset.
     assert!(matches!(
-        Config::parse(r#"{"language":42}"#, ConfigFormat::Json),
+        Config::parse(r#"{"extends":42}"#, ConfigFormat::Json),
         Err(ConfigError::Parse { .. })
     ));
-    // `extends: null` is accepted as a no-op.
+    // A known preset resolves; `extends: null` is a no-op.
+    assert!(Config::parse(r#"{"extends":"ja-basic"}"#, ConfigFormat::Json).is_ok());
     assert!(Config::parse(r#"{"extends":null}"#, ConfigFormat::Json).is_ok());
 }
 
