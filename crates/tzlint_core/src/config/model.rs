@@ -387,13 +387,18 @@ mod tests {
     }
 
     #[test]
-    fn into_config_array_extends_later_preset_wins() {
-        // Both presets set sentence-length differently in spirit; the later (ja-technical-writing)
-        // contributes it, so it is present after resolution.
+    fn into_config_array_extends_merges_all_presets() {
+        // An array `extends` layers every listed preset's rules. Later entries would win on a
+        // shared id, but the two built-ins never set a shared rule differently, so the only
+        // observable effect here is the union: ja-basic's rules plus ja-technical-writing's extras.
         let raw: RawConfig =
             serde_json::from_str(r#"{ "extends": ["ja-basic", "ja-technical-writing"] }"#).unwrap();
         let config = raw.into_config().unwrap();
+        // Contributed by ja-basic (the earlier entry).
+        assert!(config.rules.contains_key(&RuleId::from("no-hankaku-kana")));
+        // Unique to ja-technical-writing (the later entry).
         assert!(config.rules.contains_key(&RuleId::from("sentence-length")));
+        assert!(config.rules.contains_key(&RuleId::from("max-ten")));
     }
 
     #[test]
