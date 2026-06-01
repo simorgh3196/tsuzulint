@@ -1,8 +1,8 @@
 //! The serde model behind a config file and its conversion to a resolved [`Config`].
 //!
 //! [`RawConfig`] mirrors the on-disk shape (strict: `deny_unknown_fields`, kebab-case keys);
-//! [`RawConfig::into_config`] validates the reserved `extends` key and lifts string rule keys
-//! into [`RuleId`]s. [`RuleSetting`] has a hand-written `Deserialize` so a rule value may be
+//! [`RawConfig::into_config`] resolves `extends` presets (layered under this file's `rules`) and
+//! lifts string rule keys into [`RuleId`]s. [`RuleSetting`] has a hand-written `Deserialize` so a rule value may be
 //! `false`, `true`, or `{ severity?, options? }` while still rejecting unknown keys in the
 //! object form — something `#[serde(untagged)]` cannot enforce.
 
@@ -26,37 +26,68 @@ pub(super) struct RawConfig {
     message_language: Option<String>,
     #[serde(default)]
     rules: BTreeMap<String, RuleSetting>,
-    /// Reserved: composing/extending configs is a later milestone. Accepted into the model (so
-    /// a lone `extends` produces a precise "reserved" error rather than an "unknown field" one)
-    /// and rejected in [`into_config`](RawConfig::into_config). `extends: null` is treated as
-    /// absent (a no-op), matching serde's null→`None` mapping. Note: if the file *also* has an
-    /// unknown key or a type error, serde's `deny_unknown_fields`/type error fires first and
-    /// that message wins over the reserved-key one.
+    /// Preset(s) to extend: a base rule layer this file's own `rules` override. A bare string
+    /// names one preset; an array names several (later entries win over earlier; this file's
+    /// `rules` win over all). `null`/absent means none. Each id must be a known preset (e.g.
+    /// `"ja-basic"`); an unknown id is rejected in [`into_config`](RawConfig::into_config). A
+    /// non-string/array value is a serde type error at parse time.
     #[serde(default)]
-    extends: Option<Value>,
+    extends: Option<Extends>,
+}
+
+/// The shape of the `extends` value: one preset id, or a list of them.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Extends {
+    /// `extends: "ja-basic"`.
+    One(String),
+    /// `extends: ["ja-basic", "ja-technical-writing"]`.
+    Many(Vec<String>),
+}
+
+impl Extends {
+    /// The preset ids in declaration order.
+    fn ids(self) -> Vec<String> {
+        match self {
+            Extends::One(id) => vec![id],
+            Extends::Many(ids) => ids,
+        }
+    }
 }
 
 impl RawConfig {
-    /// Validate reserved keys and lift `rules` keys into [`RuleId`]s.
+    /// Resolve `extends` presets and lift `rules` keys into [`RuleId`]s.
     ///
-    /// Rule ids are not checked against a known-rule set here — that registry does not exist
-    /// until the rules crate lands (M1f), so an unknown id is kept verbatim and simply matches
-    /// no rule. (`deny_unknown_fields` guards the fixed top-level keys, not the dynamic `rules`
-    /// map keys.)
+    /// The presets form base layers under this file's own `rules` (later `extends` entries win
+    /// over earlier; this file's `rules` win over all). An unknown preset id is a
+    /// [`ConfigError::UnknownPreset`]. Rule ids inside `rules` are not checked against the
+    /// known-rule set here (`deny_unknown_fields` guards only the fixed top-level keys); an
+    /// unknown rule id is kept verbatim and simply matches no rule.
     pub(super) fn into_config(self) -> Result<Config, ConfigError> {
-        if self.extends.is_some() {
-            return Err(ConfigError::Reserved("extends"));
-        }
+        let preset_ids = self.extends.map(Extends::ids).unwrap_or_default();
+        let presets = preset_ids
+            .into_iter()
+            .map(|id| super::Preset::from_id(&id).ok_or(ConfigError::UnknownPreset(id)))
+            .collect::<Result<Vec<_>, _>>()?;
+
         let rules = self
             .rules
             .into_iter()
             .map(|(id, setting)| (RuleId::from(id), setting))
             .collect();
-        Ok(Config {
+        let user = Config {
             language: self.language,
             message_language: self.message_language,
             rules,
-        })
+        };
+
+        // Layer presets under the user config. Folding in reverse makes the precedence (low to
+        // high) `extends[0] < … < extends[n] < user`: each `resolve` puts its preset *under* the
+        // accumulator.
+        Ok(presets
+            .into_iter()
+            .rev()
+            .fold(user, |acc, preset| super::resolve(Some(preset), acc)))
     }
 }
 
@@ -334,14 +365,54 @@ mod tests {
     }
 
     #[test]
-    fn into_config_rejects_reserved_extends() {
-        let raw: RawConfig = serde_json::from_str(r#"{ "extends": ["ja-basic"] }"#).unwrap();
+    fn into_config_resolves_extends_under_user_rules() {
+        // `extends` contributes the preset's rules as a base; this file's `rules` win on overlap.
+        let raw: RawConfig = serde_json::from_str(
+            r#"{ "extends": "ja-basic", "rules": { "no-hankaku-kana": false } }"#,
+        )
+        .unwrap();
+        let config = raw.into_config().unwrap();
+        // ja-basic enables no-mixed-zenkaku-hankaku-alphabet (kept) ...
+        assert!(
+            config
+                .rules
+                .get(&RuleId::from("no-mixed-zenkaku-hankaku-alphabet"))
+                .is_some_and(RuleSetting::is_enabled)
+        );
+        // ... and no-hankaku-kana, which this file overrides to off (user wins).
+        assert_eq!(
+            config.rules.get(&RuleId::from("no-hankaku-kana")),
+            Some(&RuleSetting::Off)
+        );
+    }
+
+    #[test]
+    fn into_config_array_extends_merges_all_presets() {
+        // An array `extends` layers every listed preset's rules. Later entries would win on a
+        // shared id, but the two built-ins never set a shared rule differently, so the only
+        // observable effect here is the union: ja-basic's rules plus ja-technical-writing's extras.
+        let raw: RawConfig =
+            serde_json::from_str(r#"{ "extends": ["ja-basic", "ja-technical-writing"] }"#).unwrap();
+        let config = raw.into_config().unwrap();
+        // Contributed by ja-basic (the earlier entry).
+        assert!(config.rules.contains_key(&RuleId::from("no-hankaku-kana")));
+        // Unique to ja-technical-writing (the later entry).
+        assert!(config.rules.contains_key(&RuleId::from("sentence-length")));
+        assert!(config.rules.contains_key(&RuleId::from("max-ten")));
+    }
+
+    #[test]
+    fn into_config_rejects_unknown_preset() {
+        let raw: RawConfig = serde_json::from_str(r#"{ "extends": "nope" }"#).unwrap();
         assert!(matches!(
             raw.into_config(),
-            Err(ConfigError::Reserved("extends"))
+            Err(ConfigError::UnknownPreset(id)) if id == "nope"
         ));
-        // `extends: null` is treated as absent (a no-op), not reserved.
-        let null_extends: RawConfig = serde_json::from_str(r#"{ "extends": null }"#).unwrap();
-        assert!(null_extends.into_config().is_ok());
+    }
+
+    #[test]
+    fn into_config_null_extends_is_a_noop() {
+        let raw: RawConfig = serde_json::from_str(r#"{ "extends": null }"#).unwrap();
+        assert!(raw.into_config().unwrap().rules.is_empty());
     }
 }

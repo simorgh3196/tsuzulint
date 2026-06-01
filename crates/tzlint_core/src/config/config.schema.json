@@ -18,11 +18,20 @@
       "$ref": "#/$defs/rules"
     },
     "extends": {
-      "description": "Reserved for a future milestone and not yet supported. Only null (equivalent to absent) is accepted; any non-null value is rejected by the loader as a reserved key.",
-      "type": "null"
+      "description": "Preset(s) whose rule settings form a base layer under this file's own `rules` (this file wins on overlap; later array entries win over earlier). A preset id, an array of ids, or null/absent for none.",
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/presetId" },
+        { "type": "array", "items": { "$ref": "#/$defs/presetId" } }
+      ]
     }
   },
   "$defs": {
+    "presetId": {
+      "description": "A built-in preset id.",
+      "type": "string",
+      "enum": ["ja-basic", "ja-technical-writing"]
+    },
     "rules": {
       "description": "Map of rule id to its setting. Rule ids are arbitrary strings; they are not validated against a known-rule set yet (that arrives with the rules crate).",
       "type": "object",
