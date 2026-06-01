@@ -564,6 +564,23 @@ mod tests {
     }
 
     #[test]
+    fn config_options_take_effect_end_to_end() {
+        // A config that sets `max-ten` to `max: 0` flags a single `、`, proving per-rule options
+        // flow config -> resolve_rules -> build_rule -> engine.
+        let host = MockHost::new();
+        host.put("a.md", "これは、テストです。\n");
+        host.put(
+            "strict.json",
+            "{ \"rules\": { \"max-ten\": { \"options\": { \"max\": 0 } } } }",
+        );
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.config = Some(PathBuf::from("strict.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings);
+        assert!(out.contains("max-ten"), "{out}");
+    }
+
+    #[test]
     fn unknown_config_rule_id_is_noted() {
         // A misspelled rule id in config is reported (not silently ignored).
         let host = MockHost::new();
