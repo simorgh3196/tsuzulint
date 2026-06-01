@@ -25,12 +25,16 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::path::Path;
 
 use blake3::Hasher;
-use tzlint_pdk::{Diagnostic, Rule, Severity};
+use serde_json::Value;
+use tzlint_ast::Span;
+use tzlint_pdk::{Diagnostic, Fix, Rule, Severity};
 
 use crate::config::{Config, RuleSetting};
 use crate::engine::Engine;
+use crate::io::{Host, IoError};
 use crate::parse::{ParseError, parse};
 
 /// Cache-key recipe version. Bump to invalidate every key if the key *construction* changes.
@@ -49,6 +53,13 @@ const ASTCORE_VERSION: &str = "v1";
 /// Default in-memory capacity, in number of cached documents.
 const DEFAULT_CAPACITY: usize = 1024;
 
+/// On-disk cache file layout version. A file tagged with a different version is ignored on load
+/// (treated as empty), so an old cache can never feed mis-shaped data to a new reader.
+const CACHE_FILE_VERSION: u64 = 1;
+/// Upper bound on the on-disk cache file size read back. Generous; a larger (or unreadable) file
+/// is ignored rather than erroring — a cache must never break linting.
+const MAX_CACHE_FILE: usize = 64 * 1024 * 1024;
+
 /// BLAKE3 derive-key contexts. Distinct strings put the cache key and the config fingerprint in
 /// separate hash domains so they can never alias; the version suffix doubles as a domain version.
 const KEY_CONTEXT: &str = "tsuzulint document-cache key v1";
@@ -64,7 +75,7 @@ impl CacheKey {
         &self.0
     }
 
-    /// Lowercase hex encoding (64 chars). Reserved for future on-disk cache filenames (M1g).
+    /// Lowercase hex encoding (64 chars). Used as the key in the on-disk cache file.
     pub fn to_hex(&self) -> String {
         let mut hex = String::with_capacity(64);
         for byte in &self.0 {
@@ -74,6 +85,20 @@ impl CacheKey {
             hex.push(char::from_digit((byte & 0x0f) as u32, 16).unwrap_or('0'));
         }
         hex
+    }
+
+    /// Parse a 64-char lowercase-hex digest (as produced by [`to_hex`](CacheKey::to_hex)) back
+    /// into a key, or `None` if it is not exactly 64 ASCII hex characters.
+    pub fn from_hex(hex: &str) -> Option<CacheKey> {
+        if hex.len() != 64 || !hex.is_ascii() {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            // `hex` is ASCII and 64 long, so each 2-char window is in range and on a boundary.
+            *byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok()?;
+        }
+        Some(CacheKey(bytes))
     }
 }
 
@@ -271,6 +296,58 @@ impl DocumentCache {
         self.entries.is_empty()
     }
 
+    /// Load a cache from the JSON file at `path` through `host`, for cross-run reuse.
+    ///
+    /// **Best-effort:** a missing, oversized, malformed, or wrong-version file yields an empty
+    /// cache rather than an error — a cache must never break linting. Individual unreadable
+    /// entries are skipped. Each surviving key is content-/config-/version-addressed (see
+    /// [`document_cache_key`]), so a stale entry is simply never looked up; only the byte ceiling
+    /// and LRU capacity bound growth.
+    pub fn load(host: &dyn Host, path: &Path) -> DocumentCache {
+        let mut cache = DocumentCache::new();
+        let Ok(text) = host.read_to_string(path, MAX_CACHE_FILE) else {
+            return cache;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&text) else {
+            return cache;
+        };
+        if value.get("version").and_then(Value::as_u64) != Some(CACHE_FILE_VERSION) {
+            return cache;
+        }
+        let Some(entries) = value.get("entries").and_then(Value::as_object) else {
+            return cache;
+        };
+        for (hex, diagnostics_value) in entries {
+            let (Some(key), Some(array)) = (CacheKey::from_hex(hex), diagnostics_value.as_array())
+            else {
+                continue;
+            };
+            let diagnostics: Option<Vec<Diagnostic>> =
+                array.iter().map(diagnostic_from_value).collect();
+            if let Some(diagnostics) = diagnostics {
+                cache.insert(key, diagnostics);
+            }
+        }
+        cache
+    }
+
+    /// Persist the cache to the JSON file at `path` through `host` (atomic write). The file is a
+    /// `{ "version", "entries": { "<hex-key>": [<diagnostic>…] } }` document.
+    pub fn save(&self, host: &dyn Host, path: &Path) -> Result<(), CacheError> {
+        let mut entries = serde_json::Map::with_capacity(self.entries.len());
+        for (key, diagnostics) in &self.entries {
+            let array: Vec<Value> = diagnostics.iter().map(diagnostic_to_value).collect();
+            entries.insert(key.to_hex(), Value::Array(array));
+        }
+        let document = serde_json::json!({
+            "version": CACHE_FILE_VERSION,
+            "entries": Value::Object(entries),
+        });
+        // `Value`'s `Display` is infallible, so no serialization error to handle here.
+        host.write_atomic(path, document.to_string().as_bytes())
+            .map_err(CacheError::Io)
+    }
+
     /// Move `key` to the most-recently-used position.
     fn mark_recent(&mut self, key: &CacheKey) {
         if let Some(pos) = self.recency.iter().position(|k| k == key) {
@@ -297,6 +374,8 @@ pub enum CacheError {
     /// Archiving/accessing the parsed AST failed (an internal round-trip that should not occur
     /// for a freshly-parsed document); surfaced rather than served as a fake empty hit.
     Archive(String),
+    /// Writing the on-disk cache file failed (from [`DocumentCache::save`]).
+    Io(IoError),
 }
 
 impl fmt::Display for CacheError {
@@ -305,6 +384,7 @@ impl fmt::Display for CacheError {
             CacheError::Parse(e) => write!(f, "{e}"),
             CacheError::Key(e) => write!(f, "cache key error: {e}"),
             CacheError::Archive(m) => write!(f, "archive error: {m}"),
+            CacheError::Io(e) => write!(f, "cache file error: {e}"),
         }
     }
 }
@@ -315,6 +395,7 @@ impl std::error::Error for CacheError {
             CacheError::Parse(e) => Some(e),
             CacheError::Key(e) => Some(e),
             CacheError::Archive(_) => None,
+            CacheError::Io(e) => Some(e),
         }
     }
 }
@@ -362,6 +443,70 @@ pub fn lint_cached(
     let diagnostics = Engine::lint(archived, rules);
     cache.insert(key, diagnostics.clone());
     Ok(diagnostics)
+}
+
+/// The on-disk wire name for a severity (round-trips with [`severity_from_name`]).
+fn severity_name(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => "info",
+        Severity::Hint => "hint",
+    }
+}
+
+/// Parse a severity wire name, or `None` if unrecognized.
+fn severity_from_name(name: &str) -> Option<Severity> {
+    match name {
+        "error" => Some(Severity::Error),
+        "warning" => Some(Severity::Warning),
+        "info" => Some(Severity::Info),
+        "hint" => Some(Severity::Hint),
+        _ => None,
+    }
+}
+
+/// Serialize one diagnostic to the cache-file JSON shape.
+fn diagnostic_to_value(diagnostic: &Diagnostic) -> Value {
+    serde_json::json!({
+        "rule_id": diagnostic.rule_id.as_str(),
+        "severity": severity_name(diagnostic.severity),
+        "message": diagnostic.message,
+        "span": { "start": diagnostic.span.start, "end": diagnostic.span.end },
+        "fixes": diagnostic
+            .fixes
+            .iter()
+            .map(|fix| serde_json::json!({
+                "span": { "start": fix.span.start, "end": fix.span.end },
+                "replacement": fix.replacement,
+            }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// Reconstruct a diagnostic from the cache-file JSON shape, or `None` if any field is missing or
+/// malformed (the caller drops the whole entry, so a corrupt cache degrades to a miss).
+fn diagnostic_from_value(value: &Value) -> Option<Diagnostic> {
+    let rule_id = value.get("rule_id")?.as_str()?;
+    let severity = severity_from_name(value.get("severity")?.as_str()?)?;
+    let message = value.get("message")?.as_str()?;
+    let span = span_from_value(value.get("span")?)?;
+    let mut diagnostic = Diagnostic::new(rule_id, severity, span, message);
+    if let Some(fixes) = value.get("fixes").and_then(Value::as_array) {
+        for fix in fixes {
+            let span = span_from_value(fix.get("span")?)?;
+            let replacement = fix.get("replacement")?.as_str()?;
+            diagnostic.fixes.push(Fix::replace(span, replacement));
+        }
+    }
+    Some(diagnostic)
+}
+
+/// Parse a `{ "start", "end" }` object into a [`Span`], or `None` if out of `u32` range.
+fn span_from_value(value: &Value) -> Option<Span> {
+    let start = u32::try_from(value.get("start")?.as_u64()?).ok()?;
+    let end = u32::try_from(value.get("end")?.as_u64()?).ok()?;
+    Some(Span::new(start, end))
 }
 
 #[cfg(test)]
@@ -664,5 +809,106 @@ mod tests {
         let archive = CacheError::Archive("x".into());
         assert_eq!(archive.to_string(), "archive error: x");
         assert!(archive.source().is_none());
+    }
+
+    /// A tiny in-memory [`Host`] for cache persistence tests.
+    struct MemHost {
+        files: std::cell::RefCell<std::collections::HashMap<std::path::PathBuf, String>>,
+    }
+    impl MemHost {
+        fn new() -> Self {
+            MemHost {
+                files: std::cell::RefCell::new(std::collections::HashMap::new()),
+            }
+        }
+        fn seed(path: &str, contents: &str) -> Self {
+            let host = MemHost::new();
+            host.files
+                .borrow_mut()
+                .insert(std::path::PathBuf::from(path), contents.to_string());
+            host
+        }
+    }
+    impl Host for MemHost {
+        fn read_to_string(&self, path: &Path, limit: usize) -> Result<String, IoError> {
+            match self.files.borrow().get(path) {
+                Some(c) if c.len() > limit => Err(IoError::TooLarge { limit }),
+                Some(c) => Ok(c.clone()),
+                None => Err(IoError::NotFound),
+            }
+        }
+        fn write_atomic(&self, path: &Path, contents: &[u8]) -> Result<(), IoError> {
+            let text =
+                String::from_utf8(contents.to_vec()).map_err(|e| IoError::Other(e.to_string()))?;
+            self.files.borrow_mut().insert(path.to_path_buf(), text);
+            Ok(())
+        }
+        fn exists(&self, path: &Path) -> bool {
+            self.files.borrow().contains_key(path)
+        }
+    }
+
+    #[test]
+    fn cache_key_hex_round_trips() {
+        let key = key_of("# H\n", &cfg(r#"{"language":"ja"}"#));
+        assert_eq!(CacheKey::from_hex(&key.to_hex()), Some(key));
+        // Malformed hex is rejected, never panics.
+        assert_eq!(CacheKey::from_hex("not hex"), None);
+        assert_eq!(CacheKey::from_hex(&"z".repeat(64)), None);
+        assert_eq!(CacheKey::from_hex(&"a".repeat(63)), None);
+    }
+
+    #[test]
+    fn cache_save_then_load_round_trips_entries() {
+        let key = key_of("doc\n", &cfg("{}"));
+        let diagnostics = vec![
+            Diagnostic::new("max-ten", Severity::Error, Span::new(2, 5), "msg")
+                .with_fix(Fix::replace(Span::new(2, 5), "、")),
+            Diagnostic::new("no-todo", Severity::Hint, Span::new(0, 4), "todo"),
+        ];
+        let mut cache = DocumentCache::new();
+        cache.insert(key, diagnostics.clone());
+
+        let host = MemHost::new();
+        let path = Path::new("/work/.tzlintcache");
+        cache.save(&host, path).unwrap();
+
+        let loaded = DocumentCache::load(&host, path);
+        assert_eq!(loaded.len(), 1);
+        let mut loaded = loaded;
+        assert_eq!(loaded.get(&key).as_deref(), Some(diagnostics.as_slice()));
+    }
+
+    #[test]
+    fn cache_load_is_best_effort_on_bad_files() {
+        let path = Path::new("/work/.tzlintcache");
+        // Missing file → empty.
+        assert!(DocumentCache::load(&MemHost::new(), path).is_empty());
+        // Corrupt JSON → empty.
+        assert!(
+            DocumentCache::load(&MemHost::seed("/work/.tzlintcache", "not json"), path).is_empty()
+        );
+        // Wrong version → ignored.
+        let wrong_version = MemHost::seed("/work/.tzlintcache", r#"{"version":999,"entries":{}}"#);
+        assert!(DocumentCache::load(&wrong_version, path).is_empty());
+    }
+
+    #[test]
+    fn cache_save_surfaces_write_error() {
+        // A host whose write always fails makes `save` return an `Io` error (so a caller can warn).
+        struct FailingHost;
+        impl Host for FailingHost {
+            fn read_to_string(&self, _: &Path, _: usize) -> Result<String, IoError> {
+                Err(IoError::NotFound)
+            }
+            fn write_atomic(&self, _: &Path, _: &[u8]) -> Result<(), IoError> {
+                Err(IoError::Other("disk full".into()))
+            }
+            fn exists(&self, _: &Path) -> bool {
+                false
+            }
+        }
+        let result = DocumentCache::new().save(&FailingHost, Path::new("/x/.tzlintcache"));
+        assert!(matches!(result, Err(CacheError::Io(_))));
     }
 }

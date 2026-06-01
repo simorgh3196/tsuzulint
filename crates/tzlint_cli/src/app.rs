@@ -97,7 +97,10 @@ fn lint(
     note_unknown_rules(&config, stderr);
     let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
 
-    let mut cache = (!cli.no_cache).then(DocumentCache::new);
+    // Persistent cache: load the on-disk file (best-effort) so a repeat run on unchanged content
+    // skips parse+lint, and write it back afterwards. `--no-cache` skips both ends.
+    let cache_path = cwd.join(".tzlintcache");
+    let mut cache = (!cli.no_cache).then(|| DocumentCache::load(host, &cache_path));
     let mut reports = Vec::with_capacity(paths.len());
     let mut had_error = false;
     for path in paths {
@@ -108,6 +111,17 @@ fn lint(
                 had_error = true;
             }
         }
+    }
+
+    // A cache write failure must not fail the run; the results are already correct.
+    if let Some(cache) = &cache
+        && let Err(e) = cache.save(host, &cache_path)
+    {
+        let _ = writeln!(
+            stderr,
+            "warning: could not write {}: {e}",
+            cache_path.display()
+        );
     }
 
     match format {
@@ -711,5 +725,39 @@ mod tests {
         assert_eq!(status, ExitStatus::Error);
         assert!(err.contains("missing.md"), "{err}");
         assert!(out.contains("0 file(s) changed"), "{out}");
+    }
+
+    #[test]
+    fn lint_writes_cache_file_and_no_cache_skips_it() {
+        // A normal lint writes the persistent cache under the (injected) cwd.
+        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
+        assert!(
+            host.read("/work/.tzlintcache").is_some(),
+            "expected a cache file to be written"
+        );
+
+        // `--no-cache` neither reads nor writes it.
+        let host2 = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.no_cache = true;
+        run_capture(&c, &host2);
+        assert!(
+            host2.read("/work/.tzlintcache").is_none(),
+            "--no-cache should not write a cache file"
+        );
+    }
+
+    #[test]
+    fn cache_persists_across_runs() {
+        // Run twice against the same host: the second run loads the cache file the first wrote and
+        // hits, producing identical output to the fresh lint.
+        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let (status1, out1, _e1) = run_capture(&lint_cli("a.md", OutputFormat::Json), &host);
+        assert!(host.read("/work/.tzlintcache").is_some());
+        let (status2, out2, _e2) = run_capture(&lint_cli("a.md", OutputFormat::Json), &host);
+        assert_eq!(status1, status2);
+        assert_eq!(out1, out2);
+        assert!(out2.contains("no-hankaku-kana"), "{out2}");
     }
 }
