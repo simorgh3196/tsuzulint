@@ -94,12 +94,7 @@ fn lint(
     let config = load_config(cli, host, cwd, stderr)?;
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
-    for id in unknown_rule_ids(&config) {
-        let _ = writeln!(
-            stderr,
-            "note: config references unknown rule '{id}' (ignored)"
-        );
-    }
+    note_unknown_rules(&config, stderr);
     let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
 
     let mut cache = (!cli.no_cache).then(DocumentCache::new);
@@ -182,12 +177,7 @@ fn fix(
     let config = load_config(cli, host, cwd, stderr)?;
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
-    for id in unknown_rule_ids(&config) {
-        let _ = writeln!(
-            stderr,
-            "note: config references unknown rule '{id}' (ignored)"
-        );
-    }
+    note_unknown_rules(&config, stderr);
     let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
 
     let mut changed = 0usize;
@@ -313,6 +303,17 @@ fn note_if_no_rules(rules: &[Box<dyn Rule>], stderr: &mut dyn Write) {
         let _ = writeln!(
             stderr,
             "note: every built-in rule is disabled by config; the pipeline runs but reports nothing"
+        );
+    }
+}
+
+/// Print a stderr note for each `config.rules` id that is not a built-in rule (likely a typo),
+/// so a misspelled setting is not silently ignored. Shared by `lint` and `fix`.
+fn note_unknown_rules(config: &Config, stderr: &mut dyn Write) {
+    for id in unknown_rule_ids(config) {
+        let _ = writeln!(
+            stderr,
+            "note: config references unknown rule '{id}' (ignored)"
         );
     }
 }
