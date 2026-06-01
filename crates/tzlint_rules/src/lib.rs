@@ -2,8 +2,9 @@
 //!
 //! Each rule implements the [`Rule`](tzlint_pdk::Rule) trait (from `tzlint_pdk`) and declares
 //! the [`NodeKind`](tzlint_ast::NodeKind)s it visits, which the single-traversal scheduler in
-//! `tzlint_core` dispatches. Per-node rules act in `check`; the one document-level rule
-//! ([`NoMixedZenkakuHankakuAlphabet`]) registers `ROOT` and walks the subtree from `check`.
+//! `tzlint_core` dispatches. Per-node rules act in `check`; document-level rules (e.g.
+//! [`NoMixedZenkakuHankakuAlphabet`] and [`JaNoMixedPeriod`]) register `ROOT` and walk the
+//! subtree from `check`.
 //!
 //! [`builtin_rules`] returns every shipped rule (the registry the engine is wired through);
 //! [`RULE_IDS`] is the matching id list. Rule options are parsed leniently per rule
@@ -21,14 +22,16 @@ mod test_support;
 use tzlint_pdk::Rule;
 
 use rules::{
-    max_kanji_continuous_len, max_ten, no_hankaku_kana, no_mixed_zenkaku_hankaku_alphabet,
+    ja_no_mixed_period, max_kanji_continuous_len, max_ten, no_exclamation_question_mark,
+    no_hankaku_kana, no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_zero_width_spaces,
     sentence_length,
 };
 pub use rules::{
-    max_kanji_continuous_len::MaxKanjiContinuousLen, max_ten::MaxTen,
+    ja_no_mixed_period::JaNoMixedPeriod, max_kanji_continuous_len::MaxKanjiContinuousLen,
+    max_ten::MaxTen, no_exclamation_question_mark::NoExclamationQuestionMark,
     no_hankaku_kana::NoHankakuKana,
-    no_mixed_zenkaku_hankaku_alphabet::NoMixedZenkakuHankakuAlphabet,
-    sentence_length::SentenceLength,
+    no_mixed_zenkaku_hankaku_alphabet::NoMixedZenkakuHankakuAlphabet, no_nfd::NoNfd,
+    no_todo::NoTodo, no_zero_width_spaces::NoZeroWidthSpaces, sentence_length::SentenceLength,
 };
 
 /// The ids of every built-in rule, in [`builtin_rules`] order. Single source of truth — preset
@@ -39,6 +42,11 @@ pub const RULE_IDS: &[&str] = &[
     max_kanji_continuous_len::ID,
     no_hankaku_kana::ID,
     no_mixed_zenkaku_hankaku_alphabet::ID,
+    no_nfd::ID,
+    no_zero_width_spaces::ID,
+    no_exclamation_question_mark::ID,
+    ja_no_mixed_period::ID,
+    no_todo::ID,
 ];
 
 /// Every built-in rule, default-constructed.
@@ -52,6 +60,11 @@ pub fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MaxKanjiContinuousLen::new()),
         Box::new(NoHankakuKana::new()),
         Box::new(NoMixedZenkakuHankakuAlphabet::new()),
+        Box::new(NoNfd::new()),
+        Box::new(NoZeroWidthSpaces::new()),
+        Box::new(NoExclamationQuestionMark::new()),
+        Box::new(JaNoMixedPeriod::new()),
+        Box::new(NoTodo::new()),
     ]
 }
 
@@ -88,6 +101,20 @@ mod tests {
             NoMixedZenkakuHankakuAlphabet::default().meta().id.as_str(),
             "no-mixed-zenkaku-hankaku-alphabet"
         );
+        assert_eq!(NoNfd::default().meta().id.as_str(), "no-nfd");
+        assert_eq!(
+            NoZeroWidthSpaces::default().meta().id.as_str(),
+            "no-zero-width-spaces"
+        );
+        assert_eq!(
+            NoExclamationQuestionMark::default().meta().id.as_str(),
+            "no-exclamation-question-mark"
+        );
+        assert_eq!(
+            JaNoMixedPeriod::default().meta().id.as_str(),
+            "ja-no-mixed-period"
+        );
+        assert_eq!(NoTodo::default().meta().id.as_str(), "no-todo");
     }
 
     #[test]

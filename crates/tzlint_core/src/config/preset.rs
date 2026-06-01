@@ -65,6 +65,9 @@ fn ja_basic() -> BTreeMap<RuleId, RuleSetting> {
     [
         ("no-hankaku-kana", on(Value::Null)),
         ("no-mixed-zenkaku-hankaku-alphabet", on(Value::Null)),
+        ("no-nfd", on(Value::Null)),
+        ("no-zero-width-spaces", on(Value::Null)),
+        ("ja-no-mixed-period", on(Value::Null)),
     ]
     .into_iter()
     .map(|(id, setting)| (RuleId::from(id), setting))
@@ -80,6 +83,10 @@ fn ja_technical_writing() -> BTreeMap<RuleId, RuleSetting> {
         ("max-kanji-continuous-len", on(json!({ "max": 6 }))),
         ("no-hankaku-kana", on(Value::Null)),
         ("no-mixed-zenkaku-hankaku-alphabet", on(Value::Null)),
+        ("no-nfd", on(Value::Null)),
+        ("no-zero-width-spaces", on(Value::Null)),
+        ("no-exclamation-question-mark", on(Value::Null)),
+        ("ja-no-mixed-period", on(Value::Null)),
     ]
     .into_iter()
     .map(|(id, setting)| (RuleId::from(id), setting))
