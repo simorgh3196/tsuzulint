@@ -5,9 +5,9 @@
 //! text/JSON output via the position mapper. All file access goes through the `Host` boundary
 //! (`NativeHost`), never raw `std::fs`.
 //!
-//! Resolving a config to the actual rule set is the one piece still stubbed (see
-//! [`rules::resolve_rules`]): the built-in rule registry lives in `tzlint_rules`, which is a
-//! skeleton until the rules milestone, so today the engine runs with an empty rule set.
+//! The rule set is resolved from config by [`rules::resolve_rules`]: every built-in rule
+//! (`tzlint_rules::builtin_rules`) runs by default, and a `config.rules` entry can disable one.
+//! Routing per-rule `options`/severity overrides into rule construction is a follow-up.
 
 use std::process::ExitCode;
 

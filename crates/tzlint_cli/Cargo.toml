@@ -22,6 +22,8 @@ path = "src/main.rs"
 tzlint_core = { path = "../tzlint_core", version = "0.0.0" }
 # The diagnostic model and `Rule` trait the engine works in terms of.
 tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
+# The built-in rule registry (`builtin_rules`/`RULE_IDS`) the config selects from.
+tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
 # `to_archive`/`access` (the parse → archive → lint bridge for the no-cache path) and `Span`.
 tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
 # Argument parsing (derive API).

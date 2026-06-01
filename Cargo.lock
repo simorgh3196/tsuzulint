@@ -1791,6 +1791,7 @@ dependencies = [
  "tzlint_ast",
  "tzlint_core",
  "tzlint_pdk",
+ "tzlint_rules",
 ]
 
 [[package]]

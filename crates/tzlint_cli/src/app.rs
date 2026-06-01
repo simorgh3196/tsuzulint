@@ -23,7 +23,7 @@ use tzlint_pdk::{Diagnostic, Rule};
 
 use crate::cli::{Cli, Command, OutputFormat};
 use crate::output::{self, FileReport};
-use crate::rules::resolve_rules;
+use crate::rules::{resolve_rules, unknown_rule_ids};
 
 /// The process exit status, mapped to a code by [`ExitStatus::code`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +94,7 @@ fn lint(
     let config = load_config(cli, host, cwd, stderr)?;
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
+    note_unknown_rules(&config, stderr);
     let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
 
     let mut cache = (!cli.no_cache).then(DocumentCache::new);
@@ -176,6 +177,7 @@ fn fix(
     let config = load_config(cli, host, cwd, stderr)?;
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
+    note_unknown_rules(&config, stderr);
     let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
 
     let mut changed = 0usize;
@@ -294,14 +296,24 @@ fn load_config(
     }
 }
 
-/// Print a one-line note to stderr when no rules are wired, so an empty result is not mistaken
-/// for "your text is clean". Removed once the rule registry lands.
+/// Print a one-line note to stderr when the resolved rule set is empty (every built-in rule was
+/// turned off by config), so an empty result is not mistaken for "your text is clean".
 fn note_if_no_rules(rules: &[Box<dyn Rule>], stderr: &mut dyn Write) {
     if rules.is_empty() {
         let _ = writeln!(
             stderr,
-            "note: no rules are enabled yet (the built-in rule registry lands in a later step); \
-             the pipeline runs but reports nothing"
+            "note: every built-in rule is disabled by config; the pipeline runs but reports nothing"
+        );
+    }
+}
+
+/// Print a stderr note for each `config.rules` id that is not a built-in rule (likely a typo),
+/// so a misspelled setting is not silently ignored. Shared by `lint` and `fix`.
+fn note_unknown_rules(config: &Config, stderr: &mut dyn Write) {
+    for id in unknown_rule_ids(config) {
+        let _ = writeln!(
+            stderr,
+            "note: config references unknown rule '{id}' (ignored)"
         );
     }
 }
@@ -470,16 +482,20 @@ mod tests {
     }
 
     #[test]
-    fn no_cache_path_matches_cached_path() {
-        // Both code paths (cached vs. direct bridge) must produce identical output. Today the
-        // rule set is empty, so this compares the clean case; the diagnostic-bearing equivalence
-        // is added alongside the rule-registry wiring (when a rule can emit a diagnostic).
-        let host = MockHost::with("a.md", "段落です。\n別の段落。\n");
+    fn no_cache_path_matches_cached_path_with_diagnostics() {
+        // Both code paths (cached vs. direct bridge) must produce identical output, including when
+        // rules emit diagnostics — half-width kana triggers `no-hankaku-kana` under the default
+        // (all-on) rule set.
+        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
         let (_s1, cached_out, _e1) = run_capture(&lint_cli("a.md", OutputFormat::Json), &host);
         let mut direct = lint_cli("a.md", OutputFormat::Json);
         direct.no_cache = true;
         let (_s2, direct_out, _e2) = run_capture(&direct, &host);
         assert_eq!(cached_out, direct_out);
+        assert!(
+            cached_out.contains("no-hankaku-kana"),
+            "expected a diagnostic in the output: {cached_out}"
+        );
     }
 
     #[test]
@@ -506,9 +522,9 @@ mod tests {
     }
 
     #[test]
-    fn fix_is_a_noop_without_rules() {
-        // Without rules `fix` makes no change, so the write branch (`fixed != source`) is not
-        // reachable here; it is exercised alongside the rule-registry wiring.
+    fn fix_makes_no_change_when_there_are_no_fixes() {
+        // The built-in rules run, but none produces an autofix for this input, so the file is
+        // left untouched and the write branch (`fixed != source`) is not taken.
         let host = MockHost::with("a.md", "本文。\n");
         let (status, out, _err) = run_capture(
             &cli(Command::Fix {
@@ -518,15 +534,93 @@ mod tests {
             &host,
         );
         assert_eq!(status, ExitStatus::Clean);
-        // Unchanged: no rules → no fixes.
         assert_eq!(host.read("a.md").as_deref(), Some("本文。\n"));
         assert!(out.contains("0 file(s) changed"), "{out}");
     }
 
     #[test]
+    fn lint_reports_a_violation_and_exits_findings() {
+        // Half-width kana triggers `no-hankaku-kana` under the default (all-on) rule set, so the
+        // command path reaches `Findings` and renders a real diagnostic.
+        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Findings);
+        assert!(out.contains("no-hankaku-kana"), "{out}");
+        assert!(out.contains("1 file(s) checked,"), "{out}");
+    }
+
+    #[test]
+    fn config_off_disables_a_rule_end_to_end() {
+        // Turning the rule off in config makes the same input clean — exercises the full
+        // config -> resolve_rules -> engine path.
+        let host = MockHost::new();
+        host.put("a.md", "ﾊﾛｰ\n");
+        host.put("off.json", "{ \"rules\": { \"no-hankaku-kana\": false } }");
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.config = Some(PathBuf::from("off.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(out.contains("0 issue(s) found"), "{out}");
+    }
+
+    #[test]
+    fn unknown_config_rule_id_is_noted() {
+        // A misspelled rule id in config is reported (not silently ignored).
+        let host = MockHost::new();
+        host.put("a.md", "x\n");
+        host.put("c.json", "{ \"rules\": { \"no-such-rule\": false } }");
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.config = Some(PathBuf::from("c.json"));
+        let (_status, _out, err) = run_capture(&c, &host);
+        assert!(err.contains("unknown rule 'no-such-rule'"), "{err}");
+    }
+
+    #[test]
+    fn unknown_config_rule_id_is_noted_in_fix() {
+        // The same unknown-rule-id warning applies to `fix`, not just `lint`.
+        let host = MockHost::new();
+        host.put("a.md", "本文。\n");
+        host.put("c.json", "{ \"rules\": { \"no-such-rule\": false } }");
+        let mut c = cli(Command::Fix {
+            paths: vec![PathBuf::from("a.md")],
+            dry_run: false,
+        });
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, _out, err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(err.contains("unknown rule 'no-such-rule'"), "{err}");
+    }
+
+    #[test]
+    fn note_when_every_rule_is_disabled() {
+        // Disabling all built-in rules yields an empty rule set, so even an input that would
+        // otherwise trigger a rule (half-width kana) is clean — and the "all disabled" note fires.
+        use tzlint_rules::RULE_IDS;
+        let host = MockHost::new();
+        host.put("a.md", "ﾊﾛｰ\n");
+        let entries: Vec<String> = RULE_IDS
+            .iter()
+            .map(|id| format!("\"{id}\": false"))
+            .collect();
+        host.put(
+            "off.json",
+            &format!("{{ \"rules\": {{ {} }} }}", entries.join(", ")),
+        );
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.config = Some(PathBuf::from("off.json"));
+        let (status, out, err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(
+            err.contains("every built-in rule is disabled by config"),
+            "{err}"
+        );
+        assert!(out.contains("0 issue(s) found"), "{out}");
+    }
+
+    #[test]
     fn lint_exit_status_precedence() {
-        // Error > Findings > Clean. (Exercises the `Findings` arm without a rule, which the
-        // command path cannot reach until the rule registry is wired.)
+        // Error > Findings > Clean. (The pure-function form covers every combination; the
+        // command path reaching `Findings` is covered by `lint_reports_a_violation_*`.)
         assert_eq!(lint_exit_status(false, false), ExitStatus::Clean);
         assert_eq!(lint_exit_status(false, true), ExitStatus::Findings);
         assert_eq!(lint_exit_status(true, false), ExitStatus::Error);
