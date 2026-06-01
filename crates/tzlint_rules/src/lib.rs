@@ -2,8 +2,9 @@
 //!
 //! Each rule implements the [`Rule`](tzlint_pdk::Rule) trait (from `tzlint_pdk`) and declares
 //! the [`NodeKind`](tzlint_ast::NodeKind)s it visits, which the single-traversal scheduler in
-//! `tzlint_core` dispatches. Per-node rules act in `check`; the one document-level rule
-//! ([`NoMixedZenkakuHankakuAlphabet`]) registers `ROOT` and walks the subtree from `check`.
+//! `tzlint_core` dispatches. Per-node rules act in `check`; document-level rules (e.g.
+//! [`NoMixedZenkakuHankakuAlphabet`] and [`JaNoMixedPeriod`]) register `ROOT` and walk the
+//! subtree from `check`.
 //!
 //! [`builtin_rules`] returns every shipped rule (the registry the engine is wired through);
 //! [`RULE_IDS`] is the matching id list. Rule options are parsed leniently per rule
