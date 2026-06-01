@@ -1,9 +1,10 @@
 //! Command-line argument definitions (clap derive).
 //!
 //! The surface mirrors the established `tzlint` UX: a few global options (`--config`,
-//! `--verbose`, `--no-cache`) and the `lint` / `fix` / `init` subcommands. Plugin, rule-
-//! management, and LSP subcommands, plus the SARIF output format, are intentionally out of
-//! scope here and arrive with later milestones.
+//! `--verbose`, `--no-cache`) and the `lint` / `fix` / `init` subcommands. `lint` and `fix` take
+//! files, directories (recursed for Markdown), or glob patterns, and `-` for stdin (see the
+//! per-argument help). Plugin, rule-management, and LSP subcommands, plus the SARIF output
+//! format, are intentionally out of scope here and arrive with later milestones.
 
 use std::path::PathBuf;
 
@@ -36,7 +37,11 @@ pub struct Cli {
 pub enum Command {
     /// Lint files and report diagnostics.
     Lint {
-        /// Files to lint.
+        /// Files, directories, or globs to lint; `-` reads stdin (reported as `<stdin>`).
+        ///
+        /// A directory is searched recursively for `.md`/`.markdown` files (hidden entries and
+        /// symlinks are skipped). Globs (`*`, `?`, `[...]`, `**`) match exactly — quote them so the
+        /// shell does not expand them first.
         #[arg(required = true, value_name = "PATH")]
         paths: Vec<PathBuf>,
 
@@ -47,7 +52,11 @@ pub enum Command {
 
     /// Apply autofixes to files (in place, unless `--dry-run`).
     Fix {
-        /// Files to fix.
+        /// Files, directories, or globs to fix; `-` fixes stdin and writes the result to stdout.
+        ///
+        /// A directory is searched recursively for `.md`/`.markdown` files (hidden entries and
+        /// symlinks are skipped); globs match exactly (quote them). With `--dry-run`, changed files
+        /// are reported instead of written.
         #[arg(required = true, value_name = "PATH")]
         paths: Vec<PathBuf>,
 

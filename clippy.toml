@@ -11,4 +11,5 @@ disallowed-methods = [
     { path = "std::fs::read", reason = "use tzlint_core::io::Host::read_to_string" },
     { path = "std::fs::read_to_string", reason = "use tzlint_core::io::Host::read_to_string" },
     { path = "std::fs::write", reason = "use tzlint_core::io::Host::write_atomic" },
+    { path = "std::fs::read_dir", reason = "use tzlint_core::io::Host::list_dir" },
 ]

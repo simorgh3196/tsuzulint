@@ -10,8 +10,13 @@
 //! failed result write becomes `Error`). Writes to **stderr** (errors, notes) are best-effort
 //! `let _ = writeln!(…)`: a failed stderr write must not abort the run or change the exit code,
 //! which already signals the outcome.
+//!
+//! Inputs are expanded by [`expand`] (globs / directories / the `-` stdin sentinel). Stdin is
+//! linted/fixed in memory under the label `<stdin>` and is never cached. `fix -` writes the fixed
+//! document to **stdout** (a pass-through filter), so its progress/summary move to stderr to keep
+//! stdout a pure artifact; file fixes keep their progress on stdout as before.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use tzlint_ast::{access, to_archive};
@@ -22,8 +27,24 @@ use tzlint_core::{
 use tzlint_pdk::{Diagnostic, Rule};
 
 use crate::cli::{Cli, Command, OutputFormat};
+use crate::expand;
 use crate::output::{self, FileReport};
 use crate::rules::{resolve_rules, unknown_rule_ids};
+
+/// The path label used for diagnostics linted from standard input.
+const STDIN_LABEL: &str = "<stdin>";
+
+/// The three standard streams, bundled so the orchestration threads I/O as one value (and stays
+/// under the argument-count lint). `stdin` feeds the `-` source; `stdout` carries results, so its
+/// write errors propagate; `stderr` carries notes/errors and is best-effort.
+pub struct Streams<'a> {
+    /// Standard input — the source for the `-` argument.
+    pub stdin: &'a mut dyn Read,
+    /// Standard output — user-facing results (lint output, the fixed stdin document).
+    pub stdout: &'a mut dyn Write,
+    /// Standard error — notes, warnings, and errors.
+    pub stderr: &'a mut dyn Write,
+}
 
 /// The process exit status, mapped to a code by [`ExitStatus::code`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,24 +78,18 @@ const STARTER_CONFIG: &str = "{\n  \"language\": \"ja\",\n  \"rules\": {}\n}\n";
 ///
 /// A subcommand's unexpected error is rendered as `error: …` on stderr and becomes
 /// [`ExitStatus::Error`]; per-file problems are reported inline and do not abort the run.
-pub fn run(
-    cli: &Cli,
-    host: &dyn Host,
-    cwd: &Path,
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
-) -> ExitStatus {
+pub fn run(cli: &Cli, host: &dyn Host, cwd: &Path, streams: &mut Streams) -> ExitStatus {
     let result = match &cli.command {
-        Command::Lint { paths, format } => lint(cli, host, cwd, paths, *format, stdout, stderr),
-        Command::Fix { paths, dry_run } => fix(cli, host, cwd, paths, *dry_run, stdout, stderr),
-        Command::Init { force } => init(host, cwd, *force, stdout, stderr),
+        Command::Lint { paths, format } => lint(cli, host, cwd, paths, *format, streams),
+        Command::Fix { paths, dry_run } => fix(cli, host, cwd, paths, *dry_run, streams),
+        Command::Init { force } => init(host, cwd, *force, streams.stdout, streams.stderr),
     };
     match result {
         Ok(status) => status,
         Err(message) => {
             // stderr is best-effort (see the module's output policy); the `Error` status below
             // is the authoritative signal regardless of whether this message lands.
-            let _ = writeln!(stderr, "error: {message}");
+            let _ = writeln!(streams.stderr, "error: {message}");
             ExitStatus::Error
         }
     }
@@ -88,22 +103,49 @@ fn lint(
     cwd: &Path,
     paths: &[PathBuf],
     format: OutputFormat,
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
+    streams: &mut Streams,
 ) -> Result<ExitStatus, String> {
+    // Reborrow the three streams as locals (disjoint fields, so all three coexist) — the body then
+    // reads exactly as it did when they were separate parameters.
+    let stdin: &mut dyn Read = &mut *streams.stdin;
+    let stdout: &mut dyn Write = &mut *streams.stdout;
+    let stderr: &mut dyn Write = &mut *streams.stderr;
     let config = load_config(cli, host, cwd, stderr)?;
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
     note_unknown_rules(&config, stderr);
     let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
 
+    // Resolve the PATH arguments into concrete files (globs / directories expanded, sorted and
+    // de-duplicated) plus an optional stdin source; surface any discovery notes on stderr.
+    let inputs = expand::expand(host, cwd, paths);
+    note_expansion(&inputs.notes, stderr);
+
     // Persistent cache: load the on-disk file (best-effort) so a repeat run on unchanged content
-    // skips parse+lint, and write it back afterwards. `--no-cache` skips both ends.
+    // skips parse+lint, and write it back afterwards. `--no-cache` skips both ends. (stdin is
+    // never cached — it has no stable path key — so it always takes the direct path below.)
     let cache_path = cwd.join(".tzlintcache");
     let mut cache = (!cli.no_cache).then(|| DocumentCache::load(host, &cache_path));
-    let mut reports = Vec::with_capacity(paths.len());
+    let mut reports = Vec::with_capacity(inputs.files.len() + usize::from(inputs.stdin));
     let mut had_error = false;
-    for path in paths {
+    // stdin is reported first so the work order is fixed and the summary count is stable.
+    if inputs.stdin {
+        match read_stdin(stdin).and_then(|source| {
+            let diagnostics = lint_direct(&source, &rule_refs)?;
+            Ok(FileReport {
+                path: PathBuf::from(STDIN_LABEL),
+                source,
+                diagnostics,
+            })
+        }) {
+            Ok(report) => reports.push(report),
+            Err(message) => {
+                let _ = writeln!(stderr, "error: {STDIN_LABEL}: {message}");
+                had_error = true;
+            }
+        }
+    }
+    for path in &inputs.files {
         match read_and_lint(host, cache.as_mut(), path, &config, &rule_refs) {
             Ok(report) => reports.push(report),
             Err(message) => {
@@ -185,18 +227,63 @@ fn fix(
     cwd: &Path,
     paths: &[PathBuf],
     dry_run: bool,
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
+    streams: &mut Streams,
 ) -> Result<ExitStatus, String> {
+    // Reborrow the three streams as locals (disjoint fields, so all three coexist).
+    let stdin: &mut dyn Read = &mut *streams.stdin;
+    let stdout: &mut dyn Write = &mut *streams.stdout;
+    let stderr: &mut dyn Write = &mut *streams.stderr;
     let config = load_config(cli, host, cwd, stderr)?;
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
     note_unknown_rules(&config, stderr);
     let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
 
+    let inputs = expand::expand(host, cwd, paths);
+    note_expansion(&inputs.notes, stderr);
+
+    // When stdin is a target, stdout carries the fixed stdin document (a pass-through filter), so
+    // ALL progress/summary moves to stderr to keep stdout pure data. Without stdin, progress and
+    // the summary stay on stdout exactly as before.
+    let progress_to_stderr = inputs.stdin;
     let mut changed = 0usize;
     let mut had_error = false;
-    for path in paths {
+
+    // stdin first: fix the buffer and write the result to stdout (even when unchanged, so
+    // `cat x.md | tzlint fix -` is a safe pass-through). `--dry-run` emits no document.
+    if inputs.stdin {
+        match read_stdin(stdin) {
+            Ok(source) => {
+                let fixed = tzlint_core::fix(&source, &rule_refs);
+                let did_change = fixed != source;
+                if dry_run {
+                    if did_change {
+                        let _ = writeln!(stderr, "would fix {STDIN_LABEL}");
+                    }
+                } else {
+                    write!(stdout, "{fixed}").map_err(|e| e.to_string())?;
+                    let _ = writeln!(
+                        stderr,
+                        "{} {STDIN_LABEL}",
+                        if did_change {
+                            "fixed"
+                        } else {
+                            "no changes for"
+                        }
+                    );
+                }
+                if did_change {
+                    changed += 1;
+                }
+            }
+            Err(message) => {
+                let _ = writeln!(stderr, "error: {STDIN_LABEL}: {message}");
+                had_error = true;
+            }
+        }
+    }
+
+    for path in &inputs.files {
         let source = match host.read_to_string(path, MAX_FILE) {
             Ok(source) => source,
             Err(e) => {
@@ -212,13 +299,23 @@ fn fix(
             continue;
         }
         if dry_run {
-            writeln!(stdout, "would fix {}", path.display()).map_err(|e| e.to_string())?;
+            emit_progress(
+                progress_to_stderr,
+                stdout,
+                stderr,
+                &format!("would fix {}", path.display()),
+            )?;
         } else if let Err(e) = host.write_atomic(path, fixed.as_bytes()) {
             let _ = writeln!(stderr, "error: {}: {e}", path.display());
             had_error = true;
             continue;
         } else {
-            writeln!(stdout, "fixed {}", path.display()).map_err(|e| e.to_string())?;
+            emit_progress(
+                progress_to_stderr,
+                stdout,
+                stderr,
+                &format!("fixed {}", path.display()),
+            )?;
         }
         changed += 1;
     }
@@ -228,12 +325,56 @@ fn fix(
     } else {
         "changed"
     };
-    writeln!(stdout, "{changed} file(s) {verb}").map_err(|e| e.to_string())?;
+    emit_progress(
+        progress_to_stderr,
+        stdout,
+        stderr,
+        &format!("{changed} file(s) {verb}"),
+    )?;
     Ok(if had_error {
         ExitStatus::Error
     } else {
         ExitStatus::Clean
     })
+}
+
+/// Write a progress/summary line to stdout, or to stderr (best-effort) when stdout is reserved
+/// for a fixed stdin document. stdout errors propagate (a failed result write becomes `Error`).
+fn emit_progress(
+    to_stderr: bool,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    message: &str,
+) -> Result<(), String> {
+    if to_stderr {
+        let _ = writeln!(stderr, "{message}");
+        Ok(())
+    } else {
+        writeln!(stdout, "{message}").map_err(|e| e.to_string())
+    }
+}
+
+/// Read standard input into a UTF-8 string, capped at [`MAX_FILE`] bytes (mirroring
+/// [`Host::read_to_string`]) so a runaway pipe cannot exhaust memory.
+fn read_stdin(stdin: &mut dyn Read) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    // Read one past the cap so "exactly at the limit" is distinguishable from "over it".
+    stdin
+        .take((MAX_FILE as u64).saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > MAX_FILE {
+        return Err(format!("input exceeds the {MAX_FILE}-byte limit"));
+    }
+    String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8: {e}"))
+}
+
+/// Surface each input-expansion note (unreadable subdirectory, depth / file caps, an invalid
+/// glob) as a best-effort `warning:` on stderr.
+fn note_expansion(notes: &[String], stderr: &mut dyn Write) {
+    for note in notes {
+        let _ = writeln!(stderr, "warning: {note}");
+    }
 }
 
 /// `init`: write [`STARTER_CONFIG`] to `.tzlintrc.json` in the working directory, refusing to
@@ -338,20 +479,23 @@ mod tests {
     use std::cell::RefCell;
     use std::collections::HashMap;
 
-    use tzlint_core::IoError;
+    use tzlint_core::{DirEntry, EntryKind, IoError};
 
     use crate::cli::Command;
 
     /// An in-memory [`Host`]: only registered paths exist; writes are recorded so tests can
-    /// assert on them.
+    /// assert on them. [`MockHost::put`] also synthesizes the directory listing for every ancestor
+    /// of the file, so `list_dir` (and thus glob / directory expansion) works hermetically.
     struct MockHost {
         files: RefCell<HashMap<PathBuf, String>>,
+        dirs: RefCell<HashMap<PathBuf, Vec<DirEntry>>>,
     }
 
     impl MockHost {
         fn new() -> Self {
             MockHost {
                 files: RefCell::new(HashMap::new()),
+                dirs: RefCell::new(HashMap::new()),
             }
         }
         fn with(path: &str, contents: &str) -> Self {
@@ -360,9 +504,37 @@ mod tests {
             host
         }
         fn put(&self, path: &str, contents: &str) {
+            let leaf = PathBuf::from(path);
             self.files
                 .borrow_mut()
-                .insert(PathBuf::from(path), contents.to_string());
+                .insert(leaf.clone(), contents.to_string());
+            self.register_dir_entries(&leaf);
+        }
+        /// Register each (parent -> child) hop of `leaf` in the `dirs` index so the file is
+        /// discoverable via `list_dir`. Shared by `put` and `write_atomic` so a file written
+        /// through either path is visible to a later walk — matching `NativeHost`, where any
+        /// created file shows up in `read_dir`.
+        fn register_dir_entries(&self, leaf: &Path) {
+            let mut dirs = self.dirs.borrow_mut();
+            let mut child = leaf.to_path_buf();
+            while let Some(parent) = child.parent() {
+                if parent.as_os_str().is_empty() {
+                    break;
+                }
+                if let Some(name) = child.file_name() {
+                    let name = name.to_string_lossy().into_owned();
+                    let kind = if child == leaf {
+                        EntryKind::File
+                    } else {
+                        EntryKind::Dir
+                    };
+                    let children = dirs.entry(parent.to_path_buf()).or_default();
+                    if !children.iter().any(|e| e.name == name) {
+                        children.push(DirEntry { name, kind });
+                    }
+                }
+                child = parent.to_path_buf();
+            }
         }
         fn read(&self, path: &str) -> Option<String> {
             self.files.borrow().get(&PathBuf::from(path)).cloned()
@@ -381,10 +553,20 @@ mod tests {
             let text =
                 String::from_utf8(contents.to_vec()).map_err(|e| IoError::Other(e.to_string()))?;
             self.files.borrow_mut().insert(path.to_path_buf(), text);
+            // Keep the `dirs` index consistent with a write, so a written file is discoverable by
+            // a later `list_dir` — as it would be under `NativeHost`.
+            self.register_dir_entries(path);
             Ok(())
         }
         fn exists(&self, path: &Path) -> bool {
             self.files.borrow().contains_key(path)
+        }
+        fn list_dir(&self, dir: &Path) -> Result<Vec<DirEntry>, IoError> {
+            self.dirs
+                .borrow()
+                .get(dir)
+                .cloned()
+                .ok_or(IoError::NotFound)
         }
     }
 
@@ -409,9 +591,22 @@ mod tests {
     const TEST_CWD: &str = "/work";
 
     fn run_capture(cli: &Cli, host: &dyn Host) -> (ExitStatus, String, String) {
+        run_capture_stdin(cli, host, b"")
+    }
+
+    /// Like [`run_capture`] but feeds `stdin` to the command (for `-` tests).
+    fn run_capture_stdin(cli: &Cli, host: &dyn Host, stdin: &[u8]) -> (ExitStatus, String, String) {
         let mut out = Vec::new();
         let mut err = Vec::new();
-        let status = run(cli, host, Path::new(TEST_CWD), &mut out, &mut err);
+        let mut input = std::io::Cursor::new(stdin.to_vec());
+        let status = {
+            let mut streams = Streams {
+                stdin: &mut input,
+                stdout: &mut out,
+                stderr: &mut err,
+            };
+            run(cli, host, Path::new(TEST_CWD), &mut streams)
+        };
         (
             status,
             String::from_utf8(out).unwrap(),
@@ -789,5 +984,179 @@ mod tests {
         let (status, _out, err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
         assert_eq!(status, ExitStatus::Findings); // cache write failure did NOT become an error
         assert!(err.contains("could not write"), "{err}");
+    }
+
+    // --- input expansion: globs, directories, stdin (M1g follow-up) ---
+
+    #[test]
+    fn lint_expands_a_glob_to_matching_files() {
+        // `*.md` anchors at the (injected) cwd and matches only top-level Markdown; the `.txt` is
+        // excluded, and two clean files are checked.
+        let host = MockHost::new();
+        host.put("/work/a.md", "本文。\n");
+        host.put("/work/b.md", "別の文。\n");
+        host.put("/work/note.txt", "ignored\n");
+        let (status, out, _err) = run_capture(&lint_cli("*.md", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(out.contains("2 file(s) checked"), "{out}");
+    }
+
+    #[test]
+    fn lint_directory_arg_lints_markdown_recursively() {
+        // A directory argument recurses for `.md`/`.markdown`; other extensions are skipped.
+        let host = MockHost::new();
+        host.put("docs/a.md", "本文。\n");
+        host.put("docs/sub/b.markdown", "別。\n");
+        host.put("docs/c.txt", "ignored\n");
+        let (status, out, _err) = run_capture(&lint_cli("docs", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(out.contains("2 file(s) checked"), "{out}");
+    }
+
+    #[test]
+    fn lint_invalid_glob_warns_and_matches_nothing() {
+        // A malformed glob is reported (not silently ignored) and contributes no files.
+        let host = MockHost::new();
+        let (status, out, err) = run_capture(&lint_cli("[bad", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(err.contains("invalid glob pattern"), "{err}");
+        assert!(out.contains("0 file(s) checked"), "{out}");
+    }
+
+    #[test]
+    fn lint_reads_stdin_under_the_stdin_label() {
+        // `-` reads stdin; the diagnostic is labeled `<stdin>` and counted like a file.
+        let host = MockHost::new();
+        let (status, out, _err) = run_capture_stdin(
+            &lint_cli("-", OutputFormat::Text),
+            &host,
+            "ﾊﾛｰ\n".as_bytes(),
+        );
+        assert_eq!(status, ExitStatus::Findings);
+        assert!(out.contains("<stdin>:"), "{out}");
+        assert!(out.contains("no-hankaku-kana"), "{out}");
+        assert!(out.contains("1 file(s) checked"), "{out}");
+    }
+
+    #[test]
+    fn lint_lints_stdin_and_a_file_together() {
+        // `-` may be combined with file paths; stdin is reported first, then the file.
+        let host = MockHost::with("a.md", "本文。\n");
+        let c = cli(Command::Lint {
+            paths: vec![PathBuf::from("-"), PathBuf::from("a.md")],
+            format: OutputFormat::Text,
+        });
+        let (status, out, _err) = run_capture_stdin(&c, &host, "ﾊﾛｰ\n".as_bytes());
+        assert_eq!(status, ExitStatus::Findings);
+        assert!(out.contains("<stdin>"), "{out}");
+        assert!(out.contains("2 file(s) checked"), "{out}");
+    }
+
+    #[test]
+    fn stdin_and_file_yield_identical_diagnostics() {
+        // Dispatch parity: the same content linted from stdin and from a file produces identical
+        // diagnostics (only the `path` label differs).
+        let content = "ﾊﾛｰ\n";
+        let stdin_host = MockHost::new();
+        let (_s1, stdin_out, _e1) = run_capture_stdin(
+            &lint_cli("-", OutputFormat::Json),
+            &stdin_host,
+            content.as_bytes(),
+        );
+        let file_host = MockHost::with("x.md", content);
+        let (_s2, file_out, _e2) = run_capture(&lint_cli("x.md", OutputFormat::Json), &file_host);
+
+        let stdin_json: serde_json::Value = serde_json::from_str(&stdin_out).unwrap();
+        let file_json: serde_json::Value = serde_json::from_str(&file_out).unwrap();
+        assert_eq!(stdin_json[0]["diagnostics"], file_json[0]["diagnostics"]);
+        assert_eq!(stdin_json[0]["path"], "<stdin>");
+        assert_eq!(file_json[0]["path"], "x.md");
+    }
+
+    #[test]
+    fn fix_stdin_passes_the_document_through_stdout() {
+        // No built-in rule autofixes, so the document is unchanged — but `fix -` still echoes it
+        // to stdout (a safe pass-through filter); the progress/summary moves to stderr so stdout
+        // stays pure data, and nothing is written to the host.
+        let host = MockHost::new();
+        let c = cli(Command::Fix {
+            paths: vec![PathBuf::from("-")],
+            dry_run: false,
+        });
+        let (status, out, err) = run_capture_stdin(&c, &host, "本文。\n".as_bytes());
+        assert_eq!(status, ExitStatus::Clean);
+        assert_eq!(
+            out, "本文。\n",
+            "stdout must be exactly the document, no summary"
+        );
+        assert!(err.contains("<stdin>"), "{err}");
+        assert!(host.read("-").is_none(), "stdin must never be written back");
+    }
+
+    #[test]
+    fn fix_dry_run_stdin_emits_no_document() {
+        // `--dry-run` produces no changed artifact, so stdout stays empty for a stdin target.
+        let host = MockHost::new();
+        let c = cli(Command::Fix {
+            paths: vec![PathBuf::from("-")],
+            dry_run: true,
+        });
+        let (status, out, _err) = run_capture_stdin(&c, &host, "本文。\n".as_bytes());
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(
+            out.is_empty(),
+            "dry-run stdin must not emit the document: {out:?}"
+        );
+    }
+
+    #[test]
+    fn emit_progress_routes_between_stdout_and_stderr() {
+        // The data/metadata split that keeps `fix -`'s stdout pure.
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        emit_progress(false, &mut out, &mut err, "to-stdout").unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "to-stdout\n");
+        assert!(err.is_empty());
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        emit_progress(true, &mut out, &mut err, "to-stderr").unwrap();
+        assert!(out.is_empty());
+        assert_eq!(String::from_utf8(err).unwrap(), "to-stderr\n");
+    }
+
+    #[test]
+    fn read_stdin_reads_and_validates_utf8() {
+        assert_eq!(
+            read_stdin(&mut std::io::Cursor::new(b"hi".to_vec())).unwrap(),
+            "hi"
+        );
+        let err = read_stdin(&mut std::io::Cursor::new(vec![0xff, 0xfe])).unwrap_err();
+        assert!(err.contains("invalid UTF-8"), "{err}");
+    }
+
+    #[test]
+    fn lint_stdin_read_error_exits_error() {
+        // Non-UTF-8 on stdin fails the read; `lint -` reports it under `<stdin>` and exits `Error`
+        // (rather than panicking or silently skipping the input).
+        let host = MockHost::new();
+        let (status, _out, err) =
+            run_capture_stdin(&lint_cli("-", OutputFormat::Text), &host, &[0xff, 0xfe]);
+        assert_eq!(status, ExitStatus::Error);
+        assert!(err.contains("error: <stdin>"), "{err}");
+        assert!(err.contains("invalid UTF-8"), "{err}");
+    }
+
+    #[test]
+    fn fix_stdin_read_error_exits_error() {
+        // The same failed-read handling for `fix -`: error on stderr, `Error` exit, no document on
+        // stdout.
+        let host = MockHost::new();
+        let c = cli(Command::Fix {
+            paths: vec![PathBuf::from("-")],
+            dry_run: false,
+        });
+        let (status, out, err) = run_capture_stdin(&c, &host, &[0xff, 0xfe]);
+        assert_eq!(status, ExitStatus::Error);
+        assert!(err.contains("error: <stdin>"), "{err}");
+        assert!(out.is_empty(), "no document should be emitted: {out:?}");
     }
 }

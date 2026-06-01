@@ -18,6 +18,7 @@ use crate::cli::Cli;
 
 mod app;
 mod cli;
+mod expand;
 mod output;
 mod rules;
 
@@ -27,8 +28,14 @@ fn main() -> ExitCode {
     // Resolve the working directory once, here at the edge, and pass it in — the orchestration
     // stays independent of process-global state (and so hermetically testable).
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let mut stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
     let mut stderr = std::io::stderr().lock();
-    let status = app::run(&cli, &host, &cwd, &mut stdout, &mut stderr);
+    let mut streams = app::Streams {
+        stdin: &mut stdin,
+        stdout: &mut stdout,
+        stderr: &mut stderr,
+    };
+    let status = app::run(&cli, &host, &cwd, &mut streams);
     ExitCode::from(status.code())
 }

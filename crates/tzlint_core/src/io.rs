@@ -69,6 +69,29 @@ mod error_tests {
     }
 }
 
+/// One immediate child returned by [`Host::list_dir`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirEntry {
+    /// The final path component only (e.g. `"a.md"`), never a full path.
+    pub name: String,
+    /// What the entry resolves to. A directory walker uses this to decide whether to recurse
+    /// and whether to skip symlinks.
+    pub kind: EntryKind,
+}
+
+/// The classification of a [`DirEntry`]. A symlink is reported as [`EntryKind::Symlink`]
+/// regardless of its target, so a walker can refuse to follow it (loop / DoS guard) without a
+/// second `stat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryKind {
+    /// A regular file.
+    File,
+    /// A directory.
+    Dir,
+    /// A symlink (to anything). Walkers never follow these.
+    Symlink,
+}
+
 /// The environment a TsuzuLint host provides: bounded reads and atomic writes.
 ///
 /// Embedders (native CLI/LSP, Node, browser) implement this so the core never touches the
@@ -83,13 +106,26 @@ pub trait Host {
     /// files cheaply without reading them — so checking presence still goes through the
     /// boundary rather than touching `std::fs` directly.
     fn exists(&self, path: &Path) -> bool;
+    /// List the immediate children of `dir` (a single level, **not** recursive). The CLI's
+    /// glob / directory expansion drives recursion itself on top of this, so depth, dedup,
+    /// and symlink policy stay out of the boundary.
+    ///
+    /// The default returns an `Err`, so a non-filesystem host (a browser/wasm embedder, the
+    /// LSP scaffold) need not implement it — directory expansion simply isn't available there.
+    /// [`NativeHost`] overrides it. A missing `dir` should map to [`IoError::NotFound`].
+    fn list_dir(&self, dir: &Path) -> Result<Vec<DirEntry>, IoError> {
+        let _ = dir;
+        Err(IoError::Other(
+            "directory listing is not supported by this host".to_string(),
+        ))
+    }
 }
 
 // The real-filesystem host. Not compiled for `wasm32`, where the embedder injects its own
 // `Host` (there is no ambient filesystem in the browser).
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use super::{Host, IoError, Path};
+    use super::{DirEntry, EntryKind, Host, IoError, Path};
     use std::fs::{File, OpenOptions};
     use std::io::{Read, Write};
     use std::path::PathBuf;
@@ -132,6 +168,30 @@ mod native {
             // `try_exists` follows symlinks and distinguishes "absent" from "couldn't tell";
             // a permission/other error is treated as "not present" (best-effort discovery).
             path.try_exists().unwrap_or(false)
+        }
+
+        fn list_dir(&self, dir: &Path) -> Result<Vec<DirEntry>, IoError> {
+            // The single allowed `read_dir` call site (the io boundary); clippy's
+            // `disallowed_methods` bans it everywhere else, mirroring `read`/`write`.
+            #[allow(clippy::disallowed_methods)]
+            let read = std::fs::read_dir(dir)?;
+            let mut entries = Vec::new();
+            for entry in read {
+                let entry = entry?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                // `file_type()` does NOT follow the link, so a symlink (even to a directory)
+                // is reported as `Symlink` and the walker will not descend into it.
+                let file_type = entry.file_type()?;
+                let kind = if file_type.is_symlink() {
+                    EntryKind::Symlink
+                } else if file_type.is_dir() {
+                    EntryKind::Dir
+                } else {
+                    EntryKind::File
+                };
+                entries.push(DirEntry { name, kind });
+            }
+            Ok(entries)
         }
     }
 
@@ -239,7 +299,7 @@ mod native {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use crate::io::{IoError, MAX_FILE};
+        use crate::io::{DirEntry, EntryKind, IoError, MAX_FILE};
         use std::sync::atomic::{AtomicU64, Ordering};
 
         /// A unique, freshly-created temp directory (cleaned up by the caller).
@@ -308,10 +368,12 @@ mod native {
             let target = dir.join("a-directory");
             std::fs::create_dir_all(&target).unwrap();
             assert!(NativeHost.write_atomic(&target, b"data").is_err());
-            let leaked = std::fs::read_dir(&dir)
+            // Dogfood `list_dir` (rather than raw `read_dir`, now disallowed) to scan for a leak.
+            let leaked = NativeHost
+                .list_dir(&dir)
                 .unwrap()
-                .filter_map(Result::ok)
-                .any(|e| e.file_name().to_string_lossy().contains("tzlint-tmp"));
+                .iter()
+                .any(|e| e.name.contains("tzlint-tmp"));
             assert!(!leaked, "temp file leaked on the error path");
             std::fs::remove_dir_all(&dir).ok();
         }
@@ -400,6 +462,49 @@ mod native {
             host.write_atomic(&path, b"content").unwrap();
             assert_eq!(host.read_to_string(&path, usize::MAX).unwrap(), "content");
             std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// Index a listing by name so assertions don't depend on `read_dir`'s arbitrary order.
+        fn by_name(entries: Vec<DirEntry>) -> std::collections::BTreeMap<String, EntryKind> {
+            entries.into_iter().map(|e| (e.name, e.kind)).collect()
+        }
+
+        #[test]
+        fn list_dir_classifies_files_dirs_and_symlinks() {
+            // A regular file is `File`, a subdirectory is `Dir`, and (on Unix) a symlink is
+            // `Symlink` — classified WITHOUT following the link, so the walker can refuse it.
+            let dir = temp_dir();
+            let host = NativeHost;
+            host.write_atomic(&dir.join("a.md"), b"x").unwrap();
+            std::fs::create_dir(dir.join("sub")).unwrap();
+
+            let entries = by_name(host.list_dir(&dir).unwrap());
+            assert_eq!(entries.get("a.md"), Some(&EntryKind::File));
+            assert_eq!(entries.get("sub"), Some(&EntryKind::Dir));
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::symlink;
+                symlink(dir.join("a.md"), dir.join("link")).unwrap();
+                let entries = by_name(host.list_dir(&dir).unwrap());
+                assert_eq!(
+                    entries.get("link"),
+                    Some(&EntryKind::Symlink),
+                    "a symlink must be classified as Symlink, not its target kind"
+                );
+            }
+
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn list_dir_missing_is_not_found() {
+            // Listing a path that does not exist maps to `NotFound` (via `From<io::Error>`).
+            let host = NativeHost;
+            assert!(matches!(
+                host.list_dir(Path::new("/no/such/tzlint/dir/zzz")),
+                Err(IoError::NotFound)
+            ));
         }
     }
 }
