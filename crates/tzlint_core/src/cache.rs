@@ -334,6 +334,15 @@ impl DocumentCache {
     /// Persist the cache to the JSON file at `path` through `host` (atomic write). The file is a
     /// `{ "version", "entries": { "<hex-key>": [<diagnostic>…] } }` document.
     pub fn save(&self, host: &dyn Host, path: &Path) -> Result<(), CacheError> {
+        self.save_within(host, path, MAX_CACHE_FILE)
+    }
+
+    /// Persist the cache, rejecting a serialized document larger than `limit` bytes *before*
+    /// writing. The cap mirrors [`load`](DocumentCache::load)'s read limit, so `save` never
+    /// reports success for a file the next `load` would silently discard as oversized; checking
+    /// the in-memory bytes before the write keeps it TOCTOU-free. (`MAX_CACHE_FILE` in practice;
+    /// the parameter lets tests drive the bound without a 64 MiB fixture.)
+    fn save_within(&self, host: &dyn Host, path: &Path, limit: usize) -> Result<(), CacheError> {
         let mut entries = serde_json::Map::with_capacity(self.entries.len());
         for (key, diagnostics) in &self.entries {
             let array: Vec<Value> = diagnostics.iter().map(diagnostic_to_value).collect();
@@ -344,7 +353,11 @@ impl DocumentCache {
             "entries": Value::Object(entries),
         });
         // `Value`'s `Display` is infallible, so no serialization error to handle here.
-        host.write_atomic(path, document.to_string().as_bytes())
+        let text = document.to_string();
+        if text.len() > limit {
+            return Err(CacheError::Io(IoError::TooLarge { limit }));
+        }
+        host.write_atomic(path, text.as_bytes())
             .map_err(CacheError::Io)
     }
 
@@ -492,8 +505,11 @@ fn diagnostic_from_value(value: &Value) -> Option<Diagnostic> {
     let message = value.get("message")?.as_str()?;
     let span = span_from_value(value.get("span")?)?;
     let mut diagnostic = Diagnostic::new(rule_id, severity, span, message);
-    if let Some(fixes) = value.get("fixes").and_then(Value::as_array) {
-        for fix in fixes {
+    // A present-but-non-array `fixes` is corrupt: fail (so the caller drops the whole
+    // diagnostic) rather than silently accept it without fixes, which would diverge from a
+    // fresh lint. An absent `fixes` key is fine — the diagnostic simply has none.
+    if let Some(fixes) = value.get("fixes") {
+        for fix in fixes.as_array()? {
             let span = span_from_value(fix.get("span")?)?;
             let replacement = fix.get("replacement")?.as_str()?;
             diagnostic.fixes.push(Fix::replace(span, replacement));
@@ -944,6 +960,13 @@ mod tests {
             ))
             .is_empty()
         );
+        // A present-but-non-array `fixes` → diagnostic dropped (not accepted without its fixes).
+        assert!(
+            load(&format!(
+                r#"{{"version":1,"entries":{{"{hex}":[{{"rule_id":"r","severity":"error","message":"m","span":{{"start":0,"end":1}},"fixes":"notarray"}}]}}}}"#
+            ))
+            .is_empty()
+        );
     }
 
     #[test]
@@ -963,5 +986,31 @@ mod tests {
         }
         let result = DocumentCache::new().save(&FailingHost, Path::new("/x/.tzlintcache"));
         assert!(matches!(result, Err(CacheError::Io(_))));
+    }
+
+    #[test]
+    fn cache_save_rejects_oversize_document() {
+        // A document past the read cap must be rejected before writing, not saved as a file the
+        // next `load` would silently discard as oversized. `save_within` drives the bound with a
+        // tiny limit so no 64 MiB fixture is needed.
+        let mut cache = DocumentCache::new();
+        cache.insert(
+            key_of("doc\n", &cfg("{}")),
+            vec![Diagnostic::new(
+                "r",
+                Severity::Warning,
+                Span::new(0, 1),
+                "m",
+            )],
+        );
+        let host = MemHost::new();
+        let path = Path::new("/work/.tzlintcache");
+        let err = cache.save_within(&host, path, 1).unwrap_err();
+        assert!(matches!(
+            err,
+            CacheError::Io(IoError::TooLarge { limit: 1 })
+        ));
+        // Reject-before-write: nothing was persisted.
+        assert!(!host.exists(path));
     }
 }
