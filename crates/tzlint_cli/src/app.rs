@@ -408,7 +408,13 @@ mod tests {
         let host = MockHost::new();
         let (status, out, _err) = run_capture(&cli(Command::Init { force: false }), &host);
         assert_eq!(status, ExitStatus::Clean);
-        assert!(out.contains("created /work/.tzlintrc.json"), "{out}");
+        // Build the expected path the same way the code does, so the separator matches the
+        // platform (`\` on Windows) — the message echoes `path.display()`.
+        let expected = Path::new(TEST_CWD).join(".tzlintrc.json");
+        assert!(
+            out.contains(&format!("created {}", expected.display())),
+            "{out}"
+        );
         let written = host.read(TEST_CONFIG_PATH).unwrap();
         let config = Config::parse(&written, ConfigFormat::Json).unwrap();
         assert_eq!(config.language.as_deref(), Some("ja"));
@@ -550,7 +556,13 @@ mod tests {
         c.verbose = true;
         let (status, _out, err) = run_capture(&c, &host);
         assert_eq!(status, ExitStatus::Clean);
-        assert!(err.contains("using config /work/.tzlintrc.json"), "{err}");
+        // The discovered path echoes `path.display()`, so build the expectation with the same
+        // join to match the platform separator (`\` on Windows).
+        let expected = Path::new(TEST_CWD).join(".tzlintrc.json");
+        assert!(
+            err.contains(&format!("using config {}", expected.display())),
+            "{err}"
+        );
     }
 
     #[test]
