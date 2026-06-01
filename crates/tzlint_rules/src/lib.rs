@@ -6,12 +6,11 @@
 //! [`NoMixedZenkakuHankakuAlphabet`] and [`JaNoMixedPeriod`]) register `ROOT` and walk the
 //! subtree from `check`.
 //!
-//! [`builtin_rules`] returns every shipped rule (the registry the engine is wired through);
-//! [`RULE_IDS`] is the matching id list. Rule options are parsed leniently per rule
-//! (`from_options`), but the engine does not yet route config options into rule instances, so
-//! [`builtin_rules`] constructs each rule with its defaults — see the per-rule `from_options`
-//! and the `TODO` below. Morphology-dependent rules (e.g. `no-doubled-joshi`) are deferred to
-//! M2 and are not in this crate yet.
+//! [`RULE_IDS`] is the id list (single source of truth). [`build_rule`] constructs one rule by
+//! id, applying config `options` (via the rule's `from_options`, where it has one) and an
+//! optional severity override; [`builtin_rules`] is the default-constructed full set (every id,
+//! default options, no override). Morphology-dependent rules (e.g. `no-doubled-joshi`) are
+//! deferred to M2 and are not in this crate yet.
 
 pub mod rules;
 mod util;
@@ -19,7 +18,8 @@ mod util;
 #[cfg(test)]
 mod test_support;
 
-use tzlint_pdk::Rule;
+use serde_json::Value;
+use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
     ja_no_mixed_period, max_kanji_continuous_len, max_ten, no_exclamation_question_mark,
@@ -49,23 +49,72 @@ pub const RULE_IDS: &[&str] = &[
     no_todo::ID,
 ];
 
-/// Every built-in rule, default-constructed.
+/// Construct a single built-in rule by `id`, applying config `options` (through the rule's
+/// `from_options`, where it has one — rules without options ignore it) and an optional
+/// `severity` override. Returns `None` for an unknown id.
 ///
-/// TODO: once `tzlint_core` routes resolved config options into rule construction, build these
-/// via each rule's `from_options` instead of `new`.
+/// This is the one place a config rule entry becomes a rule instance; every id in [`RULE_IDS`]
+/// must be handled here (a test enforces it).
+pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Option<Box<dyn Rule>> {
+    let rule: Box<dyn Rule> = match id {
+        sentence_length::ID => Box::new(SentenceLength::from_options(options)),
+        max_ten::ID => Box::new(MaxTen::from_options(options)),
+        max_kanji_continuous_len::ID => Box::new(MaxKanjiContinuousLen::from_options(options)),
+        no_hankaku_kana::ID => Box::new(NoHankakuKana::new()),
+        no_mixed_zenkaku_hankaku_alphabet::ID => Box::new(NoMixedZenkakuHankakuAlphabet::new()),
+        no_nfd::ID => Box::new(NoNfd::new()),
+        no_zero_width_spaces::ID => Box::new(NoZeroWidthSpaces::new()),
+        no_exclamation_question_mark::ID => {
+            Box::new(NoExclamationQuestionMark::from_options(options))
+        }
+        ja_no_mixed_period::ID => Box::new(JaNoMixedPeriod::new()),
+        no_todo::ID => Box::new(NoTodo::from_options(options)),
+        _ => return None,
+    };
+    Some(match severity {
+        Some(severity) => Box::new(SeverityOverride::new(rule, severity)),
+        None => rule,
+    })
+}
+
+/// Every built-in rule, default-constructed (default options, no severity override) — in
+/// [`RULE_IDS`] order. The registry the engine is wired through when no config narrows it.
 pub fn builtin_rules() -> Vec<Box<dyn Rule>> {
-    vec![
-        Box::new(SentenceLength::new()),
-        Box::new(MaxTen::new()),
-        Box::new(MaxKanjiContinuousLen::new()),
-        Box::new(NoHankakuKana::new()),
-        Box::new(NoMixedZenkakuHankakuAlphabet::new()),
-        Box::new(NoNfd::new()),
-        Box::new(NoZeroWidthSpaces::new()),
-        Box::new(NoExclamationQuestionMark::new()),
-        Box::new(JaNoMixedPeriod::new()),
-        Box::new(NoTodo::new()),
-    ]
+    RULE_IDS
+        .iter()
+        .filter_map(|id| build_rule(id, &Value::Null, None))
+        .collect()
+}
+
+/// Wraps a rule so it reports at a config-overridden severity.
+///
+/// The engine reads a rule's effective severity from [`RuleMeta::default_severity`] (it builds
+/// the rule's [`Context`] from it) and never consults `&self` for severity, so a wrapper that
+/// returns a cloned meta with the severity replaced — and otherwise delegates `check`/`finish`
+/// to the inner rule — is sufficient. No engine or `Rule`-trait change is needed.
+struct SeverityOverride {
+    inner: Box<dyn Rule>,
+    meta: RuleMeta,
+}
+
+impl SeverityOverride {
+    fn new(inner: Box<dyn Rule>, severity: Severity) -> Self {
+        let mut meta = inner.meta().clone();
+        meta.default_severity = severity;
+        SeverityOverride { inner, meta }
+    }
+}
+
+impl Rule for SeverityOverride {
+    fn meta(&self) -> &RuleMeta {
+        &self.meta
+    }
+    fn check<'ast>(&self, node: NodeRef<'ast>, cx: &mut Context<'ast>) {
+        self.inner.check(node, cx);
+    }
+    fn finish<'ast>(&self, cx: &mut Context<'ast>) {
+        self.inner.finish(cx);
+    }
 }
 
 #[cfg(test)]
@@ -138,6 +187,46 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn build_rule_covers_every_id_and_rejects_unknown() {
+        for id in RULE_IDS {
+            let rule = build_rule(id, &Value::Null, None)
+                .unwrap_or_else(|| panic!("build_rule has no arm for {id}"));
+            assert_eq!(rule.meta().id.as_str(), *id);
+        }
+        assert!(build_rule("definitely-not-a-rule", &Value::Null, None).is_none());
+    }
+
+    #[test]
+    fn build_rule_applies_severity_override_preserving_kinds() {
+        let error = build_rule("max-ten", &Value::Null, Some(Severity::Error)).unwrap();
+        let hint = build_rule("max-ten", &Value::Null, Some(Severity::Hint)).unwrap();
+        assert_eq!(error.meta().default_severity, Severity::Error);
+        assert_eq!(hint.meta().default_severity, Severity::Hint);
+        // The wrapper preserves the inner rule's id and node-kind scheduling.
+        let plain = build_rule("max-ten", &Value::Null, None).unwrap();
+        assert_eq!(error.meta().id, plain.meta().id);
+        assert_eq!(error.meta().node_kinds, plain.meta().node_kinds);
+    }
+
+    #[test]
+    fn build_rule_routes_options_to_the_rule() {
+        use crate::test_support::diagnose;
+        // `max-ten` flags a sentence whose `、` count exceeds `max`; routing `max` proves options
+        // reach the constructed rule. One `、` is over `max:0` but under `max:9`.
+        let src = "これは、テストです。\n";
+        let strict = build_rule("max-ten", &serde_json::json!({ "max": 0 }), None).unwrap();
+        let lenient = build_rule("max-ten", &serde_json::json!({ "max": 9 }), None).unwrap();
+        assert!(
+            !diagnose(strict.as_ref(), src).is_empty(),
+            "max:0 should flag the comma"
+        );
+        assert!(
+            diagnose(lenient.as_ref(), src).is_empty(),
+            "max:9 should not flag a single comma"
+        );
     }
 
     #[test]
