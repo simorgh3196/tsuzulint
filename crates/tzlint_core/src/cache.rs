@@ -809,6 +809,9 @@ mod tests {
         let archive = CacheError::Archive("x".into());
         assert_eq!(archive.to_string(), "archive error: x");
         assert!(archive.source().is_none());
+        let io = CacheError::Io(IoError::Other("disk full".into()));
+        assert!(io.to_string().contains("cache file error"), "{io}");
+        assert!(io.source().is_some());
     }
 
     /// A tiny in-memory [`Host`] for cache persistence tests.
@@ -861,10 +864,15 @@ mod tests {
     #[test]
     fn cache_save_then_load_round_trips_entries() {
         let key = key_of("doc\n", &cfg("{}"));
+        // All four severities, so `severity_name`/`severity_from_name` round-trip every arm.
         let diagnostics = vec![
+            // Two fixes, so the fix (de)serialization loop runs more than one iteration.
             Diagnostic::new("max-ten", Severity::Error, Span::new(2, 5), "msg")
-                .with_fix(Fix::replace(Span::new(2, 5), "、")),
-            Diagnostic::new("no-todo", Severity::Hint, Span::new(0, 4), "todo"),
+                .with_fix(Fix::replace(Span::new(2, 3), "x"))
+                .with_fix(Fix::delete(Span::new(3, 5))),
+            Diagnostic::new("no-todo", Severity::Warning, Span::new(0, 4), "todo"),
+            Diagnostic::new("no-nfd", Severity::Info, Span::new(1, 2), "nfd"),
+            Diagnostic::new("sentence-length", Severity::Hint, Span::new(3, 4), "len"),
         ];
         let mut cache = DocumentCache::new();
         cache.insert(key, diagnostics.clone());
@@ -880,17 +888,62 @@ mod tests {
     }
 
     #[test]
-    fn cache_load_is_best_effort_on_bad_files() {
-        let path = Path::new("/work/.tzlintcache");
-        // Missing file → empty.
-        assert!(DocumentCache::load(&MemHost::new(), path).is_empty());
-        // Corrupt JSON → empty.
-        assert!(
-            DocumentCache::load(&MemHost::seed("/work/.tzlintcache", "not json"), path).is_empty()
+    fn cache_load_accepts_a_diagnostic_without_fixes() {
+        // A diagnostic with no `fixes` array (the common case) loads fine — exercises the
+        // fixes-absent path of the entry decoder.
+        let hex = key_of("doc\n", &cfg("{}")).to_hex();
+        let file = format!(
+            r#"{{"version":1,"entries":{{"{hex}":[{{"rule_id":"r","severity":"warning","message":"m","span":{{"start":0,"end":1}}}}]}}}}"#
         );
-        // Wrong version → ignored.
-        let wrong_version = MemHost::seed("/work/.tzlintcache", r#"{"version":999,"entries":{}}"#);
-        assert!(DocumentCache::load(&wrong_version, path).is_empty());
+        let loaded = DocumentCache::load(
+            &MemHost::seed("/work/.tzlintcache", &file),
+            Path::new("/work/.tzlintcache"),
+        );
+        assert_eq!(loaded.len(), 1);
+    }
+
+    #[test]
+    fn cache_load_is_best_effort_on_bad_files_and_entries() {
+        let path = Path::new("/work/.tzlintcache");
+        let load = |contents: &str| {
+            DocumentCache::load(&MemHost::seed("/work/.tzlintcache", contents), path)
+        };
+        // Whole-file problems → empty cache.
+        assert!(DocumentCache::load(&MemHost::new(), path).is_empty()); // missing file
+        assert!(load("not json").is_empty()); // corrupt JSON
+        assert!(load(r#"{"version":999,"entries":{}}"#).is_empty()); // wrong version
+        assert!(load(r#"{"version":1,"entries":["x"]}"#).is_empty()); // `entries` not an object
+
+        // Per-entry problems → that entry is skipped (so the whole cache is empty here).
+        let hex = key_of("doc\n", &cfg("{}")).to_hex();
+        assert!(load(r#"{"version":1,"entries":{"nothex":[]}}"#).is_empty()); // un-parseable key
+        assert!(
+            load(&format!(
+                r#"{{"version":1,"entries":{{"{hex}":"notarray"}}}}"#
+            ))
+            .is_empty()
+        ); // entry value not an array
+        // Diagnostic with an unknown severity → dropped.
+        assert!(
+            load(&format!(
+                r#"{{"version":1,"entries":{{"{hex}":[{{"rule_id":"r","severity":"BOGUS","message":"m","span":{{"start":0,"end":1}}}}]}}}}"#
+            ))
+            .is_empty()
+        );
+        // Diagnostic missing a required field → dropped.
+        assert!(
+            load(&format!(
+                r#"{{"version":1,"entries":{{"{hex}":[{{"severity":"error","message":"m","span":{{"start":0,"end":1}}}}]}}}}"#
+            ))
+            .is_empty()
+        );
+        // A fix missing its `replacement` → diagnostic dropped.
+        assert!(
+            load(&format!(
+                r#"{{"version":1,"entries":{{"{hex}":[{{"rule_id":"r","severity":"error","message":"m","span":{{"start":0,"end":1}},"fixes":[{{"span":{{"start":0,"end":1}}}}]}}]}}}}"#
+            ))
+            .is_empty()
+        );
     }
 
     #[test]

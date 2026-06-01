@@ -760,4 +760,34 @@ mod tests {
         assert_eq!(out1, out2);
         assert!(out2.contains("no-hankaku-kana"), "{out2}");
     }
+
+    #[test]
+    fn cache_save_failure_warns_without_failing_the_run() {
+        // A host that serves reads but fails every write: the cache save fails, which must only
+        // warn (to stderr) — the run still reports its findings, not an error.
+        struct ReadOkWriteFailHost {
+            source: String,
+        }
+        impl Host for ReadOkWriteFailHost {
+            fn read_to_string(&self, path: &Path, _limit: usize) -> Result<String, IoError> {
+                if path.ends_with("a.md") {
+                    Ok(self.source.clone())
+                } else {
+                    Err(IoError::NotFound) // no existing cache file
+                }
+            }
+            fn write_atomic(&self, _: &Path, _: &[u8]) -> Result<(), IoError> {
+                Err(IoError::Other("disk full".into()))
+            }
+            fn exists(&self, _: &Path) -> bool {
+                false
+            }
+        }
+        let host = ReadOkWriteFailHost {
+            source: "ﾊﾛｰ\n".to_string(),
+        };
+        let (status, _out, err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Findings); // cache write failure did NOT become an error
+        assert!(err.contains("could not write"), "{err}");
+    }
 }
