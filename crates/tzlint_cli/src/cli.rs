@@ -3,8 +3,8 @@
 //! The surface mirrors the established `tzlint` UX: a few global options (`--config`,
 //! `--verbose`, `--no-cache`) and the `lint` / `fix` / `init` subcommands. `lint` and `fix` take
 //! files, directories (recursed for Markdown), or glob patterns, and `-` for stdin (see the
-//! per-argument help). Plugin, rule-management, and LSP subcommands, plus the SARIF output
-//! format, are intentionally out of scope here and arrive with later milestones.
+//! per-argument help); `lint` renders text, JSON, or SARIF. Plugin, rule-management, and LSP
+//! subcommands are intentionally out of scope here and arrive with later milestones.
 
 use std::path::PathBuf;
 
@@ -80,4 +80,6 @@ pub enum OutputFormat {
     Text,
     /// A JSON array of `{ path, diagnostics }` objects.
     Json,
+    /// A SARIF 2.1.0 log (for CI integrations such as GitHub code scanning).
+    Sarif,
 }

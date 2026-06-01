@@ -169,6 +169,9 @@ fn lint(
     match format {
         OutputFormat::Text => output::render_text(stdout, &reports).map_err(|e| e.to_string())?,
         OutputFormat::Json => output::render_json(stdout, &reports).map_err(|e| e.to_string())?,
+        OutputFormat::Sarif => {
+            output::render_sarif(stdout, &reports).map_err(|e| e.to_string())?;
+        }
     }
 
     let has_findings = reports.iter().any(|report| !report.diagnostics.is_empty());
@@ -688,6 +691,34 @@ mod tests {
         assert!(value.is_array());
         assert_eq!(value[0]["path"], "a.md");
         assert_eq!(value[0]["diagnostics"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn lint_sarif_output_is_a_valid_log_with_results() {
+        // `--format sarif` emits a SARIF 2.1.0 log; the half-width kana triggers `no-hankaku-kana`,
+        // which surfaces as one result referencing that rule.
+        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Sarif), &host);
+        assert_eq!(status, ExitStatus::Findings);
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["version"], "2.1.0");
+        assert_eq!(value["runs"][0]["tool"]["driver"]["name"], "tzlint");
+        let result = &value["runs"][0]["results"][0];
+        assert_eq!(result["ruleId"], "no-hankaku-kana");
+        assert_eq!(
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "a.md"
+        );
+    }
+
+    #[test]
+    fn lint_sarif_clean_file_has_no_results() {
+        // A clean file still produces a well-formed (empty-results) SARIF log and exits `Clean`.
+        let host = MockHost::with("a.md", "ただのテキストです。\n");
+        let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Sarif), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["runs"][0]["results"], serde_json::json!([]));
     }
 
     #[test]

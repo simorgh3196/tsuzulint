@@ -5,7 +5,7 @@
 //! already in the engine's stable total order, so no re-sorting happens here.
 
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use tzlint_core::LineIndex;
@@ -121,6 +121,98 @@ fn diagnostic_json(source: &str, index: &LineIndex, diagnostic: &Diagnostic) -> 
     })
 }
 
+// ── SARIF 2.1.0 output ────────────────────────────────────────────────────────────────
+//
+// A static analysis interchange format consumed by CI integrations (notably GitHub code
+// scanning). The document is built directly from the diagnostics, so it needs no extra
+// metadata threading: each diagnostic becomes one `result`, and the rule ids that appear are
+// collected into the run's `tool.driver.rules` (referenced by `ruleIndex`).
+
+/// The analysis tool's name, embedded in every SARIF run's `tool.driver`.
+const SARIF_TOOL_NAME: &str = "tzlint";
+/// The tool version (the crate version), embedded in `tool.driver.version`.
+const SARIF_TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The project home, embedded in `tool.driver.informationUri`.
+const SARIF_TOOL_INFO_URI: &str = "https://github.com/simorgh3196/tsuzulint";
+
+/// The SARIF 2.1.0 `level` for a [`Severity`]. SARIF defines only `none`/`note`/`warning`/
+/// `error`, so the two informational severities both map to `note`.
+fn sarif_level(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info | Severity::Hint => "note",
+    }
+}
+
+/// A SARIF `artifactLocation.uri`: the path with `\` normalized to `/`, since SARIF URIs use
+/// forward slashes regardless of the host platform (so a Windows path stays a valid URI).
+fn sarif_uri(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
+/// Render `reports` as a SARIF 2.1.0 log (one `run`, one `result` per diagnostic).
+///
+/// Byte spans map to a 1-based `region`; SARIF's `endColumn` is exclusive (the column after the
+/// region), which is exactly what mapping the exclusive `span.end` yields. Rule ids encountered
+/// are deduplicated into `tool.driver.rules` in first-appearance order and referenced by
+/// `ruleIndex`. Stdin diagnostics keep their `<stdin>` label as the artifact URI.
+pub fn render_sarif(writer: &mut dyn Write, reports: &[FileReport]) -> io::Result<()> {
+    let mut rule_ids: Vec<&str> = Vec::new();
+    let mut results: Vec<Value> = Vec::new();
+    for report in reports {
+        let index = LineIndex::new(&report.source);
+        let uri = sarif_uri(&report.path);
+        for diagnostic in &report.diagnostics {
+            let rule_id = diagnostic.rule_id.as_str();
+            let rule_index = match rule_ids.iter().position(|id| *id == rule_id) {
+                Some(i) => i,
+                None => {
+                    rule_ids.push(rule_id);
+                    rule_ids.len() - 1
+                }
+            };
+            let (start_line, start_col) = index.position(&report.source, diagnostic.span.start);
+            let (end_line, end_col) = index.position(&report.source, diagnostic.span.end);
+            results.push(json!({
+                "ruleId": rule_id,
+                "ruleIndex": rule_index,
+                "level": sarif_level(diagnostic.severity),
+                "message": { "text": diagnostic.message },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": uri },
+                        "region": {
+                            "startLine": start_line,
+                            "startColumn": start_col,
+                            "endLine": end_line,
+                            "endColumn": end_col,
+                        },
+                    },
+                }],
+            }));
+        }
+    }
+    let rules: Vec<Value> = rule_ids.iter().map(|id| json!({ "id": id })).collect();
+    let log = json!({
+        "version": "2.1.0",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": SARIF_TOOL_NAME,
+                    "version": SARIF_TOOL_VERSION,
+                    "informationUri": SARIF_TOOL_INFO_URI,
+                    "rules": rules,
+                },
+            },
+            "results": results,
+        }],
+    });
+    serde_json::to_writer_pretty(&mut *writer, &log).map_err(io::Error::other)?;
+    writeln!(writer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +306,83 @@ mod tests {
         assert_eq!(severity_str(Severity::Warning), "warning");
         assert_eq!(severity_str(Severity::Info), "info");
         assert_eq!(severity_str(Severity::Hint), "hint");
+    }
+
+    fn render_sarif_value(reports: &[FileReport]) -> Value {
+        let mut buf = Vec::new();
+        render_sarif(&mut buf, reports).unwrap();
+        serde_json::from_slice(&buf).unwrap()
+    }
+
+    #[test]
+    fn sarif_has_a_valid_2_1_0_envelope() {
+        let diag = Diagnostic::new("no-todo", Severity::Warning, Span::new(4, 8), "found TODO");
+        let value = render_sarif_value(&[report("doc.md", "壱\nTODO\n", vec![diag])]);
+        assert_eq!(value["version"], "2.1.0");
+        assert!(value["$schema"].is_string(), "{value}");
+        let driver = &value["runs"][0]["tool"]["driver"];
+        assert_eq!(driver["name"], "tzlint");
+        assert!(driver["version"].is_string(), "{driver}");
+        assert!(driver["informationUri"].is_string(), "{driver}");
+    }
+
+    #[test]
+    fn sarif_result_carries_rule_level_message_and_region() {
+        // "壱\n" is 4 bytes, so byte 4 = line 2 col 1; byte 8 = the column after "TODO" =
+        // line 2 col 5 (SARIF's exclusive endColumn).
+        let diag = Diagnostic::new("no-todo", Severity::Warning, Span::new(4, 8), "found TODO");
+        let value = render_sarif_value(&[report("doc.md", "壱\nTODO\n", vec![diag])]);
+        let result = &value["runs"][0]["results"][0];
+        assert_eq!(result["ruleId"], "no-todo");
+        assert_eq!(result["ruleIndex"], 0);
+        assert_eq!(result["level"], "warning");
+        assert_eq!(result["message"]["text"], "found TODO");
+        let physical = &result["locations"][0]["physicalLocation"];
+        assert_eq!(physical["artifactLocation"]["uri"], "doc.md");
+        assert_eq!(
+            physical["region"],
+            json!({ "startLine": 2, "startColumn": 1, "endLine": 2, "endColumn": 5 }),
+            "{physical}"
+        );
+    }
+
+    #[test]
+    fn sarif_dedupes_rules_and_indexes_results() {
+        let d = |rule: &str| Diagnostic::new(rule, Severity::Error, Span::new(0, 1), "m");
+        let value = render_sarif_value(&[report("a.md", "x", vec![d("r1"), d("r2"), d("r1")])]);
+        let rules = value["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .unwrap()
+            .clone();
+        // First-appearance order, deduplicated.
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0]["id"], "r1");
+        assert_eq!(rules[1]["id"], "r2");
+        let results = value["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results[0]["ruleIndex"], 0);
+        assert_eq!(results[1]["ruleIndex"], 1);
+        assert_eq!(results[2]["ruleIndex"], 0);
+    }
+
+    #[test]
+    fn sarif_clean_report_has_empty_results_and_rules() {
+        let value = render_sarif_value(&[report("a.md", "ok\n", vec![])]);
+        assert_eq!(value["runs"][0]["results"], json!([]));
+        assert_eq!(value["runs"][0]["tool"]["driver"]["rules"], json!([]));
+    }
+
+    #[test]
+    fn sarif_level_maps_info_and_hint_to_note() {
+        assert_eq!(sarif_level(Severity::Error), "error");
+        assert_eq!(sarif_level(Severity::Warning), "warning");
+        assert_eq!(sarif_level(Severity::Info), "note");
+        assert_eq!(sarif_level(Severity::Hint), "note");
+    }
+
+    #[test]
+    fn sarif_uri_uses_forward_slashes() {
+        assert_eq!(sarif_uri(Path::new("docs/a.md")), "docs/a.md");
+        // A backslash path (as Windows `display()` yields) is normalized to URI separators.
+        assert_eq!(sarif_uri(Path::new("docs\\a.md")), "docs/a.md");
     }
 }
