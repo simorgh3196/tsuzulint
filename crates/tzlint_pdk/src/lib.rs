@@ -20,7 +20,7 @@ mod node;
 mod rule;
 
 pub use diagnostic::{Diagnostic, Fix, RuleId, Severity};
-pub use meta::RuleMeta;
+pub use meta::{Requirements, RuleMeta};
 pub use morphology::{MorphologyError, MorphologyProvider, WhitespaceProvider};
 pub use node::{Children, NodeRef};
 pub use rule::{Context, Rule};
