@@ -32,6 +32,6 @@ pub use config::{
 };
 pub use engine::Engine;
 pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
-pub use io::{Host, IoError};
+pub use io::{DirEntry, EntryKind, Host, IoError};
 pub use parse::{ParseError, parse};
 pub use position::LineIndex;

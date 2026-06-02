@@ -28,6 +28,11 @@ tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
 tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
 # Argument parsing (derive API).
 clap = { workspace = true }
+# Glob pattern matching for `lint`/`fix` PATH arguments. Used ONLY for `Pattern::matches_path`
+# (pure string matching); the directory walk itself goes through `Host::list_dir`, never
+# `glob::glob()` (which would touch `std::fs` directly and bypass the io boundary). CLI-only —
+# it never reaches the AST or the `wasm32` core, so a native-only dependency here is fine.
+glob = "0.3"
 # JSON output. The diagnostic model is serde-free (it is `no_std`/ABI-frozen), so the CLI
 # builds the JSON document itself from the diagnostic fields rather than deriving `Serialize`.
 serde_json = { workspace = true }
