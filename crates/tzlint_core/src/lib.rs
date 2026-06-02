@@ -36,3 +36,18 @@ pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
 pub use io::{DirEntry, EntryKind, Host, IoError};
 pub use parse::{ParseError, parse};
 pub use position::LineIndex;
+pub use processor::{
+    ParseMode, Parsed, Processor, ProcessorConfig, Region, RegionTag, Registry, lint_document,
+};
+
+#[cfg(test)]
+mod processor_exports {
+    use crate::{Registry, lint_document};
+
+    #[test]
+    fn processor_seam_is_reexported_at_crate_root() {
+        let reg = Registry::with_builtins();
+        let diags = lint_document(Some("md"), "x\n", &reg, &[]).unwrap();
+        assert!(diags.is_empty());
+    }
+}
