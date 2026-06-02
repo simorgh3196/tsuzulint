@@ -121,7 +121,8 @@ fn lint(
 
     // Resolve the PATH arguments into concrete files (globs / directories expanded, sorted and
     // de-duplicated) plus an optional stdin source; surface any discovery notes on stderr.
-    let inputs = expand::expand(host, cwd, paths);
+    let dir_exts = discovery_extensions(&config);
+    let inputs = expand::expand(host, cwd, paths, &dir_exts);
     note_expansion(&inputs.notes, stderr);
 
     // Persistent cache: load the on-disk file (best-effort) so a repeat run on unchanged content
@@ -230,6 +231,16 @@ fn extension_of(path: &Path) -> Option<&str> {
     path.extension().and_then(|e| e.to_str())
 }
 
+/// Extensions discovered when walking a directory: Markdown always, plus any configured
+/// delimited formats (so data CSVs are not linted unless the user opted in).
+fn discovery_extensions(config: &Config) -> Vec<String> {
+    let mut exts = vec!["md".to_string(), "markdown".to_string()];
+    for fmt in config.formats.keys() {
+        exts.push(fmt.clone()); // "csv" / "tsv"
+    }
+    exts
+}
+
 /// Lint one already-read source with the processor seam, given the file's extension.
 fn lint_source(
     registry: &Registry,
@@ -262,7 +273,8 @@ fn fix(
     note_unknown_rules(&config, stderr);
     let registry = Registry::with_builtins();
 
-    let inputs = expand::expand(host, cwd, paths);
+    let dir_exts = discovery_extensions(&config);
+    let inputs = expand::expand(host, cwd, paths, &dir_exts);
     note_expansion(&inputs.notes, stderr);
 
     // When stdin is a target, stdout carries the fixed stdin document (a pass-through filter), so
@@ -1348,6 +1360,39 @@ mod tests {
         let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
         assert_eq!(status, ExitStatus::Findings);
         assert!(out.contains("no-hankaku-kana"), "{out}");
+    }
+
+    #[test]
+    fn directory_walk_includes_csv_only_when_configured() {
+        // Without csv config, a directory walk skips .csv; with it, the .csv is linted.
+        let host = MockHost::new();
+        host.put("docs/a.md", "本文。\n");
+        host.put("docs/data.csv", "id,body\n1,x\n");
+        // No config → csv skipped, only the .md is checked.
+        let (s1, out1, _e1) = run_capture(&lint_cli("docs", OutputFormat::Text), &host);
+        assert_eq!(s1, ExitStatus::Clean);
+        assert!(out1.contains("1 file(s) checked"), "{out1}");
+
+        // With csv config → both files are checked.
+        host.put(
+            "c.json",
+            r#"{ "formats": { "csv": { "header": true, "columns": { "body": {} } } } }"#,
+        );
+        let mut c = lint_cli("docs", OutputFormat::Text);
+        c.config = Some(PathBuf::from("c.json"));
+        let (s2, out2, _e2) = run_capture(&c, &host);
+        assert_eq!(s2, ExitStatus::Clean);
+        assert!(out2.contains("2 file(s) checked"), "{out2}");
+    }
+
+    #[test]
+    fn explicitly_named_csv_is_linted_without_config_gate() {
+        // A literal .csv path is always a target (even with no formats config); it just yields
+        // no diagnostics (opt-in columns).
+        let host = MockHost::with("data.csv", "id,body\n1,x\n");
+        let (status, out, _err) = run_capture(&lint_cli("data.csv", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(out.contains("1 file(s) checked"), "{out}");
     }
 
     #[test]

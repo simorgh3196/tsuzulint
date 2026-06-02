@@ -5,7 +5,8 @@
 //! - a glob pattern (contains `*`, `?`, or `[`) — matched with `glob::Pattern` against paths
 //!   discovered by walking [`Host::list_dir`] (never `glob::glob()`, which would touch the
 //!   filesystem directly and bypass the io boundary),
-//! - a directory — recursively yields its Markdown files,
+//! - a directory — recursively yields its files whose extension is in the caller-supplied
+//!   discovery set (Markdown always, plus any configured delimited formats),
 //! - or a literal file path — passed through verbatim (so an existing file behaves exactly as
 //!   before this expansion existed, and a missing one still errors at read time).
 //!
@@ -26,8 +27,6 @@ const MAX_DEPTH: usize = 64;
 /// Soft cap on discovered files; on reaching it, discovery stops and a note is emitted, so a
 /// run over an unexpectedly huge tree fails visibly rather than exhausting memory.
 const MAX_FILES: usize = 100_000;
-/// Extensions a directory / `**`-recursion picks up, matched case-insensitively.
-const MARKDOWN_EXTENSIONS: [&str; 2] = ["md", "markdown"];
 
 /// The expanded work list.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -43,9 +42,10 @@ pub struct Inputs {
 /// Expand `args` (the user's PATH arguments) relative to `cwd`.
 ///
 /// `-` requests stdin (collapsed to a single read). An argument with a glob metacharacter
-/// (`*`, `?`, `[`) is glob-expanded; a listable directory recurses for Markdown files; anything
-/// else is a literal path passed through verbatim (so a missing file still errors at read time).
-pub fn expand(host: &dyn Host, cwd: &Path, args: &[PathBuf]) -> Inputs {
+/// (`*`, `?`, `[`) is glob-expanded; a listable directory recurses for files whose extension is
+/// in `dir_extensions` (Markdown always, plus any configured delimited formats); anything else is
+/// a literal path passed through verbatim (so a missing file still errors at read time).
+pub fn expand(host: &dyn Host, cwd: &Path, args: &[PathBuf], dir_extensions: &[String]) -> Inputs {
     let mut walk = Walk {
         host,
         files: BTreeSet::new(),
@@ -63,7 +63,7 @@ pub fn expand(host: &dyn Host, cwd: &Path, args: &[PathBuf]) -> Inputs {
         if is_glob(&as_str) {
             walk.glob(cwd, &as_str);
         } else if host.list_dir(arg).is_ok() {
-            walk.directory(arg);
+            walk.directory(arg, dir_extensions);
         } else {
             // Not a glob and not a listable directory → a literal file. Pass it through verbatim
             // (no `cwd.join`, no canonicalization): the read reproduces today's behavior exactly,
@@ -90,15 +90,11 @@ fn is_hidden(name: &str) -> bool {
     name.starts_with('.')
 }
 
-/// Whether `path`'s extension is a Markdown extension (case-insensitive).
-fn is_markdown(path: &Path) -> bool {
+/// Whether `path`'s extension (case-insensitive) is in `exts`.
+fn has_extension(path: &Path, exts: &[String]) -> bool {
     path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            MARKDOWN_EXTENSIONS
-                .iter()
-                .any(|candidate| ext.eq_ignore_ascii_case(candidate))
-        })
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| exts.iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 /// Split a glob pattern into its longest literal directory prefix (used as the walk root, so
@@ -131,8 +127,8 @@ fn split_literal_prefix(pattern: &str) -> (PathBuf, String) {
 
 /// What a [`Walk`] selects at each file.
 enum Selector<'a> {
-    /// Directory recursion: keep Markdown files.
-    Markdown,
+    /// Directory recursion: match files whose extension (case-insensitive) is in this set.
+    Extensions(&'a [String]),
     /// Glob: keep files whose path matches the pattern.
     Glob(&'a glob::Pattern),
 }
@@ -149,9 +145,9 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    /// Recurse `dir` for Markdown files.
-    fn directory(&mut self, dir: &Path) {
-        self.descend(dir, dir, 0, MAX_DEPTH, &Selector::Markdown);
+    /// Recurse `dir` for files whose extension is in `exts` (case-insensitive).
+    fn directory(&mut self, dir: &Path, exts: &[String]) {
+        self.descend(dir, dir, 0, MAX_DEPTH, &Selector::Extensions(exts));
     }
 
     /// Expand a glob pattern by walking its literal prefix and matching the rest.
@@ -230,7 +226,7 @@ impl Walk<'_> {
                 EntryKind::File => {
                     let emit_path = emit_dir.join(&entry.name);
                     let selected = match selector {
-                        Selector::Markdown => is_markdown(&emit_path),
+                        Selector::Extensions(exts) => has_extension(&emit_path, exts),
                         Selector::Glob(pattern) => {
                             pattern.matches_path_with(&match_dir.join(&entry.name), match_options())
                         }
@@ -362,7 +358,8 @@ mod tests {
 
     fn run(host: &TreeHost, args: &[&str]) -> Inputs {
         let args: Vec<PathBuf> = args.iter().map(PathBuf::from).collect();
-        expand(host, Path::new(CWD), &args)
+        let exts = [String::from("md"), String::from("markdown")];
+        expand(host, Path::new(CWD), &args, &exts)
     }
 
     fn paths(strs: &[&str]) -> Vec<PathBuf> {
