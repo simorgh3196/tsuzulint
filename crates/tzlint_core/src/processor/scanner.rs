@@ -11,7 +11,11 @@ use tzlint_ast::Span;
 pub(crate) fn scan_records(source: &str, delimiter: u8) -> Vec<Vec<Span>> {
     let b = source.as_bytes();
     let n = b.len();
-    let mut i = if b.starts_with(&[0xEF, 0xBB, 0xBF]) { 3 } else { 0 };
+    let mut i = if b.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        3
+    } else {
+        0
+    };
 
     let mut records: Vec<Vec<Span>> = Vec::new();
     if i >= n {
@@ -28,8 +32,8 @@ pub(crate) fn scan_records(source: &str, delimiter: u8) -> Vec<Vec<Span>> {
             let mut j = start;
             loop {
                 match b.get(j) {
-                    None => break,                       // unterminated → content to EOF
-                    Some(&c) if c == b'"' => {
+                    None => break, // unterminated → content to EOF
+                    Some(&b'"') => {
                         if b.get(j + 1) == Some(&b'"') {
                             j += 2; // escaped quote, stays in content
                             continue;
@@ -69,7 +73,11 @@ pub(crate) fn scan_records(source: &str, delimiter: u8) -> Vec<Vec<Span>> {
         } else {
             // sep is CR or LF — end of record.
             records.push(core::mem::take(&mut record));
-            i = if sep == b'\r' && b.get(k + 1) == Some(&b'\n') { k + 2 } else { k + 1 };
+            i = if sep == b'\r' && b.get(k + 1) == Some(&b'\n') {
+                k + 2
+            } else {
+                k + 1
+            };
             if i >= n {
                 break; // trailing newline does not create a spurious empty record
             }
@@ -83,12 +91,16 @@ mod tests {
     use super::*;
 
     /// Helper: scan and project each cell span to the &str it covers.
-    fn cells<'a>(source: &'a str, delim: u8) -> Vec<Vec<&'a str>> {
+    fn cells(source: &str, delim: u8) -> Vec<Vec<&str>> {
         scan_records(source, delim)
             .into_iter()
             .map(|rec| {
                 rec.into_iter()
-                    .map(|s| source.get(s.start as usize..s.end as usize).unwrap_or("<bad>"))
+                    .map(|s| {
+                        source
+                            .get(s.start as usize..s.end as usize)
+                            .unwrap_or("<bad>")
+                    })
                     .collect()
             })
             .collect()
@@ -104,7 +116,10 @@ mod tests {
 
     #[test]
     fn final_line_without_newline() {
-        assert_eq!(cells("a,b\nc,d", b','), vec![vec!["a", "b"], vec!["c", "d"]]);
+        assert_eq!(
+            cells("a,b\nc,d", b','),
+            vec![vec!["a", "b"], vec!["c", "d"]]
+        );
     }
 
     #[test]
@@ -122,17 +137,26 @@ mod tests {
     #[test]
     fn escaped_quotes_remain_raw_in_span() {
         // `"He said ""hi"""` → content span is `He said ""hi""` (raw doubled quotes; v1).
-        assert_eq!(cells("\"He said \"\"hi\"\"\"\n", b','), vec![vec!["He said \"\"hi\"\""]]);
+        assert_eq!(
+            cells("\"He said \"\"hi\"\"\"\n", b','),
+            vec![vec!["He said \"\"hi\"\""]]
+        );
     }
 
     #[test]
     fn crlf_line_endings() {
-        assert_eq!(cells("a,b\r\nc,d\r\n", b','), vec![vec!["a", "b"], vec!["c", "d"]]);
+        assert_eq!(
+            cells("a,b\r\nc,d\r\n", b','),
+            vec![vec!["a", "b"], vec!["c", "d"]]
+        );
     }
 
     #[test]
     fn tab_delimiter() {
-        assert_eq!(cells("a\tb\n1\t2\n", b'\t'), vec![vec!["a", "b"], vec!["1", "2"]]);
+        assert_eq!(
+            cells("a\tb\n1\t2\n", b'\t'),
+            vec![vec!["a", "b"], vec!["1", "2"]]
+        );
     }
 
     #[test]
@@ -142,7 +166,10 @@ mod tests {
 
     #[test]
     fn ragged_rows_keep_their_field_counts() {
-        assert_eq!(cells("a,b,c\nx,y\n", b','), vec![vec!["a", "b", "c"], vec!["x", "y"]]);
+        assert_eq!(
+            cells("a,b,c\nx,y\n", b','),
+            vec![vec!["a", "b", "c"], vec!["x", "y"]]
+        );
     }
 
     #[test]

@@ -18,13 +18,19 @@ impl DelimitedProcessor {
     /// A CSV processor (`.csv`, default delimiter `,`).
     #[must_use]
     pub fn csv() -> Self {
-        DelimitedProcessor { extensions: &["csv"], default_delimiter: b',' }
+        DelimitedProcessor {
+            extensions: &["csv"],
+            default_delimiter: b',',
+        }
     }
 
     /// A TSV processor (`.tsv`, default delimiter tab).
     #[must_use]
     pub fn tsv() -> Self {
-        DelimitedProcessor { extensions: &["tsv"], default_delimiter: b'\t' }
+        DelimitedProcessor {
+            extensions: &["tsv"],
+            default_delimiter: b'\t',
+        }
     }
 }
 
@@ -38,7 +44,11 @@ impl Processor for DelimitedProcessor {
         let Some(d) = cfg.delimited.as_ref() else {
             return Ok(Parsed::Regions(Vec::new()));
         };
-        Ok(Parsed::Regions(build_regions(source, d, self.default_delimiter)))
+        Ok(Parsed::Regions(build_regions(
+            source,
+            d,
+            self.default_delimiter,
+        )))
     }
 }
 
@@ -46,7 +56,11 @@ impl Processor for DelimitedProcessor {
 /// spans across the body rows. Columns that cannot be resolved (a name absent from the header,
 /// or an out-of-range index) are skipped here; Plan 3 surfaces a note for them.
 fn build_regions(source: &str, d: &DelimitedConfig, default_delimiter: u8) -> Vec<Region> {
-    let delimiter = if d.delimiter != 0 { d.delimiter } else { default_delimiter };
+    let delimiter = if d.delimiter != 0 {
+        d.delimiter
+    } else {
+        default_delimiter
+    };
     let records = scan_records(source, delimiter);
 
     let header_names: Vec<String> = if d.has_header {
@@ -72,10 +86,7 @@ fn build_regions(source: &str, d: &DelimitedConfig, default_delimiter: u8) -> Ve
         let (index0, name): (Option<u32>, Option<String>) = match &target.selector {
             ColumnSelector::Index(one_based) => (one_based.checked_sub(1), None),
             ColumnSelector::Name(n) => (
-                header_names
-                    .iter()
-                    .position(|h| h == n)
-                    .map(|i| i as u32),
+                header_names.iter().position(|h| h == n).map(|i| i as u32),
                 Some(n.clone()),
             ),
         };
@@ -112,12 +123,16 @@ mod tests {
 
     fn cfg(columns: Vec<ColumnTarget>, has_header: bool) -> ProcessorConfig {
         ProcessorConfig {
-            delimited: Some(DelimitedConfig { delimiter: b',', has_header, columns }),
+            delimited: Some(DelimitedConfig {
+                delimiter: b',',
+                has_header,
+                columns,
+            }),
         }
     }
 
     /// Project a Parsed::Regions result to (tag-index, parse_mode, cell-texts) for assertions.
-    fn regions_of<'a>(source: &'a str, parsed: Parsed) -> Vec<(Option<u32>, Option<String>, Vec<&'a str>)> {
+    fn regions_of(source: &str, parsed: Parsed) -> Vec<(Option<u32>, Option<String>, Vec<&str>)> {
         match parsed {
             Parsed::Regions(rs) => rs
                 .into_iter()
@@ -135,7 +150,16 @@ mod tests {
         let source = "id,body\n1,hello\n2,world\n";
         let p = DelimitedProcessor::csv();
         let parsed = p
-            .parse(source, &cfg(vec![ColumnTarget { selector: ColumnSelector::Name("body".into()), parse_mode: ParseMode::Markdown }], true))
+            .parse(
+                source,
+                &cfg(
+                    vec![ColumnTarget {
+                        selector: ColumnSelector::Name("body".into()),
+                        parse_mode: ParseMode::Markdown,
+                    }],
+                    true,
+                ),
+            )
             .unwrap();
         assert_eq!(
             regions_of(source, parsed),
@@ -148,10 +172,22 @@ mod tests {
         let source = "a,1\nb,2\n";
         let p = DelimitedProcessor::csv();
         let parsed = p
-            .parse(source, &cfg(vec![ColumnTarget { selector: ColumnSelector::Index(1), parse_mode: ParseMode::PlainText }], false))
+            .parse(
+                source,
+                &cfg(
+                    vec![ColumnTarget {
+                        selector: ColumnSelector::Index(1),
+                        parse_mode: ParseMode::PlainText,
+                    }],
+                    false,
+                ),
+            )
             .unwrap();
         // 1-based index 1 → 0-based 0 → first column "a","b".
-        assert_eq!(regions_of(source, parsed), vec![(Some(0), None, vec!["a", "b"])]);
+        assert_eq!(
+            regions_of(source, parsed),
+            vec![(Some(0), None, vec!["a", "b"])]
+        );
     }
 
     #[test]
@@ -159,7 +195,16 @@ mod tests {
         let source = "id,body\n1,hello\n";
         let p = DelimitedProcessor::csv();
         let parsed = p
-            .parse(source, &cfg(vec![ColumnTarget { selector: ColumnSelector::Name("missing".into()), parse_mode: ParseMode::Markdown }], true))
+            .parse(
+                source,
+                &cfg(
+                    vec![ColumnTarget {
+                        selector: ColumnSelector::Name("missing".into()),
+                        parse_mode: ParseMode::Markdown,
+                    }],
+                    true,
+                ),
+            )
             .unwrap();
         assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
     }
@@ -167,7 +212,9 @@ mod tests {
     #[test]
     fn no_delimited_config_lints_nothing() {
         let p = DelimitedProcessor::csv();
-        let parsed = p.parse("id,body\n1,x\n", &ProcessorConfig::default()).unwrap();
+        let parsed = p
+            .parse("id,body\n1,x\n", &ProcessorConfig::default())
+            .unwrap();
         assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
     }
 }
