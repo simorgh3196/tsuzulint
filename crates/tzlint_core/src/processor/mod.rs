@@ -381,7 +381,7 @@ mod tests {
         // Every built-in extension resolves to a processor that claims it.
         for ext in ["md", "markdown", "csv", "tsv"] {
             assert!(
-                reg.for_ext(Some(ext)).extensions().iter().any(|e| *e == ext),
+                reg.for_ext(Some(ext)).extensions().contains(&ext),
                 "extension {ext} should resolve to a processor claiming it",
             );
         }
