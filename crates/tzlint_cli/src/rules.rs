@@ -10,26 +10,83 @@
 //! with default options and its default severity. Unknown rule ids in config are surfaced via
 //! [`unknown_rule_ids`] so a typo'd setting is not silently ignored.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
-use tzlint_core::{Config, RuleSetting};
+use tzlint_core::processor::{ColumnTarget, DelimitedConfig};
+use tzlint_core::{Config, ProcessorConfig, RegionRules, RuleSetting};
 use tzlint_pdk::{Rule, RuleId, Severity};
 use tzlint_rules::{RULE_IDS, build_rule};
+
+/// Build the boxed rule set for an explicit rule-settings map (every built-in on by default,
+/// minus those turned off, each with its configured options/severity).
+#[must_use]
+pub fn resolve_rules_from_map(rules: &BTreeMap<RuleId, RuleSetting>) -> Vec<Box<dyn Rule>> {
+    RULE_IDS
+        .iter()
+        .filter_map(|id| match rules.get(&RuleId::from(*id)) {
+            Some(RuleSetting::Off) => None,
+            Some(RuleSetting::On { severity, options }) => build_rule(id, options, *severity),
+            None => build_rule(id, &Value::Null, None),
+        })
+        .collect()
+}
 
 /// Build the boxed rule set to run for `config`: every built-in rule (in [`RULE_IDS`] order)
 /// except those a `config.rules` entry turns off, each constructed with its configured options
 /// and severity.
 #[must_use]
 pub fn resolve_rules(config: &Config) -> Vec<Box<dyn Rule>> {
-    RULE_IDS
-        .iter()
-        .filter_map(|id| match config.rules.get(&RuleId::from(*id)) {
-            Some(RuleSetting::Off) => None,
-            Some(RuleSetting::On { severity, options }) => build_rule(id, options, *severity),
-            None => build_rule(id, &Value::Null, None),
-        })
-        .collect()
+    resolve_rules_from_map(&config.rules)
+}
+
+/// The [`ProcessorConfig`] for a file with extension `ext` under `config`: the matching
+/// `formats.<ext>` section becomes the delimited extraction config, or empty for other formats.
+#[must_use]
+pub fn processor_config_for(config: &Config, ext: Option<&str>) -> ProcessorConfig {
+    let Some(fmt) = ext.and_then(|e| config.formats.get(&e.to_ascii_lowercase())) else {
+        return ProcessorConfig::default();
+    };
+    ProcessorConfig {
+        delimited: Some(DelimitedConfig {
+            delimiter: fmt.delimiter.map(|c| c as u8).unwrap_or(0),
+            has_header: fmt.has_header,
+            columns: fmt
+                .columns
+                .iter()
+                .map(|c| ColumnTarget {
+                    selector: c.selector.clone(),
+                    parse_mode: c.parse_mode,
+                })
+                .collect(),
+        }),
+    }
+}
+
+/// The [`RegionRules`] for a file with extension `ext` under `config`: a base set from
+/// `config.rules`, plus one set per configured column (its overlay layered over the base).
+#[must_use]
+pub fn region_rules_for(config: &Config, ext: Option<&str>) -> RegionRules {
+    let mut rr = RegionRules::base_only(resolve_rules(config));
+    if let Some(fmt) = ext.and_then(|e| config.formats.get(&e.to_ascii_lowercase())) {
+        for col in &fmt.columns {
+            // base ⊕ column overlay (column wins).
+            let mut merged = config.rules.clone();
+            for (id, setting) in &col.rules {
+                merged.insert(id.clone(), setting.clone());
+            }
+            let rules = resolve_rules_from_map(&merged);
+            match &col.selector {
+                tzlint_core::processor::ColumnSelector::Index(one_based) => {
+                    rr.push_column(one_based.checked_sub(1), None, rules);
+                }
+                tzlint_core::processor::ColumnSelector::Name(name) => {
+                    rr.push_column(None, Some(name.clone()), rules);
+                }
+            }
+        }
+    }
+    rr
 }
 
 /// The effective state of one built-in rule under a resolved [`Config`] — what the `rules`
@@ -273,5 +330,98 @@ mod tests {
             assert_eq!(info.severity, built.meta().default_severity, "{id}");
             assert!(!info.severity_overridden, "{id}");
         }
+    }
+}
+
+#[cfg(test)]
+mod processing_builders {
+    use super::*;
+    use std::collections::BTreeMap;
+    use tzlint_core::processor::{ColumnSelector, ParseMode};
+    use tzlint_core::{ColumnConfig, Config, FormatConfig};
+
+    fn csv_config() -> Config {
+        let mut formats = BTreeMap::new();
+        formats.insert(
+            "csv".into(),
+            FormatConfig {
+                has_header: true,
+                delimiter: None,
+                columns: vec![ColumnConfig {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::PlainText,
+                    rules: BTreeMap::new(),
+                }],
+            },
+        );
+        Config {
+            formats,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn processor_config_for_csv_extension() {
+        let config = csv_config();
+        let pcfg = processor_config_for(&config, Some("csv"));
+        let d = pcfg.delimited.unwrap();
+        assert!(d.has_header);
+        assert_eq!(d.columns.len(), 1);
+        assert_eq!(d.columns[0].selector, ColumnSelector::Name("body".into()));
+        assert_eq!(d.columns[0].parse_mode, ParseMode::PlainText);
+        // A markdown file → no delimited config.
+        assert!(
+            processor_config_for(&config, Some("md"))
+                .delimited
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn region_rules_for_layers_column_overlay_over_base() {
+        use tzlint_core::RegionTag;
+        // Base disables no-todo; the body column re-enables it. The whole region uses the base
+        // (no-todo absent), while the `body` column region runs no-todo.
+        let mut formats = BTreeMap::new();
+        let mut overlay = BTreeMap::new();
+        overlay.insert(
+            RuleId::from("no-todo"),
+            RuleSetting::On {
+                severity: None,
+                options: Value::Null,
+            },
+        );
+        formats.insert(
+            "csv".into(),
+            FormatConfig {
+                has_header: true,
+                delimiter: None,
+                columns: vec![ColumnConfig {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::PlainText,
+                    rules: overlay,
+                }],
+            },
+        );
+        let mut base_rules = BTreeMap::new();
+        base_rules.insert(RuleId::from("no-todo"), RuleSetting::Off);
+        let config = Config {
+            rules: base_rules,
+            formats,
+            ..Default::default()
+        };
+
+        let rr = region_rules_for(&config, Some("csv"));
+        let has = |rules: &[&dyn Rule], id: &str| rules.iter().any(|r| r.meta().id.as_str() == id);
+        // The whole-region (base) set has no-todo OFF.
+        assert!(!has(&rr.for_tag(&RegionTag::whole()), "no-todo"));
+        // The `body` column set has no-todo back ON (column overlay wins).
+        assert!(has(
+            &rr.for_tag(&RegionTag::column(1, Some("body".into()))),
+            "no-todo"
+        ));
+        // A markdown file (no csv overlay) yields only the base set, never the column overlay.
+        let md = region_rules_for(&config, Some("md"));
+        assert!(!has(&md.for_tag(&RegionTag::whole()), "no-todo"));
     }
 }
