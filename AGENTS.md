@@ -17,6 +17,9 @@ one before changing that area.
   redirect-stripping; validate the dialed IP.
 - **`tzlint-contributing`** — TDD; `just check` before pushing; confirm-before-push; PR
   conventions; the migrate-and-refactor + parity-gate workflow.
+- **`tzlint-processors`** — how to add a new input-format processor (implement `Processor`,
+  register one line, add tests/docs); the Regions-vs-Ast decision guide; invariants.
+  See also [`docs/processors.md`](docs/processors.md) for user-facing CSV/TSV config.
 
 **Conventions:** Documentation under `docs/` and Rustdoc are written in **English**.
 Library code must not use `.unwrap()`/`.expect()`/`panic!` (clippy-denied). Run

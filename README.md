@@ -57,7 +57,8 @@ $ printf 'これはﾊﾛｰという文です。\n' | tzlint lint -
 1 file(s) checked, 1 issue(s) found
 ```
 
-See [`docs/config-reference.md`](docs/config-reference.md) for configuration.
+See [`docs/config-reference.md`](docs/config-reference.md) for configuration and
+[`docs/processors.md`](docs/processors.md) for CSV/TSV column linting.
 
 ## Workspace layout
 
