@@ -183,6 +183,16 @@ impl RegionRules {
         }
         self.base.iter().map(|r| r.as_ref()).collect()
     }
+
+    /// The ids of every rule across the base and all column sets — for the cache key.
+    #[must_use]
+    pub fn rule_ids(&self) -> Vec<&str> {
+        let mut ids: Vec<&str> = self.base.iter().map(|r| r.meta().id.as_str()).collect();
+        for set in &self.columns {
+            ids.extend(set.rules.iter().map(|r| r.meta().id.as_str()));
+        }
+        ids
+    }
 }
 
 mod markdown;

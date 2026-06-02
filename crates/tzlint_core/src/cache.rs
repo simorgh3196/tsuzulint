@@ -30,12 +30,11 @@ use std::path::Path;
 use blake3::Hasher;
 use serde_json::Value;
 use tzlint_ast::Span;
-use tzlint_pdk::{Diagnostic, Fix, Rule, Severity};
+use tzlint_pdk::{Diagnostic, Fix, Severity};
 
 use crate::config::{Config, RuleSetting};
-use crate::engine::Engine;
 use crate::io::{Host, IoError};
-use crate::parse::{ParseError, parse};
+use crate::parse::ParseError;
 
 /// Cache-key recipe version. Bump to invalidate every key if the key *construction* changes.
 const KEY_SCHEMA_VERSION: u32 = 1;
@@ -487,17 +486,19 @@ impl std::error::Error for CacheError {
 /// `(id, version)` pairs derived below.
 pub fn lint_cached(
     cache: &mut DocumentCache,
+    ext: Option<&str>,
     content: &str,
     config: &Config,
-    rules: &[&dyn Rule],
+    registry: &crate::Registry,
+    processor_cfg: &crate::ProcessorConfig,
+    rules: &crate::RegionRules,
 ) -> Result<Vec<Diagnostic>, CacheError> {
-    // Derive rule identity from the rules actually run, so the key reflects the real rule set.
-    // (Keying off a separately-supplied list would let it drift from `rules` — the staleness
-    // this avoids: e.g. an empty-rules result must not be reused for a non-empty rule set.)
-    let rule_versions: Vec<(&str, &str)> = rules
-        .iter()
-        .map(|rule| (rule.meta().id.as_str(), ""))
-        .collect();
+    // Derive rule identity from every rule across the base and column sets, so the key reflects
+    // the real rule set. (Keying off a separately-supplied list would let it drift from `rules`
+    // — the staleness this avoids: e.g. an empty-rules result must not be reused for a non-empty
+    // rule set.) The `config` fold already covers the `formats` settings (Task 3.3).
+    let rule_versions: Vec<(&str, &str)> =
+        rules.rule_ids().into_iter().map(|id| (id, "")).collect();
     let key = document_cache_key(&CacheKeyInput {
         content,
         config,
@@ -510,10 +511,8 @@ pub fn lint_cached(
         return Ok(hit);
     }
 
-    let ast = parse(content).map_err(CacheError::Parse)?;
-    let bytes = tzlint_ast::to_archive(&ast).map_err(|e| CacheError::Archive(e.to_string()))?;
-    let archived = tzlint_ast::access(&bytes).map_err(|e| CacheError::Archive(e.to_string()))?;
-    let diagnostics = Engine::lint(archived, rules);
+    let diagnostics = crate::lint_document(ext, content, registry, processor_cfg, rules)
+        .map_err(CacheError::Parse)?;
     cache.insert(key, diagnostics.clone());
     Ok(diagnostics)
 }
@@ -589,7 +588,7 @@ fn span_from_value(value: &Value) -> Option<Span> {
 mod tests {
     use super::*;
     use tzlint_ast::{NodeKind, Span};
-    use tzlint_pdk::{Context, NodeRef, RuleMeta};
+    use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta};
 
     fn cfg(json: &str) -> Config {
         Config::parse(json, crate::config::ConfigFormat::Json).unwrap()
@@ -847,15 +846,109 @@ mod tests {
     fn lint_cached_miss_then_hit_matches_fresh() {
         let mut cache = DocumentCache::new();
         let c = Config::default();
-        let rule = FlagKind::new(NodeKind::HEADING);
-        let rules: &[&dyn Rule] = &[&rule];
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
+        let new_rules =
+            || crate::RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::HEADING))]);
 
-        let fresh = lint_cached(&mut cache, "# H\n\nbody", &c, rules).unwrap();
+        let fresh = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n\nbody",
+            &c,
+            &registry,
+            &pcfg,
+            &new_rules(),
+        )
+        .unwrap();
         assert_eq!(fresh.len(), 1, "one heading flagged");
         assert_eq!(cache.len(), 1);
         // Second call is a hit returning identical diagnostics.
-        let hit = lint_cached(&mut cache, "# H\n\nbody", &c, rules).unwrap();
+        let hit = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n\nbody",
+            &c,
+            &registry,
+            &pcfg,
+            &new_rules(),
+        )
+        .unwrap();
         assert_eq!(hit, fresh);
+        assert_eq!(cache.len(), 1, "no new entry on a hit");
+    }
+
+    #[test]
+    fn lint_cached_csv_round_trip_matches_fresh_compute() {
+        use crate::processor::{
+            ColumnSelector, ColumnTarget, DelimitedConfig, ParseMode, ProcessorConfig, RegionRules,
+            Registry,
+        };
+        use crate::{ColumnConfig, FormatConfig};
+        use std::collections::BTreeMap;
+
+        // A FlagText-style rule that flags TEXT nodes, applied only to the "body" column.
+        let source = "id,body\n1,hello\n2,world\n";
+        let registry = Registry::with_builtins();
+        let pcfg = ProcessorConfig {
+            delimited: Some(DelimitedConfig {
+                delimiter: b',',
+                has_header: true,
+                columns: vec![ColumnTarget {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::PlainText,
+                }],
+            }),
+        };
+        // The config must carry the formats so the cache key reflects them.
+        let mut formats = BTreeMap::new();
+        formats.insert(
+            "csv".to_string(),
+            FormatConfig {
+                has_header: true,
+                delimiter: None,
+                columns: vec![ColumnConfig {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::PlainText,
+                    rules: BTreeMap::new(),
+                }],
+            },
+        );
+        let config = Config {
+            formats,
+            ..Default::default()
+        };
+
+        let build_rules = || RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::TEXT))]);
+
+        let fresh = crate::lint_document(Some("csv"), source, &registry, &pcfg, &build_rules())
+            .unwrap();
+        assert_eq!(fresh.len(), 2, "two body cells flagged");
+
+        let mut cache = DocumentCache::new();
+        let miss = lint_cached(
+            &mut cache,
+            Some("csv"),
+            source,
+            &config,
+            &registry,
+            &pcfg,
+            &build_rules(),
+        )
+        .unwrap();
+        assert_eq!(miss, fresh, "cached miss equals a fresh compute");
+        assert_eq!(cache.len(), 1);
+        let hit = lint_cached(
+            &mut cache,
+            Some("csv"),
+            source,
+            &config,
+            &registry,
+            &pcfg,
+            &build_rules(),
+        )
+        .unwrap();
+        assert_eq!(hit, fresh, "cached hit equals a fresh compute");
         assert_eq!(cache.len(), 1, "no new entry on a hit");
     }
 
@@ -864,12 +957,31 @@ mod tests {
         // Regression: a result computed with one rule set must never be reused for another.
         let mut cache = DocumentCache::new();
         let c = Config::default();
-        let rule = FlagKind::new(NodeKind::HEADING);
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
 
-        let empty = lint_cached(&mut cache, "# H\n", &c, &[]).unwrap();
+        let empty = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &crate::RegionRules::base_only(vec![]),
+        )
+        .unwrap();
         assert!(empty.is_empty());
         // A different rule set must miss (not reuse the empty-rules entry) and produce its own.
-        let with_rule = lint_cached(&mut cache, "# H\n", &c, &[&rule]).unwrap();
+        let with_rule = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &crate::RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::HEADING))]),
+        )
+        .unwrap();
         assert_eq!(
             with_rule.len(),
             1,
@@ -885,16 +997,36 @@ mod tests {
     #[test]
     fn lint_cached_empty_rules_is_no_diagnostics() {
         let mut cache = DocumentCache::new();
-        let diags = lint_cached(&mut cache, "# H\n", &Config::default(), &[]).unwrap();
+        let registry = crate::Registry::with_builtins();
+        let diags = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &Config::default(),
+            &registry,
+            &crate::ProcessorConfig::default(),
+            &crate::RegionRules::base_only(vec![]),
+        )
+        .unwrap();
         assert!(diags.is_empty());
     }
 
     #[test]
     fn lint_cached_surfaces_parse_error_without_caching() {
         let mut cache = DocumentCache::new();
+        let registry = crate::Registry::with_builtins();
         // Deeply nested block containers make `parse` reject the input.
         let pathological = "> ".repeat(5000);
-        let err = lint_cached(&mut cache, &pathological, &Config::default(), &[]).unwrap_err();
+        let err = lint_cached(
+            &mut cache,
+            Some("md"),
+            &pathological,
+            &Config::default(),
+            &registry,
+            &crate::ProcessorConfig::default(),
+            &crate::RegionRules::base_only(vec![]),
+        )
+        .unwrap_err();
         assert!(matches!(err, CacheError::Parse(_)));
         assert!(
             cache.is_empty(),

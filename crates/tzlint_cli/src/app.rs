@@ -115,7 +115,6 @@ fn lint(
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
     note_unknown_rules(&config, stderr);
-    let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
 
     // Resolve the PATH arguments into concrete files (globs / directories expanded, sorted and
     // de-duplicated) plus an optional stdin source; surface any discovery notes on stderr.
@@ -147,7 +146,7 @@ fn lint(
         }
     }
     for path in &inputs.files {
-        match read_and_lint(host, cache.as_mut(), path, &config, &rule_refs) {
+        match read_and_lint(host, cache.as_mut(), path, &config) {
             Ok(report) => reports.push(report),
             Err(message) => {
                 let _ = writeln!(stderr, "error: {}: {message}", path.display());
@@ -198,14 +197,27 @@ fn read_and_lint(
     cache: Option<&mut DocumentCache>,
     path: &Path,
     config: &Config,
-    rules: &[&dyn Rule],
 ) -> Result<FileReport, String> {
     let source = host
         .read_to_string(path, MAX_FILE)
         .map_err(|e| e.to_string())?;
+    let ext = extension_of(path);
     let diagnostics = match cache {
-        Some(cache) => lint_cached(cache, &source, config, rules).map_err(|e| e.to_string())?,
-        None => lint_direct(extension_of(path), &source, config)?,
+        Some(cache) => {
+            let registry = Registry::with_builtins();
+            let rr = RegionRules::base_only(resolve_rules(config));
+            lint_cached(
+                cache,
+                ext,
+                &source,
+                config,
+                &registry,
+                &ProcessorConfig::default(),
+                &rr,
+            )
+            .map_err(|e| e.to_string())?
+        }
+        None => lint_direct(ext, &source, config)?,
     };
     Ok(FileReport {
         path: path.to_path_buf(),
@@ -246,7 +258,7 @@ fn fix(
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
     note_unknown_rules(&config, stderr);
-    let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
+    let registry = Registry::with_builtins();
 
     let inputs = expand::expand(host, cwd, paths);
     note_expansion(&inputs.notes, stderr);
@@ -263,7 +275,14 @@ fn fix(
     if inputs.stdin {
         match read_stdin(stdin) {
             Ok(source) => {
-                let fixed = tzlint_core::fix(&source, &rule_refs);
+                let rr = RegionRules::base_only(resolve_rules(&config));
+                let fixed = tzlint_core::fix(
+                    None,
+                    &source,
+                    &registry,
+                    &ProcessorConfig::default(),
+                    &rr,
+                );
                 let did_change = fixed != source;
                 if dry_run {
                     if did_change {
@@ -303,7 +322,10 @@ fn fix(
         };
         // `fix` parses internally and returns the source unchanged on a parse failure, so the
         // only failure to handle here is the write below.
-        let fixed = tzlint_core::fix(&source, &rule_refs);
+        let ext = extension_of(path);
+        let rr = RegionRules::base_only(resolve_rules(&config));
+        let fixed =
+            tzlint_core::fix(ext, &source, &registry, &ProcessorConfig::default(), &rr);
         if fixed == source {
             continue;
         }

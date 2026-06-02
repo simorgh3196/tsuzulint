@@ -1,8 +1,6 @@
 //! Applying autofixes with deterministic conflict resolution.
 
-use tzlint_pdk::{Diagnostic, Fix, Rule};
-
-use crate::Engine;
+use tzlint_pdk::{Diagnostic, Fix};
 
 /// Maximum number of lint→fix passes (ESLint semantics), guaranteeing termination.
 pub const MAX_FIX_PASSES: usize = 10;
@@ -72,21 +70,28 @@ pub fn apply_fixes(source: &str, diagnostics: &[Diagnostic]) -> FixPass {
     }
 }
 
-/// Lint-and-fix `source` to a fixpoint: parse → lint → apply, repeating until the text
-/// stops changing or [`MAX_FIX_PASSES`] is reached (which guarantees termination). Returns
-/// the fixed text; a parse failure leaves the current text unchanged.
+/// Lint-and-fix `source` to a fixpoint over the processor seam: select a processor by `ext`,
+/// extract its regions (or whole AST), lint each with the rules its tag resolves to in `rules`,
+/// and apply the collected fixes — repeating until the text stops changing or [`MAX_FIX_PASSES`]
+/// is reached (which guarantees termination). Returns the fixed text; a parse failure leaves the
+/// current text unchanged.
+///
+/// Fixes land in absolute source coordinates, so a CSV/TSV fix changes only its cell while the
+/// structural bytes (delimiters, header, untargeted columns) stay intact.
 #[must_use]
-pub fn fix(source: &str, rules: &[&dyn Rule]) -> String {
+pub fn fix(
+    ext: Option<&str>,
+    source: &str,
+    registry: &crate::Registry,
+    processor_cfg: &crate::ProcessorConfig,
+    rules: &crate::RegionRules,
+) -> String {
     let mut text = source.to_string();
     for _ in 0..MAX_FIX_PASSES {
-        let Ok(ast) = crate::parse(&text) else { break };
-        let Ok(bytes) = tzlint_ast::to_archive(&ast) else {
+        let Ok(diagnostics) = crate::lint_document(ext, &text, registry, processor_cfg, rules)
+        else {
             break;
         };
-        let Ok(archived) = tzlint_ast::access(&bytes) else {
-            break;
-        };
-        let diagnostics = Engine::lint(archived, rules);
         let pass = apply_fixes(&text, &diagnostics);
         if pass.output == text {
             break; // fixpoint: nothing changed
@@ -100,7 +105,7 @@ pub fn fix(source: &str, rules: &[&dyn Rule]) -> String {
 mod tests {
     use super::*;
     use tzlint_ast::{NodeKind, Span};
-    use tzlint_pdk::{Context, NodeRef, RuleMeta, Severity};
+    use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
     fn diag_with_fix(span: Span, replacement: &str) -> Diagnostic {
         Diagnostic::new("t", Severity::Warning, span, "m").with_fix(Fix::replace(span, replacement))
@@ -197,8 +202,64 @@ mod tests {
     #[test]
     fn fix_converges_when_no_more_apply() {
         // Once "BAD" → "ok", re-linting finds nothing, so it stops.
-        let rule = Rewrite::new("BAD", "ok");
-        assert_eq!(fix("BAD\n", &[&rule]), "ok\n");
+        let registry = crate::Registry::with_builtins();
+        let rules = crate::RegionRules::base_only(vec![Box::new(Rewrite::new("BAD", "ok"))]);
+        assert_eq!(
+            fix(
+                Some("md"),
+                "BAD\n",
+                &registry,
+                &crate::ProcessorConfig::default(),
+                &rules
+            ),
+            "ok\n"
+        );
+    }
+
+    /// Replaces a TEXT node whose text is exactly `"x"` with `"y"` via a fix.
+    struct ReplaceXWithY {
+        meta: RuleMeta,
+    }
+    impl ReplaceXWithY {
+        fn new() -> Self {
+            ReplaceXWithY {
+                meta: RuleMeta::new("replace-x", Severity::Warning, vec![NodeKind::TEXT]),
+            }
+        }
+    }
+    impl Rule for ReplaceXWithY {
+        fn meta(&self) -> &RuleMeta {
+            &self.meta
+        }
+        fn check<'ast>(&self, node: NodeRef<'ast>, cx: &mut Context<'ast>) {
+            if node.text() == "x" {
+                cx.report_with_fixes(node.span(), "x→y", [Fix::replace(node.span(), "y")]);
+            }
+        }
+    }
+
+    #[test]
+    fn fix_applies_inside_csv_cells_only() {
+        use crate::processor::{
+            ColumnSelector, ColumnTarget, DelimitedConfig, ParseMode, ProcessorConfig, RegionRules,
+            Registry,
+        };
+        // Only the body cells change; structure (header, ids, commas) is intact.
+        let source = "id,body\n1,x\n2,x\n";
+        let registry = Registry::with_builtins();
+        let pcfg = ProcessorConfig {
+            delimited: Some(DelimitedConfig {
+                delimiter: b',',
+                has_header: true,
+                columns: vec![ColumnTarget {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::PlainText,
+                }],
+            }),
+        };
+        let rules = RegionRules::base_only(vec![Box::new(ReplaceXWithY::new())]);
+        let out = fix(Some("csv"), source, &registry, &pcfg, &rules);
+        assert_eq!(out, "id,body\n1,y\n2,y\n");
     }
 
     #[test]
@@ -220,7 +281,15 @@ mod tests {
             meta: RuleMeta::new("grow", Severity::Warning, vec![NodeKind::TEXT]),
         };
         // Starts as "a"; each of the 10 passes appends one '!'.
-        let out = fix("a", &[&rule]);
+        let registry = crate::Registry::with_builtins();
+        let rules = crate::RegionRules::base_only(vec![Box::new(rule)]);
+        let out = fix(
+            Some("md"),
+            "a",
+            &registry,
+            &crate::ProcessorConfig::default(),
+            &rules,
+        );
         assert_eq!(out, format!("a{}", "!".repeat(MAX_FIX_PASSES)));
     }
 }
