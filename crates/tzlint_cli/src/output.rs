@@ -213,6 +213,83 @@ pub fn render_sarif(writer: &mut dyn Write, reports: &[FileReport]) -> io::Resul
     writeln!(writer)
 }
 
+// ── `rules` subcommand output ─────────────────────────────────────────────────────────
+//
+// Renders the effective built-in rule set (see [`RuleInfo`]) for the `rules list` / `rules
+// explain` subcommands — separate from the diagnostic renderers above.
+
+use crate::rules::RuleInfo;
+
+/// Render the rule list as aligned `id  on|off  severity` columns, then a summary line.
+pub fn render_rule_list_text(writer: &mut dyn Write, infos: &[RuleInfo]) -> io::Result<()> {
+    let id_width = infos.iter().map(|info| info.id.len()).max().unwrap_or(0);
+    let enabled = infos.iter().filter(|info| info.enabled).count();
+    for info in infos {
+        writeln!(
+            writer,
+            "{:<id_width$}  {:<3}  {}",
+            info.id,
+            if info.enabled { "on" } else { "off" },
+            severity_str(info.severity),
+        )?;
+    }
+    writeln!(
+        writer,
+        "{} built-in rule(s), {enabled} enabled",
+        infos.len(),
+    )
+}
+
+/// Render the rule list as a JSON array of `{ id, enabled, severity }` objects.
+pub fn render_rule_list_json(writer: &mut dyn Write, infos: &[RuleInfo]) -> io::Result<()> {
+    let rules: Vec<Value> = infos
+        .iter()
+        .map(|info| {
+            json!({
+                "id": info.id,
+                "enabled": info.enabled,
+                "severity": severity_str(info.severity),
+            })
+        })
+        .collect();
+    serde_json::to_writer_pretty(&mut *writer, &Value::Array(rules)).map_err(io::Error::other)?;
+    writeln!(writer)
+}
+
+/// Render one rule's effective state (`rules explain`): status, severity (noting whether it is a
+/// config override or the default), and config-supplied options if any.
+pub fn render_rule_explain(writer: &mut dyn Write, info: &RuleInfo) -> io::Result<()> {
+    writeln!(writer, "rule:     {}", info.id)?;
+    writeln!(
+        writer,
+        "status:   {}",
+        if info.enabled {
+            "enabled"
+        } else {
+            "disabled (by config)"
+        },
+    )?;
+    let severity_note = if info.severity_overridden {
+        "overridden by config"
+    } else {
+        "default"
+    };
+    writeln!(
+        writer,
+        "severity: {} ({severity_note})",
+        severity_str(info.severity),
+    )?;
+    match &info.options {
+        // `serde_json::to_string` only errors on a non-string map key, which a parsed config
+        // value never has; surface it as an io error rather than unwrapping regardless.
+        Some(options) => {
+            let rendered = serde_json::to_string(options).map_err(io::Error::other)?;
+            writeln!(writer, "options:  {rendered} (from config)")
+        }
+        None => writeln!(writer, "options:  (defaults)"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,5 +461,137 @@ mod tests {
         assert_eq!(sarif_uri(Path::new("docs/a.md")), "docs/a.md");
         // A backslash path (as Windows `display()` yields) is normalized to URI separators.
         assert_eq!(sarif_uri(Path::new("docs\\a.md")), "docs/a.md");
+    }
+
+    fn ri(id: &'static str, enabled: bool, severity: Severity) -> RuleInfo {
+        RuleInfo {
+            id,
+            enabled,
+            severity,
+            severity_overridden: false,
+            options: None,
+        }
+    }
+
+    fn render_to_string(f: impl FnOnce(&mut Vec<u8>) -> io::Result<()>) -> String {
+        let mut buf = Vec::new();
+        f(&mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn rule_list_text_lists_state_and_summarizes() {
+        let infos = vec![
+            ri("max-ten", true, Severity::Warning),
+            ri("sentence-length", false, Severity::Error),
+        ];
+        let out = render_to_string(|w| render_rule_list_text(w, &infos));
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("max-ten") && l.contains("on") && l.contains("warning")),
+            "{out}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("sentence-length") && l.contains("off") && l.contains("error")),
+            "{out}"
+        );
+        assert!(out.contains("2 built-in rule(s), 1 enabled"), "{out}");
+    }
+
+    #[test]
+    fn rule_list_text_aligns_the_severity_column() {
+        // Differing id lengths are padded so the on/off and severity columns line up.
+        let infos = vec![
+            ri("max-ten", true, Severity::Warning),
+            ri("no-mixed-zenkaku-hankaku-alphabet", true, Severity::Warning),
+        ];
+        let out = render_to_string(|w| render_rule_list_text(w, &infos));
+        let cols: Vec<usize> = out
+            .lines()
+            .filter(|l| l.contains("warning"))
+            .map(|l| l.find("warning").unwrap())
+            .collect();
+        assert_eq!(cols.len(), 2);
+        assert_eq!(cols[0], cols[1], "severity column should align: {out:?}");
+    }
+
+    #[test]
+    fn rule_list_json_is_an_array_of_objects() {
+        let infos = vec![
+            ri("max-ten", true, Severity::Warning),
+            ri("no-todo", false, Severity::Info),
+        ];
+        let mut buf = Vec::new();
+        render_rule_list_json(&mut buf, &infos).unwrap();
+        let value: Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(
+            value[0],
+            json!({ "id": "max-ten", "enabled": true, "severity": "warning" })
+        );
+        assert_eq!(
+            value[1],
+            json!({ "id": "no-todo", "enabled": false, "severity": "info" })
+        );
+    }
+
+    #[test]
+    fn rule_explain_default_shows_defaults() {
+        let out =
+            render_to_string(|w| render_rule_explain(w, &ri("max-ten", true, Severity::Warning)));
+        assert!(out.contains("rule:     max-ten"), "{out}");
+        assert!(out.contains("status:   enabled"), "{out}");
+        assert!(out.contains("severity: warning (default)"), "{out}");
+        assert!(out.contains("options:  (defaults)"), "{out}");
+    }
+
+    #[test]
+    fn rule_explain_shows_override_disabled_and_options() {
+        let info = RuleInfo {
+            id: "max-ten",
+            enabled: false,
+            severity: Severity::Error,
+            severity_overridden: true,
+            options: Some(json!({ "max": 0 })),
+        };
+        let out = render_to_string(|w| render_rule_explain(w, &info));
+        assert!(out.contains("status:   disabled (by config)"), "{out}");
+        assert!(
+            out.contains("severity: error (overridden by config)"),
+            "{out}"
+        );
+        assert!(out.contains("options:  {\"max\":0} (from config)"), "{out}");
+    }
+
+    #[test]
+    fn renderers_propagate_writer_errors() {
+        // A zero-capacity `&mut [u8]` sink fails (`WriteZero`) on any non-empty write, exercising
+        // each renderer's error-propagation arm — the module's output policy is that a failed
+        // result write surfaces as an error (the CLI maps it to `ExitStatus::Error`).
+        fn write_fails(render: impl FnOnce(&mut dyn Write) -> io::Result<()>) -> bool {
+            let mut sink: &mut [u8] = &mut [];
+            render(&mut sink).is_err()
+        }
+        let reports = [report(
+            "a.md",
+            "x\n",
+            vec![Diagnostic::new(
+                "no-todo",
+                Severity::Warning,
+                Span::new(0, 1),
+                "m",
+            )],
+        )];
+        assert!(write_fails(|w| render_text(w, &reports)));
+        assert!(write_fails(|w| render_json(w, &reports)));
+        assert!(write_fails(|w| render_sarif(w, &reports)));
+
+        let infos = [ri("max-ten", true, Severity::Warning)];
+        assert!(write_fails(|w| render_rule_list_text(w, &infos)));
+        assert!(write_fails(|w| render_rule_list_json(w, &infos)));
+        assert!(write_fails(|w| render_rule_explain(w, &infos[0])));
     }
 }
