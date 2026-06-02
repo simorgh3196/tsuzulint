@@ -220,7 +220,11 @@ fn extension_of(path: &Path) -> Option<&str> {
 
 /// The no-cache path: select a processor by extension and lint via the processor seam, surfacing
 /// parse/archive failures as a message (mirrors what [`lint_cached`] reports on the cached path).
-fn lint_direct(ext: Option<&str>, source: &str, rules: &[&dyn Rule]) -> Result<Vec<Diagnostic>, String> {
+fn lint_direct(
+    ext: Option<&str>,
+    source: &str,
+    rules: &[&dyn Rule],
+) -> Result<Vec<Diagnostic>, String> {
     let registry = Registry::with_builtins();
     lint_document(ext, source, &registry, rules).map_err(|e| e.to_string())
 }

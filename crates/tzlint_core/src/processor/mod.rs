@@ -55,13 +55,21 @@ impl RegionTag {
     /// The tag for a whole single-document format (no kind/index/name).
     #[must_use]
     pub fn whole() -> Self {
-        RegionTag { kind: None, index: None, name: None }
+        RegionTag {
+            kind: None,
+            index: None,
+            name: None,
+        }
     }
 
     /// The tag for a delimited-format column at 0-based `index`, with an optional header `name`.
     #[must_use]
     pub fn column(index: u32, name: Option<String>) -> Self {
-        RegionTag { kind: Some("column"), index: Some(index), name }
+        RegionTag {
+            kind: Some("column"),
+            index: Some(index),
+            name,
+        }
     }
 }
 
@@ -96,7 +104,10 @@ impl Registry {
     /// The registry of built-in processors. Markdown is the default; later plans push CSV/TSV.
     #[must_use]
     pub fn with_builtins() -> Self {
-        Registry { default: Box::new(MarkdownProcessor), others: Vec::new() }
+        Registry {
+            default: Box::new(MarkdownProcessor),
+            others: Vec::new(),
+        }
     }
 
     /// The processor handling `ext` (case-insensitive, dot-less), or the Markdown default when
@@ -139,10 +150,12 @@ pub fn lint_document(
     };
     let mut diagnostics = Vec::new();
     for ast in &asts {
-        let bytes = tzlint_ast::to_archive(ast)
-            .map_err(|e| ParseError { message: format!("archive failed: {e}") })?;
-        let archived = tzlint_ast::access(&bytes)
-            .map_err(|e| ParseError { message: format!("archive failed: {e}") })?;
+        let bytes = tzlint_ast::to_archive(ast).map_err(|e| ParseError {
+            message: format!("archive failed: {e}"),
+        })?;
+        let archived = tzlint_ast::access(&bytes).map_err(|e| ParseError {
+            message: format!("archive failed: {e}"),
+        })?;
         diagnostics.extend(crate::Engine::lint(archived, rules));
     }
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
@@ -211,7 +224,11 @@ fn plaintext_slice_ast(start: u32, end: u32, source: &str) -> Ast {
             next_sibling: OptionNodeId::NONE,
         },
     ];
-    Ast { nodes, text: source.to_string(), root: NodeId(0) }
+    Ast {
+        nodes,
+        text: source.to_string(),
+        root: NodeId(0),
+    }
 }
 
 #[cfg(test)]
@@ -244,7 +261,7 @@ mod tests {
     fn fake_processor_reports_extension() {
         let f = Fake;
         assert_eq!(f.extensions(), &["fake"]);
-        let parsed = f.parse("x", &ProcessorConfig::default()).unwrap();
+        let parsed = f.parse("x", &ProcessorConfig).unwrap();
         assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
     }
 
@@ -253,11 +270,18 @@ mod tests {
         let reg = Registry::with_builtins();
         // Markdown is registered for md/markdown…
         assert!(reg.for_ext(Some("md")).extensions().contains(&"md"));
-        assert!(reg.for_ext(Some("markdown")).extensions().contains(&"markdown"));
+        assert!(
+            reg.for_ext(Some("markdown"))
+                .extensions()
+                .contains(&"markdown")
+        );
         // …and is the fallback for unknown / missing extensions.
         let default_exts = reg.for_ext(None).extensions().to_vec();
         assert!(default_exts.contains(&"md"));
-        assert_eq!(reg.for_ext(Some("UNKNOWN")).extensions().to_vec(), default_exts);
+        assert_eq!(
+            reg.for_ext(Some("UNKNOWN")).extensions().to_vec(),
+            default_exts
+        );
         // Case-insensitive match.
         assert!(reg.for_ext(Some("MD")).extensions().contains(&"md"));
     }
@@ -284,7 +308,10 @@ mod tests {
         assert_eq!(ast.nodes[ast.root.0 as usize].kind, NodeKind::ROOT);
         let text_node = ast.nodes.iter().find(|n| n.kind == NodeKind::TEXT).unwrap();
         assert_eq!(text_node.span, Span::new(10, 15));
-        assert_eq!(&ast.text[text_node.span.start as usize..text_node.span.end as usize], "hello");
+        assert_eq!(
+            &ast.text[text_node.span.start as usize..text_node.span.end as usize],
+            "hello"
+        );
     }
 
     #[test]
@@ -295,19 +322,23 @@ mod tests {
         let ast = &asts[0];
         assert_eq!(ast.text, source);
         // The STRONG node's span must be absolute into the whole source.
-        let strong = ast.nodes.iter().find(|n| n.kind == NodeKind::STRONG).unwrap();
-        assert_eq!(&ast.text[strong.span.start as usize..strong.span.end as usize], "**bold**");
+        let strong = ast
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::STRONG)
+            .unwrap();
+        assert_eq!(
+            &ast.text[strong.span.start as usize..strong.span.end as usize],
+            "**bold**"
+        );
         assert_eq!(strong.span, Span::new(10, 18));
     }
 
     #[test]
     fn one_mini_ast_per_slice() {
         let source = "a\nbb\nccc\n";
-        let asts = build_region_asts(
-            &[region(&[(0, 1), (2, 4)], ParseMode::PlainText)],
-            source,
-        )
-        .unwrap();
+        let asts =
+            build_region_asts(&[region(&[(0, 1), (2, 4)], ParseMode::PlainText)], source).unwrap();
         assert_eq!(asts.len(), 2); // independent mini-document per slice
     }
 
@@ -319,7 +350,9 @@ mod tests {
     }
     impl FlagText {
         fn new() -> Self {
-            FlagText { meta: RuleMeta::new("flag-text", Severity::Warning, vec![NodeKind::TEXT]) }
+            FlagText {
+                meta: RuleMeta::new("flag-text", Severity::Warning, vec![NodeKind::TEXT]),
+            }
         }
     }
     impl Rule for FlagText {
