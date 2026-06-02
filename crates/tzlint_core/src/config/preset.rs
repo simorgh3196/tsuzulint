@@ -8,8 +8,9 @@ use super::{Config, RuleSetting};
 
 /// A built-in preset: a base set of rule settings the user config overrides by id.
 ///
-/// The concrete rule sets are populated when `tzlint_rules` lands (M1f); the resolution
-/// machinery ([`resolve`]) is already complete and tested, so filling them in is additive.
+/// The concrete rule sets reference `tzlint_rules` ids as strings (no crate dependency); the
+/// resolution machinery ([`resolve`]) layers a preset under the user config, and the CLI selects
+/// a preset via the config's `extends` key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Preset {
     /// A small, broadly-applicable base for Japanese prose.
@@ -41,8 +42,8 @@ impl Preset {
     /// Rule ids are referenced as strings (no dependency on `tzlint_rules`); they MUST match the
     /// ids in `tzlint_rules::RULE_IDS` verbatim. Rules whose detection needs morphology (M2),
     /// such as `no-doubled-joshi`, are intentionally omitted until that lands — additively.
-    /// Options here are config-layer metadata; routing them into rule instances is a later step,
-    /// so a rule currently runs with its own defaults regardless of the value set here.
+    /// The options set here are routed into the constructed rule instances (via
+    /// `tzlint_rules::build_rule`) when a config selects this preset through `extends`.
     fn rules(self) -> BTreeMap<RuleId, RuleSetting> {
         match self {
             Preset::JaBasic => ja_basic(),
