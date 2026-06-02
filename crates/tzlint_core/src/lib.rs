@@ -2,6 +2,8 @@
 //!
 //! Compiles for native and `wasm32`. Houses:
 //! - the markdown-rs parser + mdast → index-AST transform,
+//! - the format-neutral `processor` seam (`Processor`/`Registry`/`lint_document`) that selects a
+//!   parser by file extension, defaulting to Markdown,
 //! - the single-traversal multi-visitor `Engine::lint` (the one dispatch entry point),
 //! - multi-format config loading (+ presets), the document-level cache,
 //! - the position mapper, and the centralized boundary `io` module (`Host::read_to_string`
@@ -41,7 +43,7 @@ pub use processor::{
 };
 
 #[cfg(test)]
-mod processor_exports {
+mod tests {
     use crate::{Registry, lint_document};
 
     #[test]

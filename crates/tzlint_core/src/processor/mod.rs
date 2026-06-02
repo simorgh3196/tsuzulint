@@ -112,6 +112,10 @@ impl Registry {
 
     /// The processor handling `ext` (case-insensitive, dot-less), or the Markdown default when
     /// `ext` is `None` or unmatched.
+    ///
+    /// Permanent contract: only the `others` are matched by extension (case-insensitively); the
+    /// `default` (Markdown) processor is returned for any unrecognized or missing extension, so a
+    /// file always has a processor.
     #[must_use]
     pub fn for_ext(&self, ext: Option<&str>) -> &dyn Processor {
         if let Some(ext) = ext {
@@ -158,6 +162,8 @@ pub fn lint_document(
         })?;
         diagnostics.extend(crate::Engine::lint(archived, rules));
     }
+    // Sort unconditionally — even on the single-AST path — so callers never observe an unstable
+    // order, and so diagnostics merged across multiple regions come out in one stable sequence.
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
     Ok(diagnostics)
 }
@@ -171,9 +177,13 @@ pub fn lint_document(
 pub(crate) fn build_region_asts(regions: &[Region], source: &str) -> Result<Vec<Ast>, ParseError> {
     let mut asts = Vec::new();
     for region in regions {
+        // `region.tag` is intentionally unused at this stage; later plans consume it for
+        // per-region rule selection.
         for slice in &region.slices {
             let start = slice.start;
             let end = slice.end;
+            // An out-of-range slice (a processor-contract violation) degrades to empty text rather
+            // than panicking.
             let text = source.get(start as usize..end as usize).unwrap_or("");
             let ast = match region.parse_mode {
                 ParseMode::Markdown => markdown_slice_ast(text, start, source)?,

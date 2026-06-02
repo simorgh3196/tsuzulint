@@ -190,8 +190,8 @@ fn lint_exit_status(had_error: bool, has_findings: bool) -> ExitStatus {
     }
 }
 
-/// Read `path` through the host and lint it, via the cache when enabled or the direct
-/// parse→archive→lint bridge otherwise.
+/// Read `path` through the host and lint it, via the cache when enabled or the processor seam
+/// ([`lint_document`]) otherwise.
 fn read_and_lint(
     host: &dyn Host,
     cache: Option<&mut DocumentCache>,
@@ -213,7 +213,8 @@ fn read_and_lint(
     })
 }
 
-/// The lowercase extension of `path` (dot-less), or `None`.
+/// The extension of `path` (dot-less, as-is), or `None`. Case is preserved here; [`Registry::for_ext`]
+/// lowercases when matching.
 fn extension_of(path: &Path) -> Option<&str> {
     path.extension().and_then(|e| e.to_str())
 }
