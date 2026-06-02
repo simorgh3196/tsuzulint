@@ -13,6 +13,52 @@ textlint and specialized for CJK (Japanese first; Korean/Chinese planned).
   easy rule extension (Rust PDK now; layered ABI for future TS/AssemblyScript), safe
   breaking changes (frozen AST core + additive tables + `bytecheck`), strong tests & docs.
 
+## Usage
+
+Build the binary (`cargo build --release` → `target/release/tzlint`), then:
+
+```sh
+# Lint files, directories (recursed for Markdown), or globs; `-` reads stdin.
+tzlint lint README.md docs/ 'src/**/*.md'
+cat draft.md | tzlint lint -
+
+# Pick an output format (text | json | sarif).
+tzlint lint --format json docs/
+tzlint lint --format sarif docs/ > results.sarif   # e.g. GitHub code scanning
+
+# Apply autofixes in place (preview with --dry-run); `fix -` filters stdin to stdout.
+tzlint fix docs/
+tzlint fix --dry-run docs/
+cat draft.md | tzlint fix - > fixed.md
+
+# Write a starter .tzlintrc.json in the working directory.
+tzlint init
+
+# Inspect the resolved rule set (honors --config / discovery).
+tzlint rules list
+tzlint rules explain max-ten
+```
+
+A directory argument is searched recursively for `.md`/`.markdown` files (hidden entries and
+symlinks are skipped); globs (`*`, `?`, `[...]`, `**`) match exactly, so quote them to keep the
+shell from expanding them first.
+
+Global options: `-c/--config <PATH>` (use a specific config instead of upward discovery),
+`-v/--verbose` (extra notes to stderr), `--no-cache` (skip the document cache).
+
+`lint` exits `0` when clean, `1` when it reports one or more diagnostics, and `2` on an
+operational error (bad config, unreadable file, …) — the conventional codes for CI. The text
+format is `path:line:col: severity: message [rule]`, where `col` is the diagnostic's 1-based
+start column:
+
+```text
+$ printf 'これはﾊﾛｰという文です。\n' | tzlint lint -
+<stdin>:1:4: warning: 半角カタカナは推奨されません。全角カタカナを使ってください。 [no-hankaku-kana]
+1 file(s) checked, 1 issue(s) found
+```
+
+See [`docs/config-reference.md`](docs/config-reference.md) for configuration.
+
 ## Workspace layout
 
 ```

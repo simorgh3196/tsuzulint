@@ -14,8 +14,9 @@ constraint from day one (the core compiles to `wasm32`, CI builds it); the first
 - **M1 — Lean core**: `tzlint_ast` (frozen AST), `tzlint_core` (markdown-rs parser +
   mdast→index transform, multi-format config + presets, document-level cache,
   single-traversal engine, position mapper, `io` + `Host` abstraction), Diagnostic/Fix
-  model + autofix, `tzlint_rules` starter set, `tzlint_cli` (`lint`/`fix`/`init`), full
-  tests + docs. **Migration parity gate** asserted here.
+  model + autofix, `tzlint_rules` starter set, `tzlint_cli` (`lint`/`fix`/`init`/`rules`,
+  text/JSON/SARIF), full tests + docs. The earlier `tsuzulint` prototype is an implementation
+  reference only — it has no users, so M1 ships no formal migration-parity gate.
 - **M2 — Morphology**: language-neutral provider; Japanese first; `MorphologyV1` table;
   dynamic (non-embedded) dictionary provisioning; dictionary-version cache key.
 - **M3 — Plugin ABI (native)**: `tzlint_abi` transport + calling convention on wasmtime
