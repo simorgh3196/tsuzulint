@@ -921,8 +921,8 @@ mod tests {
 
         let build_rules = || RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::TEXT))]);
 
-        let fresh = crate::lint_document(Some("csv"), source, &registry, &pcfg, &build_rules())
-            .unwrap();
+        let fresh =
+            crate::lint_document(Some("csv"), source, &registry, &pcfg, &build_rules()).unwrap();
         assert_eq!(fresh.len(), 2, "two body cells flagged");
 
         let mut cache = DocumentCache::new();

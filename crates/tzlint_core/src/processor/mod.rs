@@ -164,11 +164,7 @@ impl RegionRules {
         name: Option<String>,
         rules: Vec<Box<dyn Rule>>,
     ) {
-        self.columns.push(ColumnRuleSet {
-            index,
-            name,
-            rules,
-        });
+        self.columns.push(ColumnRuleSet { index, name, rules });
     }
 
     /// The rules to run for a region with `tag`: the first matching column set, else the base set.
@@ -626,8 +622,14 @@ mod tests {
         // (Box a fresh FlagText for the column set.)
         rr_with_col.push_column(None, Some("body".into()), vec![Box::new(FlagText::new())]);
 
-        let none =
-            lint_document(Some("onecol"), "abc", &reg, &ProcessorConfig::default(), &rr).unwrap();
+        let none = lint_document(
+            Some("onecol"),
+            "abc",
+            &reg,
+            &ProcessorConfig::default(),
+            &rr,
+        )
+        .unwrap();
         assert!(
             none.is_empty(),
             "empty base + no column rules → no diagnostics"
@@ -700,8 +702,14 @@ mod tests {
             r
         };
         let rr = RegionRules::base_only(vec![Box::new(FlagText::new())]);
-        let diags =
-            lint_document(Some("slice"), source, &reg, &ProcessorConfig::default(), &rr).unwrap();
+        let diags = lint_document(
+            Some("slice"),
+            source,
+            &reg,
+            &ProcessorConfig::default(),
+            &rr,
+        )
+        .unwrap();
         // The single TEXT node spans the slice 2..7 absolutely.
         assert_eq!(diag_spans(&diags), vec![(2, 7)]);
     }
