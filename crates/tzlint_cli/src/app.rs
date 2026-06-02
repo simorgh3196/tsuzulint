@@ -21,15 +21,16 @@ use std::path::{Path, PathBuf};
 
 use tzlint_core::io::{MAX_CONFIG, MAX_FILE};
 use tzlint_core::{
-    Config, ConfigFormat, DocumentCache, Host, ProcessorConfig, RegionRules, Registry, discover,
-    lint_cached, lint_document,
+    Config, ConfigFormat, DocumentCache, Host, Registry, discover, lint_cached, lint_document,
 };
 use tzlint_pdk::{Diagnostic, Rule};
 
 use crate::cli::{Cli, Command, OutputFormat, RuleListFormat, RulesCommand};
 use crate::expand;
 use crate::output::{self, FileReport};
-use crate::rules::{resolve_rules, rule_info, rule_infos, unknown_rule_ids};
+use crate::rules::{
+    processor_config_for, region_rules_for, resolve_rules, rule_info, rule_infos, unknown_rule_ids,
+};
 
 /// The path label used for diagnostics linted from standard input.
 const STDIN_LABEL: &str = "<stdin>";
@@ -115,6 +116,8 @@ fn lint(
     let rules = resolve_rules(&config);
     note_if_no_rules(&rules, stderr);
     note_unknown_rules(&config, stderr);
+    // One processor registry for the whole run, shared by every file and the stdin source.
+    let registry = Registry::with_builtins();
 
     // Resolve the PATH arguments into concrete files (globs / directories expanded, sorted and
     // de-duplicated) plus an optional stdin source; surface any discovery notes on stderr.
@@ -131,7 +134,7 @@ fn lint(
     // stdin is reported first so the work order is fixed and the summary count is stable.
     if inputs.stdin {
         match read_stdin(stdin).and_then(|source| {
-            let diagnostics = lint_direct(None, &source, &config)?;
+            let diagnostics = lint_source(&registry, &config, None, &source)?;
             Ok(FileReport {
                 path: PathBuf::from(STDIN_LABEL),
                 source,
@@ -146,7 +149,7 @@ fn lint(
         }
     }
     for path in &inputs.files {
-        match read_and_lint(host, cache.as_mut(), path, &config) {
+        match read_and_lint(&registry, host, cache.as_mut(), path, &config) {
             Ok(report) => reports.push(report),
             Err(message) => {
                 let _ = writeln!(stderr, "error: {}: {message}", path.display());
@@ -191,8 +194,11 @@ fn lint_exit_status(had_error: bool, has_findings: bool) -> ExitStatus {
 }
 
 /// Read `path` through the host and lint it, via the cache when enabled or the processor seam
-/// ([`lint_document`]) otherwise.
+/// ([`lint_document`]) otherwise. Both paths build the file's [`ProcessorConfig`] and
+/// [`RegionRules`] from its extension (so CSV/TSV columns are extracted and per-column rules
+/// applied; Markdown gets the base set and the Markdown processor).
 fn read_and_lint(
+    registry: &Registry,
     host: &dyn Host,
     cache: Option<&mut DocumentCache>,
     path: &Path,
@@ -204,20 +210,12 @@ fn read_and_lint(
     let ext = extension_of(path);
     let diagnostics = match cache {
         Some(cache) => {
-            let registry = Registry::with_builtins();
-            let rr = RegionRules::base_only(resolve_rules(config));
-            lint_cached(
-                cache,
-                ext,
-                &source,
-                config,
-                &registry,
-                &ProcessorConfig::default(),
-                &rr,
-            )
-            .map_err(|e| e.to_string())?
+            let pcfg = processor_config_for(config, ext);
+            let rr = region_rules_for(config, ext);
+            lint_cached(cache, ext, &source, config, registry, &pcfg, &rr)
+                .map_err(|e| e.to_string())?
         }
-        None => lint_direct(ext, &source, config)?,
+        None => lint_source(registry, config, ext, &source)?,
     };
     Ok(FileReport {
         path: path.to_path_buf(),
@@ -232,12 +230,16 @@ fn extension_of(path: &Path) -> Option<&str> {
     path.extension().and_then(|e| e.to_str())
 }
 
-/// The no-cache path: select a processor by extension and lint via the processor seam, surfacing
-/// parse/archive failures as a message (mirrors what [`lint_cached`] reports on the cached path).
-fn lint_direct(ext: Option<&str>, source: &str, config: &Config) -> Result<Vec<Diagnostic>, String> {
-    let registry = Registry::with_builtins();
-    let rr = RegionRules::base_only(resolve_rules(config));
-    lint_document(ext, source, &registry, &ProcessorConfig::default(), &rr).map_err(|e| e.to_string())
+/// Lint one already-read source with the processor seam, given the file's extension.
+fn lint_source(
+    registry: &Registry,
+    config: &Config,
+    ext: Option<&str>,
+    source: &str,
+) -> Result<Vec<Diagnostic>, String> {
+    let pcfg = processor_config_for(config, ext);
+    let rr = region_rules_for(config, ext);
+    lint_document(ext, source, registry, &pcfg, &rr).map_err(|e| e.to_string())
 }
 
 /// `fix`: lint-and-fix each file to a fixpoint; write changed files in place (or just report
@@ -275,14 +277,9 @@ fn fix(
     if inputs.stdin {
         match read_stdin(stdin) {
             Ok(source) => {
-                let rr = RegionRules::base_only(resolve_rules(&config));
-                let fixed = tzlint_core::fix(
-                    None,
-                    &source,
-                    &registry,
-                    &ProcessorConfig::default(),
-                    &rr,
-                );
+                let pcfg = processor_config_for(&config, None);
+                let rr = region_rules_for(&config, None);
+                let fixed = tzlint_core::fix(None, &source, &registry, &pcfg, &rr);
                 let did_change = fixed != source;
                 if dry_run {
                     if did_change {
@@ -323,9 +320,9 @@ fn fix(
         // `fix` parses internally and returns the source unchanged on a parse failure, so the
         // only failure to handle here is the write below.
         let ext = extension_of(path);
-        let rr = RegionRules::base_only(resolve_rules(&config));
-        let fixed =
-            tzlint_core::fix(ext, &source, &registry, &ProcessorConfig::default(), &rr);
+        let pcfg = processor_config_for(&config, ext);
+        let rr = region_rules_for(&config, ext);
+        let fixed = tzlint_core::fix(ext, &source, &registry, &pcfg, &rr);
         if fixed == source {
             continue;
         }
@@ -1351,6 +1348,30 @@ mod tests {
         let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
         assert_eq!(status, ExitStatus::Findings);
         assert!(out.contains("no-hankaku-kana"), "{out}");
+    }
+
+    #[test]
+    fn lint_csv_with_per_column_rule_reports_in_the_right_cell() {
+        // Config lints only the `body` column; `no-todo` is on. The TODO in the `body` cell is
+        // flagged; the TODO in the un-linted `note` column is not.
+        let host = MockHost::new();
+        host.put("data.csv", "id,body,note\n1,TODO fix,TODO ignore\n");
+        host.put(
+            "c.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        let mut c = lint_cli("data.csv", OutputFormat::Json);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let diags = &v[0]["diagnostics"];
+        assert_eq!(
+            diags.as_array().unwrap().len(),
+            1,
+            "only the body TODO: {out}"
+        );
+        assert!(out.contains("no-todo"), "{out}");
     }
 
     #[test]
