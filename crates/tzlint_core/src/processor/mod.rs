@@ -376,6 +376,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn builtin_extensions_are_pinned() {
+        let reg = Registry::with_builtins();
+        // Every built-in extension resolves to a processor that claims it.
+        for ext in ["md", "markdown", "csv", "tsv"] {
+            assert!(
+                reg.for_ext(Some(ext)).extensions().iter().any(|e| *e == ext),
+                "extension {ext} should resolve to a processor claiming it",
+            );
+        }
+        // An unknown extension falls back to Markdown (the default).
+        assert!(reg.for_ext(Some("xyz")).extensions().contains(&"md"));
+    }
+
+    #[test]
     fn registry_includes_csv_and_tsv() {
         let reg = Registry::with_builtins();
         assert!(reg.for_ext(Some("csv")).extensions().contains(&"csv"));
