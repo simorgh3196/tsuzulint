@@ -22,6 +22,7 @@ pub mod fix;
 pub mod io;
 pub mod parse;
 pub mod position;
+pub mod processor;
 
 pub use cache::{
     CacheError, CacheKey, CacheKeyInput, DocumentCache, document_cache_key, lint_cached,
