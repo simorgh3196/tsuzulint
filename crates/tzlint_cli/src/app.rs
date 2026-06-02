@@ -19,10 +19,9 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use tzlint_ast::{access, to_archive};
 use tzlint_core::io::{MAX_CONFIG, MAX_FILE};
 use tzlint_core::{
-    Config, ConfigFormat, DocumentCache, Engine, Host, discover, lint_cached, parse,
+    Config, ConfigFormat, DocumentCache, Host, Registry, discover, lint_cached, lint_document,
 };
 use tzlint_pdk::{Diagnostic, Rule};
 
@@ -132,7 +131,7 @@ fn lint(
     // stdin is reported first so the work order is fixed and the summary count is stable.
     if inputs.stdin {
         match read_stdin(stdin).and_then(|source| {
-            let diagnostics = lint_direct(&source, &rule_refs)?;
+            let diagnostics = lint_direct(None, &source, &rule_refs)?;
             Ok(FileReport {
                 path: PathBuf::from(STDIN_LABEL),
                 source,
@@ -205,7 +204,7 @@ fn read_and_lint(
         .map_err(|e| e.to_string())?;
     let diagnostics = match cache {
         Some(cache) => lint_cached(cache, &source, config, rules).map_err(|e| e.to_string())?,
-        None => lint_direct(&source, rules)?,
+        None => lint_direct(extension_of(path), &source, rules)?,
     };
     Ok(FileReport {
         path: path.to_path_buf(),
@@ -214,13 +213,16 @@ fn read_and_lint(
     })
 }
 
-/// The no-cache path: parse → archive → access → [`Engine::lint`], surfacing parse/archive
-/// failures as a message (mirrors what [`lint_cached`] reports on the cached path).
-fn lint_direct(source: &str, rules: &[&dyn Rule]) -> Result<Vec<Diagnostic>, String> {
-    let ast = parse(source).map_err(|e| e.to_string())?;
-    let bytes = to_archive(&ast).map_err(|e| format!("archive failed: {e}"))?;
-    let archived = access(&bytes).map_err(|e| format!("archive failed: {e}"))?;
-    Ok(Engine::lint(archived, rules))
+/// The lowercase extension of `path` (dot-less), or `None`.
+fn extension_of(path: &Path) -> Option<&str> {
+    path.extension().and_then(|e| e.to_str())
+}
+
+/// The no-cache path: select a processor by extension and lint via the processor seam, surfacing
+/// parse/archive failures as a message (mirrors what [`lint_cached`] reports on the cached path).
+fn lint_direct(ext: Option<&str>, source: &str, rules: &[&dyn Rule]) -> Result<Vec<Diagnostic>, String> {
+    let registry = Registry::with_builtins();
+    lint_document(ext, source, &registry, rules).map_err(|e| e.to_string())
 }
 
 /// `fix`: lint-and-fix each file to a fixpoint; write changed files in place (or just report
@@ -1314,6 +1316,16 @@ mod tests {
         assert_eq!(status, ExitStatus::Clean);
         assert!(out.contains("\"max\":0"), "{out}");
         assert!(out.contains("from config"), "{out}");
+    }
+
+    #[test]
+    fn lint_routes_through_processor_seam_unchanged_for_markdown() {
+        // Same half-width-kana input as `lint_reports_a_violation_*`: routing through the
+        // processor seam must still produce the `no-hankaku-kana` diagnostic identically.
+        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Findings);
+        assert!(out.contains("no-hankaku-kana"), "{out}");
     }
 
     #[test]
