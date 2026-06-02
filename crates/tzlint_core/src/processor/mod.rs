@@ -3,6 +3,7 @@
 //! [`Region`]s. See `docs/design/input-format-processors.md`.
 
 use tzlint_ast::{Ast, Node, NodeId, NodeKind, OptionNodeId, Span};
+use tzlint_pdk::{Diagnostic, Rule};
 
 use crate::ParseError;
 
@@ -112,6 +113,40 @@ impl Registry {
         }
         self.default.as_ref()
     }
+
+    /// Register an additional processor (tried before the Markdown default by extension).
+    pub fn push(&mut self, processor: Box<dyn Processor>) {
+        self.others.push(processor);
+    }
+}
+
+/// The single dispatch entry: select a processor by `ext`, parse `source`, lint every resulting
+/// AST with `rules`, and return the merged diagnostics in the engine's stable order.
+///
+/// A parse failure is returned as [`ParseError`]; the caller renders it as one diagnostic for the
+/// document (mirroring the existing direct/cached paths).
+pub fn lint_document(
+    ext: Option<&str>,
+    source: &str,
+    registry: &Registry,
+    rules: &[&dyn Rule],
+) -> Result<Vec<Diagnostic>, ParseError> {
+    let processor = registry.for_ext(ext);
+    let parsed = processor.parse(source, &ProcessorConfig)?;
+    let asts: Vec<Ast> = match parsed {
+        Parsed::Ast(ast) => vec![ast],
+        Parsed::Regions(regions) => build_region_asts(&regions, source)?,
+    };
+    let mut diagnostics = Vec::new();
+    for ast in &asts {
+        let bytes = tzlint_ast::to_archive(ast)
+            .map_err(|e| ParseError { message: format!("archive failed: {e}") })?;
+        let archived = tzlint_ast::access(&bytes)
+            .map_err(|e| ParseError { message: format!("archive failed: {e}") })?;
+        diagnostics.extend(crate::Engine::lint(archived, rules));
+    }
+    diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+    Ok(diagnostics)
 }
 
 /// Build one independent mini-[`Ast`] per slice of every region. Each mini-AST's `text` is the
@@ -274,5 +309,78 @@ mod tests {
         )
         .unwrap();
         assert_eq!(asts.len(), 2); // independent mini-document per slice
+    }
+
+    use tzlint_pdk::{Context, Diagnostic, NodeRef, Rule, RuleMeta, Severity};
+
+    /// Flags every TEXT node at its own span (so we can read back absolute offsets).
+    struct FlagText {
+        meta: RuleMeta,
+    }
+    impl FlagText {
+        fn new() -> Self {
+            FlagText { meta: RuleMeta::new("flag-text", Severity::Warning, vec![NodeKind::TEXT]) }
+        }
+    }
+    impl Rule for FlagText {
+        fn meta(&self) -> &RuleMeta {
+            &self.meta
+        }
+        fn check<'ast>(&self, node: NodeRef<'ast>, cx: &mut Context<'ast>) {
+            cx.report(node.span(), "text");
+        }
+    }
+
+    /// A processor that yields one PlainText region covering bytes 2..7 of the source.
+    struct SliceAt;
+    impl Processor for SliceAt {
+        fn extensions(&self) -> &[&str] {
+            &["slice"]
+        }
+        fn parse(&self, _source: &str, _cfg: &ProcessorConfig) -> Result<Parsed, ParseError> {
+            Ok(Parsed::Regions(vec![Region {
+                slices: vec![Span::new(2, 7)],
+                tag: RegionTag::whole(),
+                parse_mode: ParseMode::PlainText,
+            }]))
+        }
+    }
+
+    fn diag_spans(diags: &[Diagnostic]) -> Vec<(u32, u32)> {
+        // `Diagnostic.span` is a public field (not a method); `node.span()` (NodeRef) is a method.
+        diags.iter().map(|d| (d.span.start, d.span.end)).collect()
+    }
+
+    #[test]
+    fn lint_document_markdown_matches_direct_parse() {
+        // The Markdown path must equal parse → archive → access → Engine::lint exactly.
+        let source = "本文。\n";
+        let reg = Registry::with_builtins();
+        let rule = FlagText::new();
+        let rules: Vec<&dyn Rule> = vec![&rule];
+
+        let via_document = lint_document(Some("md"), source, &reg, &rules).unwrap();
+
+        let ast = crate::parse(source).unwrap();
+        let bytes = tzlint_ast::to_archive(&ast).unwrap();
+        let archived = tzlint_ast::access(&bytes).unwrap();
+        let direct = crate::Engine::lint(archived, &rules);
+
+        assert_eq!(diag_spans(&via_document), diag_spans(&direct));
+    }
+
+    #[test]
+    fn lint_document_regions_yields_absolute_spans() {
+        let source = "abXYZok"; // slice 2..7 == "XYZok"
+        let reg = {
+            let mut r = Registry::with_builtins();
+            r.push(Box::new(SliceAt)); // see Step 3 for `push`
+            r
+        };
+        let rule = FlagText::new();
+        let rules: Vec<&dyn Rule> = vec![&rule];
+        let diags = lint_document(Some("slice"), source, &reg, &rules).unwrap();
+        // The single TEXT node spans the slice 2..7 absolutely.
+        assert_eq!(diag_spans(&diags), vec![(2, 7)]);
     }
 }
