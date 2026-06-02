@@ -124,6 +124,8 @@ pub enum ColumnSelector {
 mod markdown;
 pub use markdown::MarkdownProcessor;
 
+mod scanner;
+
 /// A set of built-in [`Processor`]s, resolved by file extension. The Markdown processor is
 /// always the default/fallback for unknown or missing extensions.
 pub struct Registry {
