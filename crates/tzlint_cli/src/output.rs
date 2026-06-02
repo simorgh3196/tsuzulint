@@ -5,7 +5,7 @@
 //! already in the engine's stable total order, so no re-sorting happens here.
 
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use tzlint_core::LineIndex;
@@ -121,6 +121,175 @@ fn diagnostic_json(source: &str, index: &LineIndex, diagnostic: &Diagnostic) -> 
     })
 }
 
+// ── SARIF 2.1.0 output ────────────────────────────────────────────────────────────────
+//
+// A static analysis interchange format consumed by CI integrations (notably GitHub code
+// scanning). The document is built directly from the diagnostics, so it needs no extra
+// metadata threading: each diagnostic becomes one `result`, and the rule ids that appear are
+// collected into the run's `tool.driver.rules` (referenced by `ruleIndex`).
+
+/// The analysis tool's name, embedded in every SARIF run's `tool.driver`.
+const SARIF_TOOL_NAME: &str = "tzlint";
+/// The tool version (the crate version), embedded in `tool.driver.version`.
+const SARIF_TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The project home, embedded in `tool.driver.informationUri`.
+const SARIF_TOOL_INFO_URI: &str = "https://github.com/simorgh3196/tsuzulint";
+
+/// The SARIF 2.1.0 `level` for a [`Severity`]. SARIF defines only `none`/`note`/`warning`/
+/// `error`, so the two informational severities both map to `note`.
+fn sarif_level(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info | Severity::Hint => "note",
+    }
+}
+
+/// A SARIF `artifactLocation.uri`: the path with `\` normalized to `/`, since SARIF URIs use
+/// forward slashes regardless of the host platform (so a Windows path stays a valid URI).
+fn sarif_uri(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
+/// Render `reports` as a SARIF 2.1.0 log (one `run`, one `result` per diagnostic).
+///
+/// Byte spans map to a 1-based `region`; SARIF's `endColumn` is exclusive (the column after the
+/// region), which is exactly what mapping the exclusive `span.end` yields. Rule ids encountered
+/// are deduplicated into `tool.driver.rules` in first-appearance order and referenced by
+/// `ruleIndex`. Stdin diagnostics keep their `<stdin>` label as the artifact URI.
+pub fn render_sarif(writer: &mut dyn Write, reports: &[FileReport]) -> io::Result<()> {
+    let mut rule_ids: Vec<&str> = Vec::new();
+    let mut results: Vec<Value> = Vec::new();
+    for report in reports {
+        let index = LineIndex::new(&report.source);
+        let uri = sarif_uri(&report.path);
+        for diagnostic in &report.diagnostics {
+            let rule_id = diagnostic.rule_id.as_str();
+            let rule_index = match rule_ids.iter().position(|id| *id == rule_id) {
+                Some(i) => i,
+                None => {
+                    rule_ids.push(rule_id);
+                    rule_ids.len() - 1
+                }
+            };
+            let (start_line, start_col) = index.position(&report.source, diagnostic.span.start);
+            let (end_line, end_col) = index.position(&report.source, diagnostic.span.end);
+            results.push(json!({
+                "ruleId": rule_id,
+                "ruleIndex": rule_index,
+                "level": sarif_level(diagnostic.severity),
+                "message": { "text": diagnostic.message },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": uri },
+                        "region": {
+                            "startLine": start_line,
+                            "startColumn": start_col,
+                            "endLine": end_line,
+                            "endColumn": end_col,
+                        },
+                    },
+                }],
+            }));
+        }
+    }
+    let rules: Vec<Value> = rule_ids.iter().map(|id| json!({ "id": id })).collect();
+    let log = json!({
+        "version": "2.1.0",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": SARIF_TOOL_NAME,
+                    "version": SARIF_TOOL_VERSION,
+                    "informationUri": SARIF_TOOL_INFO_URI,
+                    "rules": rules,
+                },
+            },
+            "results": results,
+        }],
+    });
+    serde_json::to_writer_pretty(&mut *writer, &log).map_err(io::Error::other)?;
+    writeln!(writer)
+}
+
+// ── `rules` subcommand output ─────────────────────────────────────────────────────────
+//
+// Renders the effective built-in rule set (see [`RuleInfo`]) for the `rules list` / `rules
+// explain` subcommands — separate from the diagnostic renderers above.
+
+use crate::rules::RuleInfo;
+
+/// Render the rule list as aligned `id  on|off  severity` columns, then a summary line.
+pub fn render_rule_list_text(writer: &mut dyn Write, infos: &[RuleInfo]) -> io::Result<()> {
+    let id_width = infos.iter().map(|info| info.id.len()).max().unwrap_or(0);
+    let enabled = infos.iter().filter(|info| info.enabled).count();
+    for info in infos {
+        writeln!(
+            writer,
+            "{:<id_width$}  {:<3}  {}",
+            info.id,
+            if info.enabled { "on" } else { "off" },
+            severity_str(info.severity),
+        )?;
+    }
+    writeln!(
+        writer,
+        "{} built-in rule(s), {enabled} enabled",
+        infos.len(),
+    )
+}
+
+/// Render the rule list as a JSON array of `{ id, enabled, severity }` objects.
+pub fn render_rule_list_json(writer: &mut dyn Write, infos: &[RuleInfo]) -> io::Result<()> {
+    let rules: Vec<Value> = infos
+        .iter()
+        .map(|info| {
+            json!({
+                "id": info.id,
+                "enabled": info.enabled,
+                "severity": severity_str(info.severity),
+            })
+        })
+        .collect();
+    serde_json::to_writer_pretty(&mut *writer, &Value::Array(rules)).map_err(io::Error::other)?;
+    writeln!(writer)
+}
+
+/// Render one rule's effective state (`rules explain`): status, severity (noting whether it is a
+/// config override or the default), and config-supplied options if any.
+pub fn render_rule_explain(writer: &mut dyn Write, info: &RuleInfo) -> io::Result<()> {
+    writeln!(writer, "rule:     {}", info.id)?;
+    writeln!(
+        writer,
+        "status:   {}",
+        if info.enabled {
+            "enabled"
+        } else {
+            "disabled (by config)"
+        },
+    )?;
+    let severity_note = if info.severity_overridden {
+        "overridden by config"
+    } else {
+        "default"
+    };
+    writeln!(
+        writer,
+        "severity: {} ({severity_note})",
+        severity_str(info.severity),
+    )?;
+    match &info.options {
+        // `serde_json::to_string` only errors on a non-string map key, which a parsed config
+        // value never has; surface it as an io error rather than unwrapping regardless.
+        Some(options) => {
+            let rendered = serde_json::to_string(options).map_err(io::Error::other)?;
+            writeln!(writer, "options:  {rendered} (from config)")
+        }
+        None => writeln!(writer, "options:  (defaults)"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +383,215 @@ mod tests {
         assert_eq!(severity_str(Severity::Warning), "warning");
         assert_eq!(severity_str(Severity::Info), "info");
         assert_eq!(severity_str(Severity::Hint), "hint");
+    }
+
+    fn render_sarif_value(reports: &[FileReport]) -> Value {
+        let mut buf = Vec::new();
+        render_sarif(&mut buf, reports).unwrap();
+        serde_json::from_slice(&buf).unwrap()
+    }
+
+    #[test]
+    fn sarif_has_a_valid_2_1_0_envelope() {
+        let diag = Diagnostic::new("no-todo", Severity::Warning, Span::new(4, 8), "found TODO");
+        let value = render_sarif_value(&[report("doc.md", "壱\nTODO\n", vec![diag])]);
+        assert_eq!(value["version"], "2.1.0");
+        assert!(value["$schema"].is_string(), "{value}");
+        let driver = &value["runs"][0]["tool"]["driver"];
+        assert_eq!(driver["name"], "tzlint");
+        assert!(driver["version"].is_string(), "{driver}");
+        assert!(driver["informationUri"].is_string(), "{driver}");
+    }
+
+    #[test]
+    fn sarif_result_carries_rule_level_message_and_region() {
+        // "壱\n" is 4 bytes, so byte 4 = line 2 col 1; byte 8 = the column after "TODO" =
+        // line 2 col 5 (SARIF's exclusive endColumn).
+        let diag = Diagnostic::new("no-todo", Severity::Warning, Span::new(4, 8), "found TODO");
+        let value = render_sarif_value(&[report("doc.md", "壱\nTODO\n", vec![diag])]);
+        let result = &value["runs"][0]["results"][0];
+        assert_eq!(result["ruleId"], "no-todo");
+        assert_eq!(result["ruleIndex"], 0);
+        assert_eq!(result["level"], "warning");
+        assert_eq!(result["message"]["text"], "found TODO");
+        let physical = &result["locations"][0]["physicalLocation"];
+        assert_eq!(physical["artifactLocation"]["uri"], "doc.md");
+        assert_eq!(
+            physical["region"],
+            json!({ "startLine": 2, "startColumn": 1, "endLine": 2, "endColumn": 5 }),
+            "{physical}"
+        );
+    }
+
+    #[test]
+    fn sarif_dedupes_rules_and_indexes_results() {
+        let d = |rule: &str| Diagnostic::new(rule, Severity::Error, Span::new(0, 1), "m");
+        let value = render_sarif_value(&[report("a.md", "x", vec![d("r1"), d("r2"), d("r1")])]);
+        let rules = value["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .unwrap()
+            .clone();
+        // First-appearance order, deduplicated.
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0]["id"], "r1");
+        assert_eq!(rules[1]["id"], "r2");
+        let results = value["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results[0]["ruleIndex"], 0);
+        assert_eq!(results[1]["ruleIndex"], 1);
+        assert_eq!(results[2]["ruleIndex"], 0);
+    }
+
+    #[test]
+    fn sarif_clean_report_has_empty_results_and_rules() {
+        let value = render_sarif_value(&[report("a.md", "ok\n", vec![])]);
+        assert_eq!(value["runs"][0]["results"], json!([]));
+        assert_eq!(value["runs"][0]["tool"]["driver"]["rules"], json!([]));
+    }
+
+    #[test]
+    fn sarif_level_maps_info_and_hint_to_note() {
+        assert_eq!(sarif_level(Severity::Error), "error");
+        assert_eq!(sarif_level(Severity::Warning), "warning");
+        assert_eq!(sarif_level(Severity::Info), "note");
+        assert_eq!(sarif_level(Severity::Hint), "note");
+    }
+
+    #[test]
+    fn sarif_uri_uses_forward_slashes() {
+        assert_eq!(sarif_uri(Path::new("docs/a.md")), "docs/a.md");
+        // A backslash path (as Windows `display()` yields) is normalized to URI separators.
+        assert_eq!(sarif_uri(Path::new("docs\\a.md")), "docs/a.md");
+    }
+
+    fn ri(id: &'static str, enabled: bool, severity: Severity) -> RuleInfo {
+        RuleInfo {
+            id,
+            enabled,
+            severity,
+            severity_overridden: false,
+            options: None,
+        }
+    }
+
+    fn render_to_string(f: impl FnOnce(&mut Vec<u8>) -> io::Result<()>) -> String {
+        let mut buf = Vec::new();
+        f(&mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn rule_list_text_lists_state_and_summarizes() {
+        let infos = vec![
+            ri("max-ten", true, Severity::Warning),
+            ri("sentence-length", false, Severity::Error),
+        ];
+        let out = render_to_string(|w| render_rule_list_text(w, &infos));
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("max-ten") && l.contains("on") && l.contains("warning")),
+            "{out}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("sentence-length") && l.contains("off") && l.contains("error")),
+            "{out}"
+        );
+        assert!(out.contains("2 built-in rule(s), 1 enabled"), "{out}");
+    }
+
+    #[test]
+    fn rule_list_text_aligns_the_severity_column() {
+        // Differing id lengths are padded so the on/off and severity columns line up.
+        let infos = vec![
+            ri("max-ten", true, Severity::Warning),
+            ri("no-mixed-zenkaku-hankaku-alphabet", true, Severity::Warning),
+        ];
+        let out = render_to_string(|w| render_rule_list_text(w, &infos));
+        let cols: Vec<usize> = out
+            .lines()
+            .filter(|l| l.contains("warning"))
+            .map(|l| l.find("warning").unwrap())
+            .collect();
+        assert_eq!(cols.len(), 2);
+        assert_eq!(cols[0], cols[1], "severity column should align: {out:?}");
+    }
+
+    #[test]
+    fn rule_list_json_is_an_array_of_objects() {
+        let infos = vec![
+            ri("max-ten", true, Severity::Warning),
+            ri("no-todo", false, Severity::Info),
+        ];
+        let mut buf = Vec::new();
+        render_rule_list_json(&mut buf, &infos).unwrap();
+        let value: Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(
+            value[0],
+            json!({ "id": "max-ten", "enabled": true, "severity": "warning" })
+        );
+        assert_eq!(
+            value[1],
+            json!({ "id": "no-todo", "enabled": false, "severity": "info" })
+        );
+    }
+
+    #[test]
+    fn rule_explain_default_shows_defaults() {
+        let out =
+            render_to_string(|w| render_rule_explain(w, &ri("max-ten", true, Severity::Warning)));
+        assert!(out.contains("rule:     max-ten"), "{out}");
+        assert!(out.contains("status:   enabled"), "{out}");
+        assert!(out.contains("severity: warning (default)"), "{out}");
+        assert!(out.contains("options:  (defaults)"), "{out}");
+    }
+
+    #[test]
+    fn rule_explain_shows_override_disabled_and_options() {
+        let info = RuleInfo {
+            id: "max-ten",
+            enabled: false,
+            severity: Severity::Error,
+            severity_overridden: true,
+            options: Some(json!({ "max": 0 })),
+        };
+        let out = render_to_string(|w| render_rule_explain(w, &info));
+        assert!(out.contains("status:   disabled (by config)"), "{out}");
+        assert!(
+            out.contains("severity: error (overridden by config)"),
+            "{out}"
+        );
+        assert!(out.contains("options:  {\"max\":0} (from config)"), "{out}");
+    }
+
+    #[test]
+    fn renderers_propagate_writer_errors() {
+        // A zero-capacity `&mut [u8]` sink fails (`WriteZero`) on any non-empty write, exercising
+        // each renderer's error-propagation arm — the module's output policy is that a failed
+        // result write surfaces as an error (the CLI maps it to `ExitStatus::Error`).
+        fn write_fails(render: impl FnOnce(&mut dyn Write) -> io::Result<()>) -> bool {
+            let mut sink: &mut [u8] = &mut [];
+            render(&mut sink).is_err()
+        }
+        let reports = [report(
+            "a.md",
+            "x\n",
+            vec![Diagnostic::new(
+                "no-todo",
+                Severity::Warning,
+                Span::new(0, 1),
+                "m",
+            )],
+        )];
+        assert!(write_fails(|w| render_text(w, &reports)));
+        assert!(write_fails(|w| render_json(w, &reports)));
+        assert!(write_fails(|w| render_sarif(w, &reports)));
+
+        let infos = [ri("max-ten", true, Severity::Warning)];
+        assert!(write_fails(|w| render_rule_list_text(w, &infos)));
+        assert!(write_fails(|w| render_rule_list_json(w, &infos)));
+        assert!(write_fails(|w| render_rule_explain(w, &infos[0])));
     }
 }

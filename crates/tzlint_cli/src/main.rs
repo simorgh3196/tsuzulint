@@ -1,9 +1,9 @@
 //! `tzlint` — the TsuzuLint command-line binary.
 //!
-//! Wires the `lint` / `fix` / `init` subcommands over `tzlint_core`: config discovery, the
-//! parse → archive → `Engine::lint` pipeline (with the in-memory document cache), autofix, and
-//! text/JSON output via the position mapper. All file access goes through the `Host` boundary
-//! (`NativeHost`), never raw `std::fs`.
+//! Wires the `lint` / `fix` / `init` / `rules` subcommands over `tzlint_core`: config discovery,
+//! the parse → archive → `Engine::lint` pipeline (with the in-memory document cache), autofix,
+//! and text / JSON / SARIF output via the position mapper. `rules` reports the resolved rule set.
+//! All file access goes through the `Host` boundary (`NativeHost`), never raw `std::fs`.
 //!
 //! The rule set is resolved from config by [`rules::resolve_rules`]: every built-in rule
 //! (`tzlint_rules::builtin_rules`) runs by default, and a `config.rules` entry can disable one.

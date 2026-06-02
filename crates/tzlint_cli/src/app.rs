@@ -26,10 +26,10 @@ use tzlint_core::{
 };
 use tzlint_pdk::{Diagnostic, Rule};
 
-use crate::cli::{Cli, Command, OutputFormat};
+use crate::cli::{Cli, Command, OutputFormat, RuleListFormat, RulesCommand};
 use crate::expand;
 use crate::output::{self, FileReport};
-use crate::rules::{resolve_rules, unknown_rule_ids};
+use crate::rules::{resolve_rules, rule_info, rule_infos, unknown_rule_ids};
 
 /// The path label used for diagnostics linted from standard input.
 const STDIN_LABEL: &str = "<stdin>";
@@ -83,6 +83,7 @@ pub fn run(cli: &Cli, host: &dyn Host, cwd: &Path, streams: &mut Streams) -> Exi
         Command::Lint { paths, format } => lint(cli, host, cwd, paths, *format, streams),
         Command::Fix { paths, dry_run } => fix(cli, host, cwd, paths, *dry_run, streams),
         Command::Init { force } => init(host, cwd, *force, streams.stdout, streams.stderr),
+        Command::Rules { command } => rules_cmd(cli, host, cwd, command, streams),
     };
     match result {
         Ok(status) => status,
@@ -169,6 +170,9 @@ fn lint(
     match format {
         OutputFormat::Text => output::render_text(stdout, &reports).map_err(|e| e.to_string())?,
         OutputFormat::Json => output::render_json(stdout, &reports).map_err(|e| e.to_string())?,
+        OutputFormat::Sarif => {
+            output::render_sarif(stdout, &reports).map_err(|e| e.to_string())?;
+        }
     }
 
     let has_findings = reports.iter().any(|report| !report.diagnostics.is_empty());
@@ -403,6 +407,49 @@ fn init(
     Ok(ExitStatus::Clean)
 }
 
+/// `rules`: report the built-in rule set under the resolved config — the full list or one rule's
+/// details. Reads the same config as `lint`/`fix` (so it answers "what runs for this project?")
+/// and warns about unknown config rule ids. A clean run exits `Clean`; an unknown `explain` id
+/// exits `Error`.
+fn rules_cmd(
+    cli: &Cli,
+    host: &dyn Host,
+    cwd: &Path,
+    command: &RulesCommand,
+    streams: &mut Streams,
+) -> Result<ExitStatus, String> {
+    let stdout: &mut dyn Write = &mut *streams.stdout;
+    let stderr: &mut dyn Write = &mut *streams.stderr;
+    let config = load_config(cli, host, cwd, stderr)?;
+    note_unknown_rules(&config, stderr);
+    match command {
+        RulesCommand::List { format } => {
+            let infos = rule_infos(&config);
+            match format {
+                RuleListFormat::Text => {
+                    output::render_rule_list_text(stdout, &infos).map_err(|e| e.to_string())?;
+                }
+                RuleListFormat::Json => {
+                    output::render_rule_list_json(stdout, &infos).map_err(|e| e.to_string())?;
+                }
+            }
+            Ok(ExitStatus::Clean)
+        }
+        RulesCommand::Explain { id } => match rule_info(&config, id) {
+            Some(info) => {
+                output::render_rule_explain(stdout, &info).map_err(|e| e.to_string())?;
+                Ok(ExitStatus::Clean)
+            }
+            None => {
+                // Not a built-in rule (likely a typo). Name it and exit `Error` rather than
+                // printing a misleading "all defaults" block for a rule that does not exist.
+                let _ = writeln!(stderr, "error: unknown rule '{id}'");
+                Ok(ExitStatus::Error)
+            }
+        },
+    }
+}
+
 /// Resolve the configuration: read `--config` if given (format inferred from its name, JSONC
 /// otherwise), else walk up from the working directory via [`discover`], else the default.
 fn load_config(
@@ -586,6 +633,18 @@ mod tests {
         })
     }
 
+    fn rules_list_cli(format: RuleListFormat) -> Cli {
+        cli(Command::Rules {
+            command: RulesCommand::List { format },
+        })
+    }
+
+    fn rules_explain_cli(id: &str) -> Cli {
+        cli(Command::Rules {
+            command: RulesCommand::Explain { id: id.to_string() },
+        })
+    }
+
     /// A fixed, absolute working directory for hermetic discovery/init tests (the orchestration
     /// never touches the real process cwd — it is injected).
     const TEST_CWD: &str = "/work";
@@ -688,6 +747,34 @@ mod tests {
         assert!(value.is_array());
         assert_eq!(value[0]["path"], "a.md");
         assert_eq!(value[0]["diagnostics"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn lint_sarif_output_is_a_valid_log_with_results() {
+        // `--format sarif` emits a SARIF 2.1.0 log; the half-width kana triggers `no-hankaku-kana`,
+        // which surfaces as one result referencing that rule.
+        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Sarif), &host);
+        assert_eq!(status, ExitStatus::Findings);
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["version"], "2.1.0");
+        assert_eq!(value["runs"][0]["tool"]["driver"]["name"], "tzlint");
+        let result = &value["runs"][0]["results"][0];
+        assert_eq!(result["ruleId"], "no-hankaku-kana");
+        assert_eq!(
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "a.md"
+        );
+    }
+
+    #[test]
+    fn lint_sarif_clean_file_has_no_results() {
+        // A clean file still produces a well-formed (empty-results) SARIF log and exits `Clean`.
+        let host = MockHost::with("a.md", "ただのテキストです。\n");
+        let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Sarif), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["runs"][0]["results"], serde_json::json!([]));
     }
 
     #[test]
@@ -1143,6 +1230,90 @@ mod tests {
         assert_eq!(status, ExitStatus::Error);
         assert!(err.contains("error: <stdin>"), "{err}");
         assert!(err.contains("invalid UTF-8"), "{err}");
+    }
+
+    // --- `rules` subcommand (M1g follow-up) ---
+
+    #[test]
+    fn rules_list_text_defaults_to_all_enabled() {
+        use tzlint_rules::RULE_IDS;
+        let host = MockHost::new();
+        let (status, out, _err) = run_capture(&rules_list_cli(RuleListFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(
+            out.contains(&format!(
+                "{} built-in rule(s), {} enabled",
+                RULE_IDS.len(),
+                RULE_IDS.len()
+            )),
+            "{out}"
+        );
+        assert!(
+            out.lines()
+                .any(|l| l.contains("no-hankaku-kana") && l.contains("on")),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn rules_list_reflects_a_config_disable() {
+        // `rules list` honors the resolved config: a rule turned off shows as disabled.
+        let host = MockHost::new();
+        host.put("off.json", "{ \"rules\": { \"no-hankaku-kana\": false } }");
+        let mut c = rules_list_cli(RuleListFormat::Text);
+        c.config = Some(PathBuf::from("off.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(
+            out.lines()
+                .any(|l| l.contains("no-hankaku-kana") && l.contains("off")),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn rules_list_json_is_an_array_of_rule_objects() {
+        let host = MockHost::new();
+        let (status, out, _err) = run_capture(&rules_list_cli(RuleListFormat::Json), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(value.is_array());
+        assert_eq!(value[0]["id"], "sentence-length");
+        assert_eq!(value[0]["enabled"], true);
+    }
+
+    #[test]
+    fn rules_explain_known_rule_shows_details() {
+        let host = MockHost::new();
+        let (status, out, _err) = run_capture(&rules_explain_cli("max-ten"), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(out.contains("rule:     max-ten"), "{out}");
+        assert!(out.contains("status:   enabled"), "{out}");
+        assert!(out.contains("severity:"), "{out}");
+    }
+
+    #[test]
+    fn rules_explain_unknown_rule_exits_error() {
+        let host = MockHost::new();
+        let (status, _out, err) = run_capture(&rules_explain_cli("no-such-rule"), &host);
+        assert_eq!(status, ExitStatus::Error);
+        assert!(err.contains("unknown rule 'no-such-rule'"), "{err}");
+    }
+
+    #[test]
+    fn rules_explain_reflects_config_options() {
+        // `explain` surfaces the config-supplied options for a rule.
+        let host = MockHost::new();
+        host.put(
+            "strict.json",
+            "{ \"rules\": { \"max-ten\": { \"options\": { \"max\": 0 } } } }",
+        );
+        let mut c = rules_explain_cli("max-ten");
+        c.config = Some(PathBuf::from("strict.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(out.contains("\"max\":0"), "{out}");
+        assert!(out.contains("from config"), "{out}");
     }
 
     #[test]

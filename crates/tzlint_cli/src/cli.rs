@@ -1,10 +1,11 @@
 //! Command-line argument definitions (clap derive).
 //!
 //! The surface mirrors the established `tzlint` UX: a few global options (`--config`,
-//! `--verbose`, `--no-cache`) and the `lint` / `fix` / `init` subcommands. `lint` and `fix` take
-//! files, directories (recursed for Markdown), or glob patterns, and `-` for stdin (see the
-//! per-argument help). Plugin, rule-management, and LSP subcommands, plus the SARIF output
-//! format, are intentionally out of scope here and arrive with later milestones.
+//! `--verbose`, `--no-cache`) and the `lint` / `fix` / `init` / `rules` subcommands. `lint` and
+//! `fix` take files, directories (recursed for Markdown), or glob patterns, and `-` for stdin
+//! (see the per-argument help); `lint` renders text, JSON, or SARIF. `rules list` / `rules
+//! explain` report the built-in rule set under the resolved config. Plugin and LSP subcommands
+//! are intentionally out of scope here and arrive with later milestones.
 
 use std::path::PathBuf;
 
@@ -71,6 +72,32 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
+
+    /// Inspect the built-in rule set: which rules run, and at what severity, under the
+    /// resolved config (honors `--config` / discovery).
+    Rules {
+        /// What to inspect (`list` or `explain`).
+        #[command(subcommand)]
+        command: RulesCommand,
+    },
+}
+
+/// The `rules` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum RulesCommand {
+    /// List every built-in rule and whether it is enabled under the resolved config.
+    List {
+        /// Output format.
+        #[arg(short, long, default_value = "text")]
+        format: RuleListFormat,
+    },
+
+    /// Show one rule's effective state: status, severity, and config-supplied options.
+    Explain {
+        /// The rule id to explain (e.g. `max-ten`).
+        #[arg(value_name = "RULE")]
+        id: String,
+    },
 }
 
 /// How `lint` renders its diagnostics.
@@ -79,5 +106,16 @@ pub enum OutputFormat {
     /// One grep-friendly `path:line:col: severity: message [rule]` line per diagnostic.
     Text,
     /// A JSON array of `{ path, diagnostics }` objects.
+    Json,
+    /// A SARIF 2.1.0 log (for CI integrations such as GitHub code scanning).
+    Sarif,
+}
+
+/// How `rules list` renders the rule table. (No SARIF — it is not a diagnostic stream.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum RuleListFormat {
+    /// Aligned `id  on|off  severity` columns plus a summary line.
+    Text,
+    /// A JSON array of `{ id, enabled, severity }` objects.
     Json,
 }
