@@ -82,6 +82,11 @@ fn build_regions(source: &str, d: &DelimitedConfig, default_delimiter: u8) -> Ve
     };
 
     let mut regions = Vec::new();
+    // Track the 0-based indices already emitted: two config targets (e.g. a header name and a
+    // 1-based index) can resolve to the SAME physical column. Keep the FIRST such target and skip
+    // later duplicates, so a cell is never linted twice. `RegionRules::for_tag` already returns the
+    // first matching rule set, so rule selection is unaffected.
+    let mut seen: Vec<u32> = Vec::new();
     for target in &d.columns {
         let (index0, name): (Option<u32>, Option<String>) = match &target.selector {
             ColumnSelector::Index(one_based) => (one_based.checked_sub(1), None),
@@ -91,6 +96,9 @@ fn build_regions(source: &str, d: &DelimitedConfig, default_delimiter: u8) -> Ve
             ),
         };
         let Some(idx) = index0 else { continue };
+        if seen.contains(&idx) {
+            continue; // this physical column already has a region (first target wins)
+        }
         let slices: Vec<tzlint_ast::Span> = body
             .iter()
             .filter_map(|rec| rec.get(idx as usize).copied())
@@ -100,6 +108,7 @@ fn build_regions(source: &str, d: &DelimitedConfig, default_delimiter: u8) -> Ve
             continue;
         }
         let resolved_name = name.or_else(|| header_names.get(idx as usize).cloned());
+        seen.push(idx);
         regions.push(Region {
             slices,
             tag: RegionTag::column(idx, resolved_name),
@@ -244,6 +253,45 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
+    }
+
+    #[test]
+    fn column_targeted_by_name_and_index_emits_one_region() {
+        // `body` (column 0 via header) and `1` (column 0 via 1-based index) resolve to the SAME
+        // physical column. Only ONE region may be emitted for it, or its cells would be linted
+        // twice (doubled diagnostics). The FIRST target in iteration order wins.
+        let source = "body,x\nhello,1\nworld,2\n";
+        let p = DelimitedProcessor::csv();
+        let parsed = p
+            .parse(
+                source,
+                &cfg(
+                    vec![
+                        ColumnTarget {
+                            selector: ColumnSelector::Name("body".into()),
+                            parse_mode: ParseMode::Markdown,
+                        },
+                        ColumnTarget {
+                            selector: ColumnSelector::Index(1),
+                            parse_mode: ParseMode::PlainText,
+                        },
+                    ],
+                    true,
+                ),
+            )
+            .unwrap();
+        let Parsed::Regions(rs) = &parsed else {
+            panic!("expected regions");
+        };
+        assert_eq!(rs.len(), 1, "one physical column → exactly one region");
+        // The first target (the name selector, Markdown) is kept; the duplicate index target is
+        // dropped, so the region carries the resolved header name and the FIRST target's parse mode.
+        assert_eq!(rs[0].tag.index, Some(0));
+        assert_eq!(rs[0].parse_mode, ParseMode::Markdown);
+        assert_eq!(
+            regions_of(source, parsed),
+            vec![(Some(0), Some("body".to_string()), vec!["hello", "world"])],
+        );
     }
 
     #[test]

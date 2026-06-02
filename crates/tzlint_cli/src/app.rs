@@ -1481,6 +1481,81 @@ mod tests {
     }
 
     #[test]
+    fn lint_csv_column_targeted_by_name_and_index_reports_each_cell_once() {
+        // Regression: when one physical column is targeted by BOTH a header name and a 1-based
+        // index, its cells must be linted exactly once (not twice). Here `body` (column 0 by name)
+        // and `1` (column 0 by index) resolve to the same column; the single TODO must yield ONE
+        // diagnostic, not two.
+        let host = MockHost::new();
+        host.put("data.csv", "body,x\nTODO fix,9\n");
+        host.put(
+            "c.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": true } }, "1": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        let mut c = lint_cli("data.csv", OutputFormat::Json);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let diags = v[0]["diagnostics"].as_array().unwrap();
+        assert_eq!(
+            diags.len(),
+            1,
+            "the cell must be linted once, not doubled: {out}"
+        );
+        assert_eq!(diags[0]["rule_id"], "no-todo", "{out}");
+    }
+
+    #[test]
+    fn lint_csv_index_selected_column_reports_in_the_right_cell() {
+        // A column selected by 1-based INDEX (not name) is linted, and the diagnostic lands inside
+        // that cell. Column "2" → 0-based 1 → the `body` cell "TODO fix" (bytes 10..18 of the
+        // source); the `id` column is untouched.
+        let source = "id,body\n1,TODO fix\n";
+        let host = MockHost::new();
+        host.put("data.csv", source);
+        host.put(
+            "c.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "2": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        let mut c = lint_cli("data.csv", OutputFormat::Json);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let diags = v[0]["diagnostics"].as_array().unwrap();
+        assert_eq!(diags.len(), 1, "{out}");
+        assert_eq!(diags[0]["rule_id"], "no-todo", "{out}");
+        // The diagnostic must fall inside the body cell ("TODO fix" begins at byte 10).
+        let start = diags[0]["span"]["start"].as_u64().unwrap();
+        let end = diags[0]["span"]["end"].as_u64().unwrap();
+        let cell_start = source.find("TODO fix").unwrap() as u64;
+        assert!(
+            start >= cell_start && end <= (cell_start + "TODO fix".len() as u64),
+            "diagnostic span {start}..{end} should be inside the body cell at {cell_start}: {out}"
+        );
+    }
+
+    #[test]
+    fn lint_tsv_column_is_linted_end_to_end() {
+        // A `.tsv` file with a `formats.tsv` config: the tab-delimited `body` column is linted.
+        let host = MockHost::new();
+        host.put("data.tsv", "id\tbody\n1\tTODO fix\n");
+        host.put(
+            "c.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "tsv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        let mut c = lint_cli("data.tsv", OutputFormat::Json);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings, "{out}");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let diags = v[0]["diagnostics"].as_array().unwrap();
+        assert_eq!(diags.len(), 1, "the tsv body TODO: {out}");
+        assert_eq!(diags[0]["rule_id"], "no-todo", "{out}");
+    }
+
+    #[test]
     fn fix_stdin_read_error_exits_error() {
         // The same failed-read handling for `fix -`: error on stderr, `Error` exit, no document on
         // stdout.

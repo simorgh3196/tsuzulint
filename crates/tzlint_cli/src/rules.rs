@@ -49,6 +49,8 @@ pub fn processor_config_for(config: &Config, ext: Option<&str>) -> ProcessorConf
     };
     ProcessorConfig {
         delimited: Some(DelimitedConfig {
+            // `delimiter` is guaranteed ASCII by config parsing (`ConfigError::NonAsciiDelimiter`),
+            // so `c as u8` is lossless here; `0` means "use the processor default".
             delimiter: fmt.delimiter.map(|c| c as u8).unwrap_or(0),
             has_header: fmt.has_header,
             columns: fmt

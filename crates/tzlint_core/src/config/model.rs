@@ -125,6 +125,16 @@ impl RawConfig {
             if fmt_id != "csv" && fmt_id != "tsv" {
                 return Err(ConfigError::UnknownFormat(fmt_id));
             }
+            // The delimited scanner is byte-oriented; a non-ASCII delimiter cannot be represented
+            // in one byte and would be silently truncated downstream, so reject it here.
+            if let Some(delimiter) = raw.delimiter
+                && !delimiter.is_ascii()
+            {
+                return Err(ConfigError::NonAsciiDelimiter {
+                    format: fmt_id,
+                    delimiter,
+                });
+            }
             let mut columns = Vec::new();
             for (key, raw_col) in raw.columns {
                 let selector = match key.parse::<u32>() {
@@ -562,5 +572,29 @@ mod formats_parsing {
             matches!(err, ConfigError::UnknownFormat(ref f) if f == "xml"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn non_ascii_delimiter_is_an_error() {
+        // The scanner is byte-oriented, so a non-ASCII delimiter would truncate via `char as u8`
+        // and corrupt extraction. Reject it at parse time instead.
+        let err = parse(
+            r#"{ "formats": { "csv": { "header": true, "delimiter": "；", "columns": { "1": {} } } } }"#,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, ConfigError::NonAsciiDelimiter { ref format, delimiter } if format == "csv" && delimiter == '；'),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn ascii_delimiter_override_is_accepted() {
+        // An ASCII override (e.g. a semicolon) is fine — it fits in one byte.
+        let c = parse(
+            r#"{ "formats": { "csv": { "header": true, "delimiter": ";", "columns": { "1": {} } } } }"#,
+        )
+        .unwrap();
+        assert_eq!(c.formats.get("csv").unwrap().delimiter, Some(';'));
     }
 }

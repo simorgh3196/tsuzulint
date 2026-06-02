@@ -88,6 +88,14 @@ pub enum ConfigError {
         /// The header name that cannot be resolved without a header row.
         name: String,
     },
+    /// A format's `delimiter` override is not an ASCII character. The delimited scanner is
+    /// byte-oriented, so a multi-byte delimiter cannot be represented; reject it at parse time.
+    NonAsciiDelimiter {
+        /// The format id (`csv`/`tsv`) whose delimiter override is non-ASCII.
+        format: String,
+        /// The offending delimiter character.
+        delimiter: char,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -110,6 +118,12 @@ impl fmt::Display for ConfigError {
                 write!(
                     f,
                     "column '{name}' in format '{format}' is selected by name but header is false"
+                )
+            }
+            ConfigError::NonAsciiDelimiter { format, delimiter } => {
+                write!(
+                    f,
+                    "delimiter '{delimiter}' in format '{format}' is not ASCII (only single-byte delimiters are supported)"
                 )
             }
         }
@@ -152,6 +166,14 @@ mod tests {
         assert_eq!(
             ConfigError::UnknownPreset("nope".into()).to_string(),
             "`extends` references unknown preset `nope`"
+        );
+        assert_eq!(
+            ConfigError::NonAsciiDelimiter {
+                format: "csv".into(),
+                delimiter: '；',
+            }
+            .to_string(),
+            "delimiter '；' in format 'csv' is not ASCII (only single-byte delimiters are supported)"
         );
     }
 
