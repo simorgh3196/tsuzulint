@@ -79,6 +79,41 @@ pub enum ParseMode {
 #[derive(Debug, Clone, Default)]
 pub struct ProcessorConfig;
 
+mod markdown;
+pub use markdown::MarkdownProcessor;
+
+/// A set of built-in [`Processor`]s, resolved by file extension. The Markdown processor is
+/// always the default/fallback for unknown or missing extensions.
+pub struct Registry {
+    /// The fallback processor (Markdown). Resolved when no extension matches.
+    default: Box<dyn Processor>,
+    /// Additional processors, tried before the default by extension.
+    others: Vec<Box<dyn Processor>>,
+}
+
+impl Registry {
+    /// The registry of built-in processors. Markdown is the default; later plans push CSV/TSV.
+    #[must_use]
+    pub fn with_builtins() -> Self {
+        Registry { default: Box::new(MarkdownProcessor), others: Vec::new() }
+    }
+
+    /// The processor handling `ext` (case-insensitive, dot-less), or the Markdown default when
+    /// `ext` is `None` or unmatched.
+    #[must_use]
+    pub fn for_ext(&self, ext: Option<&str>) -> &dyn Processor {
+        if let Some(ext) = ext {
+            let lower = ext.to_ascii_lowercase();
+            for p in &self.others {
+                if p.extensions().iter().any(|e| *e == lower) {
+                    return p.as_ref();
+                }
+            }
+        }
+        self.default.as_ref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +146,19 @@ mod tests {
         assert_eq!(f.extensions(), &["fake"]);
         let parsed = f.parse("x", &ProcessorConfig::default()).unwrap();
         assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
+    }
+
+    #[test]
+    fn registry_resolves_known_extension_and_defaults_to_markdown() {
+        let reg = Registry::with_builtins();
+        // Markdown is registered for md/markdown…
+        assert!(reg.for_ext(Some("md")).extensions().contains(&"md"));
+        assert!(reg.for_ext(Some("markdown")).extensions().contains(&"markdown"));
+        // …and is the fallback for unknown / missing extensions.
+        let default_exts = reg.for_ext(None).extensions().to_vec();
+        assert!(default_exts.contains(&"md"));
+        assert_eq!(reg.for_ext(Some("UNKNOWN")).extensions().to_vec(), default_exts);
+        // Case-insensitive match.
+        assert!(reg.for_ext(Some("MD")).extensions().contains(&"md"));
     }
 }
