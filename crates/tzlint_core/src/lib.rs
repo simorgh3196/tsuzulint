@@ -45,12 +45,19 @@ pub use processor::{
 
 #[cfg(test)]
 mod tests {
-    use crate::{Registry, lint_document};
+    use crate::{ProcessorConfig, RegionRules, Registry, lint_document};
 
     #[test]
     fn processor_seam_is_reexported_at_crate_root() {
         let reg = Registry::with_builtins();
-        let diags = lint_document(Some("md"), "x\n", &reg, &[]).unwrap();
+        let diags = lint_document(
+            Some("md"),
+            "x\n",
+            &reg,
+            &ProcessorConfig::default(),
+            &RegionRules::base_only(vec![]),
+        )
+        .unwrap();
         assert!(diags.is_empty());
     }
 }

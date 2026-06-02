@@ -21,7 +21,8 @@ use std::path::{Path, PathBuf};
 
 use tzlint_core::io::{MAX_CONFIG, MAX_FILE};
 use tzlint_core::{
-    Config, ConfigFormat, DocumentCache, Host, Registry, discover, lint_cached, lint_document,
+    Config, ConfigFormat, DocumentCache, Host, ProcessorConfig, RegionRules, Registry, discover,
+    lint_cached, lint_document,
 };
 use tzlint_pdk::{Diagnostic, Rule};
 
@@ -131,7 +132,7 @@ fn lint(
     // stdin is reported first so the work order is fixed and the summary count is stable.
     if inputs.stdin {
         match read_stdin(stdin).and_then(|source| {
-            let diagnostics = lint_direct(None, &source, &rule_refs)?;
+            let diagnostics = lint_direct(None, &source, &config)?;
             Ok(FileReport {
                 path: PathBuf::from(STDIN_LABEL),
                 source,
@@ -204,7 +205,7 @@ fn read_and_lint(
         .map_err(|e| e.to_string())?;
     let diagnostics = match cache {
         Some(cache) => lint_cached(cache, &source, config, rules).map_err(|e| e.to_string())?,
-        None => lint_direct(extension_of(path), &source, rules)?,
+        None => lint_direct(extension_of(path), &source, config)?,
     };
     Ok(FileReport {
         path: path.to_path_buf(),
@@ -221,13 +222,10 @@ fn extension_of(path: &Path) -> Option<&str> {
 
 /// The no-cache path: select a processor by extension and lint via the processor seam, surfacing
 /// parse/archive failures as a message (mirrors what [`lint_cached`] reports on the cached path).
-fn lint_direct(
-    ext: Option<&str>,
-    source: &str,
-    rules: &[&dyn Rule],
-) -> Result<Vec<Diagnostic>, String> {
+fn lint_direct(ext: Option<&str>, source: &str, config: &Config) -> Result<Vec<Diagnostic>, String> {
     let registry = Registry::with_builtins();
-    lint_document(ext, source, &registry, rules).map_err(|e| e.to_string())
+    let rr = RegionRules::base_only(resolve_rules(config));
+    lint_document(ext, source, &registry, &ProcessorConfig::default(), &rr).map_err(|e| e.to_string())
 }
 
 /// `fix`: lint-and-fix each file to a fixpoint; write changed files in place (or just report

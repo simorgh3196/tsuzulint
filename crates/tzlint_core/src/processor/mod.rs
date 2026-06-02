@@ -240,8 +240,9 @@ impl Registry {
     }
 }
 
-/// The single dispatch entry: select a processor by `ext`, parse `source`, lint every resulting
-/// AST with `rules`, and return the merged diagnostics in the engine's stable order.
+/// The single dispatch entry: select a processor by `ext`, parse `source` with `processor_cfg`,
+/// and lint each resulting region (or the whole AST) with the rules its tag resolves to in
+/// `rules`. Diagnostics carry absolute spans and are returned in the engine's stable order.
 ///
 /// A parse failure is returned as [`ParseError`]; the caller renders it as one diagnostic for the
 /// document (mirroring the existing direct/cached paths).
@@ -249,28 +250,46 @@ pub fn lint_document(
     ext: Option<&str>,
     source: &str,
     registry: &Registry,
-    rules: &[&dyn Rule],
+    processor_cfg: &ProcessorConfig,
+    rules: &RegionRules,
 ) -> Result<Vec<Diagnostic>, ParseError> {
     let processor = registry.for_ext(ext);
-    let parsed = processor.parse(source, &ProcessorConfig::default())?;
-    let asts: Vec<Ast> = match parsed {
-        Parsed::Ast(ast) => vec![ast],
-        Parsed::Regions(regions) => build_region_asts(&regions, source)?,
-    };
+    let parsed = processor.parse(source, processor_cfg)?;
     let mut diagnostics = Vec::new();
-    for ast in &asts {
-        let bytes = tzlint_ast::to_archive(ast).map_err(|e| ParseError {
-            message: format!("archive failed: {e}"),
-        })?;
-        let archived = tzlint_ast::access(&bytes).map_err(|e| ParseError {
-            message: format!("archive failed: {e}"),
-        })?;
-        diagnostics.extend(crate::Engine::lint(archived, rules));
+    match parsed {
+        Parsed::Ast(ast) => {
+            let region_rules = rules.for_tag(&RegionTag::whole());
+            lint_ast_into(&ast, &region_rules, &mut diagnostics)?;
+        }
+        Parsed::Regions(regions) => {
+            for region in &regions {
+                let region_rules = rules.for_tag(&region.tag);
+                for ast in build_region_asts(core::slice::from_ref(region), source)? {
+                    lint_ast_into(&ast, &region_rules, &mut diagnostics)?;
+                }
+            }
+        }
     }
     // Sort unconditionally — even on the single-AST path — so callers never observe an unstable
     // order, and so diagnostics merged across multiple regions come out in one stable sequence.
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
     Ok(diagnostics)
+}
+
+/// Archive `ast`, lint it with `rules`, and append the diagnostics into `out`.
+fn lint_ast_into(
+    ast: &Ast,
+    rules: &[&dyn Rule],
+    out: &mut Vec<Diagnostic>,
+) -> Result<(), ParseError> {
+    let bytes = tzlint_ast::to_archive(ast).map_err(|e| ParseError {
+        message: format!("archive failed: {e}"),
+    })?;
+    let archived = tzlint_ast::access(&bytes).map_err(|e| ParseError {
+        message: format!("archive failed: {e}"),
+    })?;
+    out.extend(crate::Engine::lint(archived, rules));
+    Ok(())
 }
 
 /// Build one independent mini-[`Ast`] per slice of every region. Each mini-AST's `text` is the
@@ -364,7 +383,14 @@ mod tests {
         // Through the dispatch entry, a .csv with the default (empty) ProcessorConfig yields no
         // diagnostics — opt-in safety.
         let reg = Registry::with_builtins();
-        let diags = lint_document(Some("csv"), "id,body\n1,ﾊﾛｰ\n", &reg, &[]).unwrap();
+        let diags = lint_document(
+            Some("csv"),
+            "id,body\n1,ﾊﾛｰ\n",
+            &reg,
+            &ProcessorConfig::default(),
+            &RegionRules::base_only(vec![]),
+        )
+        .unwrap();
         assert!(diags.is_empty());
     }
 
@@ -549,8 +575,10 @@ mod tests {
         let reg = Registry::with_builtins();
         let rule = FlagText::new();
         let rules: Vec<&dyn Rule> = vec![&rule];
+        let rr = RegionRules::base_only(vec![Box::new(FlagText::new())]);
 
-        let via_document = lint_document(Some("md"), source, &reg, &rules).unwrap();
+        let via_document =
+            lint_document(Some("md"), source, &reg, &ProcessorConfig::default(), &rr).unwrap();
 
         let ast = crate::parse(source).unwrap();
         let bytes = tzlint_ast::to_archive(&ast).unwrap();
@@ -558,6 +586,57 @@ mod tests {
         let direct = crate::Engine::lint(archived, &rules);
 
         assert_eq!(diag_spans(&via_document), diag_spans(&direct));
+    }
+
+    #[test]
+    fn lint_document_applies_per_region_rules() {
+        // A processor that yields one region tagged column(0,"body") covering bytes 0..3.
+        struct OneCol;
+        impl Processor for OneCol {
+            fn extensions(&self) -> &[&str] {
+                &["onecol"]
+            }
+            fn parse(&self, _s: &str, _c: &ProcessorConfig) -> Result<Parsed, ParseError> {
+                Ok(Parsed::Regions(vec![Region {
+                    slices: vec![Span::new(0, 3)],
+                    tag: RegionTag::column(0, Some("body".into())),
+                    parse_mode: ParseMode::PlainText,
+                }]))
+            }
+        }
+        let mut reg = Registry::with_builtins();
+        reg.push(Box::new(OneCol));
+
+        let flag = FlagText::new(); // base rule, flags TEXT
+        let base: Vec<&dyn Rule> = vec![&flag];
+        // base_only → the region falls back to base and flags its TEXT node at 0..3.
+        let rr = RegionRules::base_only(vec![]); // empty base
+        let mut rr_with_col = RegionRules::base_only(vec![]);
+        // Give the "body" column the flag rule; base stays empty.
+        // (Box a fresh FlagText for the column set.)
+        rr_with_col.push_column(None, Some("body".into()), vec![Box::new(FlagText::new())]);
+
+        let none =
+            lint_document(Some("onecol"), "abc", &reg, &ProcessorConfig::default(), &rr).unwrap();
+        assert!(
+            none.is_empty(),
+            "empty base + no column rules → no diagnostics"
+        );
+        let some = lint_document(
+            Some("onecol"),
+            "abc",
+            &reg,
+            &ProcessorConfig::default(),
+            &rr_with_col,
+        )
+        .unwrap();
+        assert_eq!(
+            some.iter()
+                .map(|d| (d.span.start, d.span.end))
+                .collect::<Vec<_>>(),
+            vec![(0, 3)]
+        );
+        let _ = base; // base slice kept for clarity
     }
 
     #[test]
@@ -610,9 +689,9 @@ mod tests {
             r.push(Box::new(SliceAt)); // see Step 3 for `push`
             r
         };
-        let rule = FlagText::new();
-        let rules: Vec<&dyn Rule> = vec![&rule];
-        let diags = lint_document(Some("slice"), source, &reg, &rules).unwrap();
+        let rr = RegionRules::base_only(vec![Box::new(FlagText::new())]);
+        let diags =
+            lint_document(Some("slice"), source, &reg, &ProcessorConfig::default(), &rr).unwrap();
         // The single TEXT node spans the slice 2..7 absolutely.
         assert_eq!(diag_spans(&diags), vec![(2, 7)]);
     }
