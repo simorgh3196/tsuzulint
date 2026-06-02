@@ -1385,6 +1385,37 @@ mod tests {
     }
 
     #[test]
+    fn changing_column_config_invalidates_cache() {
+        // Run once with body→no-todo on; then a config that turns it off must NOT reuse the
+        // cached (findings) result. The body cell carries a real marker ("TODO " has the trailing
+        // space the default `no-todo` pattern requires).
+        let host = MockHost::new();
+        host.put("data.csv", "id,body\n1,TODO fix\n");
+        host.put(
+            "on.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        host.put(
+            "off.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": false } } } } } }"#,
+        );
+
+        let mut on = lint_cli("data.csv", OutputFormat::Text);
+        on.config = Some(PathBuf::from("on.json"));
+        let (s_on, out_on, _e) = run_capture(&on, &host);
+        assert_eq!(s_on, ExitStatus::Findings, "{out_on}");
+
+        let mut off = lint_cli("data.csv", OutputFormat::Text);
+        off.config = Some(PathBuf::from("off.json"));
+        let (s_off, out_off, _e) = run_capture(&off, &host);
+        assert_eq!(
+            s_off,
+            ExitStatus::Clean,
+            "cache must invalidate on column-rule change: {out_off}"
+        );
+    }
+
+    #[test]
     fn notes_when_csv_has_no_columns_configured() {
         // A .csv argument with no formats config → a note that nothing was linted.
         let host = MockHost::with("data.csv", "id,body\n1,x\n");
