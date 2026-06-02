@@ -79,6 +79,15 @@ pub enum ConfigError {
     },
     /// `extends` referenced a preset id that is not a known [`Preset`].
     UnknownPreset(String),
+    /// A `formats` key that is not a known input format (only `csv`/`tsv` support columns).
+    UnknownFormat(String),
+    /// A column was selected by name under a format with `header: false`.
+    ColumnNameWithoutHeader {
+        /// The format id (`csv`/`tsv`) whose column was selected by name.
+        format: String,
+        /// The header name that cannot be resolved without a header row.
+        name: String,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -90,6 +99,18 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::UnknownPreset(id) => {
                 write!(f, "`extends` references unknown preset `{id}`")
+            }
+            ConfigError::UnknownFormat(format) => {
+                write!(
+                    f,
+                    "unknown input format '{format}' (only csv/tsv support columns)"
+                )
+            }
+            ConfigError::ColumnNameWithoutHeader { format, name } => {
+                write!(
+                    f,
+                    "column '{name}' in format '{format}' is selected by name but header is false"
+                )
             }
         }
     }

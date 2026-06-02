@@ -33,6 +33,42 @@ pub(super) struct RawConfig {
     /// non-string/array value is a serde type error at parse time.
     #[serde(default)]
     extends: Option<Extends>,
+    /// Per-format sections (`formats.csv` / `formats.tsv`). Resolved into
+    /// [`Config::formats`](super::Config::formats); an unknown format id or a name-keyed column
+    /// under `header: false` is rejected in [`into_config`](RawConfig::into_config).
+    #[serde(default)]
+    formats: std::collections::BTreeMap<String, RawFormat>,
+}
+
+/// The on-disk shape of one `formats.<id>` section.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct RawFormat {
+    #[serde(default)]
+    header: bool,
+    #[serde(default)]
+    delimiter: Option<char>,
+    #[serde(default)]
+    columns: BTreeMap<String, RawColumn>,
+}
+
+/// The on-disk shape of one column under `formats.<id>.columns`. The map key is the selector
+/// (a 1-based number, or a header name).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct RawColumn {
+    #[serde(default)]
+    parse_mode: Option<RawParseMode>,
+    #[serde(default)]
+    rules: BTreeMap<String, RuleSetting>,
+}
+
+/// The on-disk spelling of a cell parse mode.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RawParseMode {
+    Markdown,
+    Plain,
 }
 
 /// The shape of the `extends` value: one preset id, or a list of them.
@@ -82,13 +118,62 @@ impl RawConfig {
             ..Default::default()
         };
 
+        // Resolve formats (csv/tsv only; columns become selectors + parse mode + rule overlay).
+        // Formats are not preset-layered, so they are attached to the FINAL folded config below.
+        let mut formats = std::collections::BTreeMap::new();
+        for (fmt_id, raw) in self.formats {
+            if fmt_id != "csv" && fmt_id != "tsv" {
+                return Err(ConfigError::UnknownFormat(fmt_id));
+            }
+            let mut columns = Vec::new();
+            for (key, raw_col) in raw.columns {
+                let selector = match key.parse::<u32>() {
+                    Ok(n) if n >= 1 => crate::processor::ColumnSelector::Index(n),
+                    _ => {
+                        if !raw.header {
+                            return Err(ConfigError::ColumnNameWithoutHeader {
+                                format: fmt_id,
+                                name: key,
+                            });
+                        }
+                        crate::processor::ColumnSelector::Name(key)
+                    }
+                };
+                let parse_mode = match raw_col.parse_mode {
+                    Some(RawParseMode::Plain) => crate::processor::ParseMode::PlainText,
+                    _ => crate::processor::ParseMode::Markdown,
+                };
+                let rules = raw_col
+                    .rules
+                    .into_iter()
+                    .map(|(id, setting)| (RuleId::from(id), setting))
+                    .collect();
+                columns.push(crate::ColumnConfig {
+                    selector,
+                    parse_mode,
+                    rules,
+                });
+            }
+            formats.insert(
+                fmt_id,
+                crate::FormatConfig {
+                    has_header: raw.header,
+                    delimiter: raw.delimiter,
+                    columns,
+                },
+            );
+        }
+
         // Layer presets under the user config. Folding in reverse makes the precedence (low to
         // high) `extends[0] < … < extends[n] < user`: each `resolve` puts its preset *under* the
         // accumulator.
-        Ok(presets
+        let mut result = presets
             .into_iter()
             .rev()
-            .fold(user, |acc, preset| super::resolve(Some(preset), acc)))
+            .fold(user, |acc, preset| super::resolve(Some(preset), acc));
+        // Attach the resolved formats to the FINAL folded config (formats are not preset-layered).
+        result.formats = formats;
+        Ok(result)
     }
 }
 
@@ -415,5 +500,67 @@ mod tests {
     fn into_config_null_extends_is_a_noop() {
         let raw: RawConfig = serde_json::from_str(r#"{ "extends": null }"#).unwrap();
         assert!(raw.into_config().unwrap().rules.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod formats_parsing {
+    use crate::processor::{ColumnSelector, ParseMode};
+    use crate::{Config, ConfigError, ConfigFormat, RuleSetting};
+
+    fn parse(json: &str) -> Result<Config, ConfigError> {
+        Config::parse(json, ConfigFormat::Json)
+    }
+
+    #[test]
+    fn parses_columns_by_name_and_index_with_overlay_rules() {
+        let c = parse(
+            r#"{ "formats": { "csv": { "header": true,
+                "columns": {
+                  "body": { "rules": { "no-todo": true } },
+                  "2": { "parse-mode": "plain", "rules": { "max-ten": { "options": { "max": 0 } } } }
+                } } } }"#,
+        )
+        .unwrap();
+        let csv = c.formats.get("csv").unwrap();
+        assert!(csv.has_header);
+        assert_eq!(csv.columns.len(), 2);
+        // BTreeMap key order: "2" then "body" — assert by finding.
+        let body = csv
+            .columns
+            .iter()
+            .find(|col| col.selector == ColumnSelector::Name("body".into()))
+            .unwrap();
+        assert_eq!(body.parse_mode, ParseMode::Markdown);
+        assert!(matches!(
+            body.rules.get(&"no-todo".into()),
+            Some(RuleSetting::On { .. })
+        ));
+        let col2 = csv
+            .columns
+            .iter()
+            .find(|col| col.selector == ColumnSelector::Index(2))
+            .unwrap();
+        assert_eq!(col2.parse_mode, ParseMode::PlainText);
+    }
+
+    #[test]
+    fn name_key_without_header_is_an_error() {
+        let err =
+            parse(r#"{ "formats": { "tsv": { "header": false, "columns": { "body": {} } } } }"#)
+                .unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ColumnNameWithoutHeader { .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_format_id_is_an_error() {
+        let err = parse(r#"{ "formats": { "xml": { "columns": { "1": {} } } } }"#).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::UnknownFormat(ref f) if f == "xml"),
+            "{err:?}"
+        );
     }
 }
