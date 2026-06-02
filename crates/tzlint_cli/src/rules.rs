@@ -124,6 +124,7 @@ mod tests {
             language: None,
             message_language: None,
             rules: map,
+            ..Default::default()
         }
     }
 

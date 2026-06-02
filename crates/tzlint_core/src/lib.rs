@@ -30,8 +30,8 @@ pub use cache::{
     CacheError, CacheKey, CacheKeyInput, DocumentCache, document_cache_key, lint_cached,
 };
 pub use config::{
-    CONFIG_SCHEMA, Config, ConfigError, ConfigFormat, DiscoveredConfig, Preset, RuleSetting,
-    ShadowedCandidate, discover, resolve,
+    CONFIG_SCHEMA, ColumnConfig, Config, ConfigError, ConfigFormat, DiscoveredConfig, FormatConfig,
+    Preset, RuleSetting, ShadowedCandidate, discover, resolve,
 };
 pub use engine::Engine;
 pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};

@@ -19,6 +19,7 @@
 
 mod discover;
 mod format;
+mod format_config;
 mod model;
 mod preset;
 mod schema;
@@ -30,6 +31,7 @@ use tzlint_pdk::RuleId;
 
 pub use discover::{DiscoveredConfig, ShadowedCandidate, discover};
 pub use format::ConfigFormat;
+pub use format_config::{ColumnConfig, FormatConfig};
 pub use model::RuleSetting;
 pub use preset::{Preset, resolve};
 pub use schema::CONFIG_SCHEMA;
@@ -49,6 +51,8 @@ pub struct Config {
     pub message_language: Option<String>,
     /// Per-rule settings, keyed by [`RuleId`]. Absent ids fall back to a rule's own defaults.
     pub rules: BTreeMap<RuleId, RuleSetting>,
+    /// Per-format settings (e.g. `formats.csv`), keyed by format id. Empty by default.
+    pub formats: BTreeMap<String, FormatConfig>,
 }
 
 impl Config {
@@ -153,5 +157,16 @@ mod tests {
             Config::parse("{ not json", ConfigFormat::Json),
             Err(ConfigError::Parse { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod format_config_tests {
+    use super::*;
+
+    #[test]
+    fn config_default_has_no_formats() {
+        let c = Config::default();
+        assert!(c.formats.is_empty());
     }
 }

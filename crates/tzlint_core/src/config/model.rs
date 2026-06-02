@@ -79,6 +79,7 @@ impl RawConfig {
             language: self.language,
             message_language: self.message_language,
             rules,
+            ..Default::default()
         };
 
         // Layer presets under the user config. Folding in reverse makes the precedence (low to
