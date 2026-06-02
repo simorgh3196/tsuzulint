@@ -40,6 +40,10 @@ use alloc::vec::Vec;
 
 use rkyv::{Archive, Serialize};
 
+/// The frozen `MorphologyV1` table (per-node morphological tokens, M2) — a separate additive
+/// archived payload alongside the AST core, keyed by [`NodeId`]. See `abi-spec.md`.
+pub mod morphology;
+
 /// An absolute, half-open byte range `[start, end)` into [`Ast::text`].
 ///
 /// Offsets are **bytes**, not chars or columns — a node's text is exactly
