@@ -102,7 +102,8 @@ fn build_regions(source: &str, d: &DelimitedConfig, default_delimiter: u8) -> Ve
         let slices: Vec<tzlint_ast::Span> = body
             .iter()
             .filter_map(|rec| rec.get(idx as usize).copied())
-            .filter(|s| s.start != s.end) // skip empty cells
+            // §6: skip empty AND whitespace-only cells (nothing lintable in them).
+            .filter(|s| !cell_text(source, *s).trim().is_empty())
             .collect();
         if slices.is_empty() {
             continue;
@@ -253,6 +254,53 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
+    }
+
+    #[test]
+    fn whitespace_only_cells_are_not_linted() {
+        // §6: a cell that is empty OR whitespace-only is not linted. Here every `body` body cell
+        // is spaces, so the column yields no region at all.
+        let source = "id,body\n1,   \n2,\t \n";
+        let p = DelimitedProcessor::csv();
+        let parsed = p
+            .parse(
+                source,
+                &cfg(
+                    vec![ColumnTarget {
+                        selector: ColumnSelector::Name("body".into()),
+                        parse_mode: ParseMode::PlainText,
+                    }],
+                    true,
+                ),
+            )
+            .unwrap();
+        assert!(
+            matches!(parsed, Parsed::Regions(rs) if rs.is_empty()),
+            "whitespace-only cells must not produce a region",
+        );
+    }
+
+    #[test]
+    fn whitespace_only_cells_are_skipped_among_real_ones() {
+        // A mix: only the non-blank cells become slices; the whitespace row is dropped.
+        let source = "id,body\n1,hello\n2,   \n3,world\n";
+        let p = DelimitedProcessor::csv();
+        let parsed = p
+            .parse(
+                source,
+                &cfg(
+                    vec![ColumnTarget {
+                        selector: ColumnSelector::Name("body".into()),
+                        parse_mode: ParseMode::PlainText,
+                    }],
+                    true,
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            regions_of(source, parsed),
+            vec![(Some(1), Some("body".to_string()), vec!["hello", "world"])],
+        );
     }
 
     #[test]

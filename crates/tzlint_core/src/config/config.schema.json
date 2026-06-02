@@ -24,6 +24,9 @@
         { "$ref": "#/$defs/presetId" },
         { "type": "array", "items": { "$ref": "#/$defs/presetId" } }
       ]
+    },
+    "formats": {
+      "$ref": "#/$defs/formats"
     }
   },
   "$defs": {
@@ -37,6 +40,54 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/ruleSetting"
+      }
+    },
+    "formats": {
+      "description": "Per-input-format settings, keyed by format id. Only `csv` and `tsv` are wired (an unknown id is rejected by the loader at resolve time — not expressible here, so this allows arbitrary keys). Each value describes how to extract and lint that format's columns.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/format"
+      }
+    },
+    "format": {
+      "description": "One delimited format's settings: whether the first row is a header, an optional single-character delimiter override, and the target columns.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "header": {
+          "description": "Whether the first record is a header row (enables selecting columns by name).",
+          "type": "boolean"
+        },
+        "delimiter": {
+          "description": "A single-character delimiter override (else the format default: `,` for csv, tab for tsv). Must be one character and, at resolve time, ASCII (the non-ASCII check is the loader's, not expressible here).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1
+        },
+        "columns": {
+          "$ref": "#/$defs/columns"
+        }
+      }
+    },
+    "columns": {
+      "description": "Target columns to lint, keyed by selector: a 1-based column number (e.g. \"2\") or a header name (requires `header: true`). Keys are arbitrary strings (the name-vs-number resolution and the header requirement are the loader's, not expressible here).",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/column"
+      }
+    },
+    "column": {
+      "description": "One target column: how to parse its cells and an optional rule overlay layered over the base `rules` (the column wins).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parse-mode": {
+          "description": "How each cell is parsed before linting. Defaults to markdown.",
+          "enum": ["markdown", "plain"]
+        },
+        "rules": {
+          "$ref": "#/$defs/rules"
+        }
       }
     },
     "ruleSetting": {

@@ -197,6 +197,68 @@ const CORPUS: &[(&str, &str, Mode)] = &[
         r#"{"rules":{"r":"maybe"}}"#,
         Mode::Reject,
     ),
+    // `formats`: per-format column linting. Only rows where the schema and loader AGREE are in the
+    // corpus — several loader-only validations (unknown format id beyond csv/tsv, name key under
+    // `header:false`, a non-ASCII delimiter) are resolve-time checks that JSON Schema cannot
+    // express, so they are deliberately omitted here (and covered by unit tests in `src/config/`).
+    ("formats empty", r#"{"formats":{}}"#, Mode::Accept),
+    (
+        "format empty object (all defaults)",
+        r#"{"formats":{"csv":{}}}"#,
+        Mode::Accept,
+    ),
+    (
+        "formats valid columns by name with overlay rules",
+        r#"{"formats":{"csv":{"header":true,"columns":{"body":{"rules":{"no-todo":true}}}}}}"#,
+        Mode::Accept,
+    ),
+    (
+        "format parse-mode plain",
+        r#"{"formats":{"csv":{"header":true,"columns":{"body":{"parse-mode":"plain"}}}}}"#,
+        Mode::Accept,
+    ),
+    (
+        "format parse-mode markdown",
+        r#"{"formats":{"csv":{"header":true,"columns":{"2":{"parse-mode":"markdown"}}}}}"#,
+        Mode::Accept,
+    ),
+    (
+        "format single-char delimiter override",
+        r#"{"formats":{"csv":{"header":true,"delimiter":";","columns":{"1":{}}}}}"#,
+        Mode::Accept,
+    ),
+    // Schema-expressible rejections that the loader also rejects (strict parity).
+    (
+        "format parse-mode bogus",
+        r#"{"formats":{"csv":{"header":true,"columns":{"body":{"parse-mode":"bogus"}}}}}"#,
+        Mode::Reject,
+    ),
+    (
+        "format unknown key",
+        r#"{"formats":{"csv":{"header":true,"bogus":1,"columns":{}}}}"#,
+        Mode::Reject,
+    ),
+    (
+        "column unknown key",
+        r#"{"formats":{"csv":{"header":true,"columns":{"body":{"bogus":1}}}}}"#,
+        Mode::Reject,
+    ),
+    (
+        "format header wrong type",
+        r#"{"formats":{"csv":{"header":"yes","columns":{}}}}"#,
+        Mode::Reject,
+    ),
+    (
+        "format multi-char delimiter",
+        r#"{"formats":{"csv":{"header":true,"delimiter":";;","columns":{"1":{}}}}}"#,
+        Mode::Reject,
+    ),
+    ("formats non-object", r#"{"formats":5}"#, Mode::Reject),
+    (
+        "format column rule bad severity (reuses rules sub-schema)",
+        r#"{"formats":{"csv":{"header":true,"columns":{"body":{"rules":{"r":{"severity":"fatal"}}}}}}}"#,
+        Mode::Reject,
+    ),
 ];
 
 fn validator() -> Validator {

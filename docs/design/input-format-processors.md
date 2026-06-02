@@ -289,7 +289,9 @@ New top-level keys (kebab-case, `deny_unknown_fields` extended to the new shapes
   `rules` overlay (same shape as top-level `rules`).
 - `overrides` (general, format-neutral): a list of `{ files?: glob[], region: { kind?,
   index?, name? }, rules }`. `formats.<fmt>.columns` desugars to entries of this form; the
-  general form is the extension point for other formats.
+  general form is the extension point for other formats. **(Not yet implemented — only
+  `formats.<csv|tsv>.columns` is wired; `deny_unknown_fields` rejects a top-level `overrides`
+  key today. See §16.)**
 
 ### Examples
 
@@ -324,7 +326,8 @@ formats:
       "5": { parse-mode: plain, rules: { max-ten: { options: { max: 0 } } } }
 ```
 
-General override (the desugared / cross-format form):
+General override (the desugared / cross-format form — **not yet implemented; future work.**
+Using a top-level `overrides:` key in a real config hard-errors today via `deny_unknown_fields`):
 
 ```yaml
 overrides:
@@ -420,6 +423,9 @@ byte-for-byte unchanged. The `golden_archived_layout_is_frozen` test is unaffect
 
 ## 16. Open questions / future work
 
+- General top-level `overrides` key (§9): deferred / not yet implemented. Only
+  `formats.<csv|tsv>.columns` is wired; a top-level `overrides` key currently hard-errors via
+  `deny_unknown_fields`. The format-neutral form lands when a non-column format needs it.
 - Escaped-quote content fidelity (`""` vs `"`) via content normalization + span back-map.
 - Strict IANA TSV escaping mode.
 - "One AST per column" performance optimization (gated on document-level rule scope).
