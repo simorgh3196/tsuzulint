@@ -2,7 +2,7 @@
 //! turns source into either a full [`Ast`] (Markdown's path) or a list of lintable
 //! [`Region`]s. See `docs/design/input-format-processors.md`.
 
-use tzlint_ast::Span;
+use tzlint_ast::{Ast, Node, NodeId, NodeKind, OptionNodeId, Span};
 
 use crate::ParseError;
 
@@ -114,6 +114,71 @@ impl Registry {
     }
 }
 
+/// Build one independent mini-[`Ast`] per slice of every region. Each mini-AST's `text` is the
+/// whole `source` and its node spans are **absolute** byte offsets into it, so diagnostics from
+/// linting it are already in the original file's coordinates (no later shifting).
+///
+/// A slice that fails to parse (Markdown only) propagates its [`ParseError`]; the caller turns
+/// it into a single diagnostic for the document.
+pub(crate) fn build_region_asts(regions: &[Region], source: &str) -> Result<Vec<Ast>, ParseError> {
+    let mut asts = Vec::new();
+    for region in regions {
+        for slice in &region.slices {
+            let start = slice.start;
+            let end = slice.end;
+            let text = source.get(start as usize..end as usize).unwrap_or("");
+            let ast = match region.parse_mode {
+                ParseMode::Markdown => markdown_slice_ast(text, start, source)?,
+                ParseMode::PlainText => plaintext_slice_ast(start, end, source),
+            };
+            asts.push(ast);
+        }
+    }
+    Ok(asts)
+}
+
+/// Parse `text` (a slice of `source` starting at byte `start`) as Markdown, then shift every
+/// node span by `start` so they are absolute into `source`, and set the AST's text to the whole
+/// `source`.
+fn markdown_slice_ast(text: &str, start: u32, source: &str) -> Result<Ast, ParseError> {
+    let mut ast = crate::parse(text)?;
+    for node in &mut ast.nodes {
+        node.span = Span::new(node.span.start + start, node.span.end + start);
+    }
+    ast.text = source.to_string();
+    Ok(ast)
+}
+
+/// A fixed Root → Paragraph → Text spine spanning `[start, end)`, with the AST's text set to the
+/// whole `source` (so spans are absolute).
+fn plaintext_slice_ast(start: u32, end: u32, source: &str) -> Ast {
+    let span = Span::new(start, end);
+    let nodes = vec![
+        Node {
+            kind: NodeKind::ROOT,
+            span,
+            parent: NodeId(0),
+            first_child: OptionNodeId::some(NodeId(1)),
+            next_sibling: OptionNodeId::NONE,
+        },
+        Node {
+            kind: NodeKind::PARAGRAPH,
+            span,
+            parent: NodeId(0),
+            first_child: OptionNodeId::some(NodeId(2)),
+            next_sibling: OptionNodeId::NONE,
+        },
+        Node {
+            kind: NodeKind::TEXT,
+            span,
+            parent: NodeId(1),
+            first_child: OptionNodeId::NONE,
+            next_sibling: OptionNodeId::NONE,
+        },
+    ];
+    Ast { nodes, text: source.to_string(), root: NodeId(0) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +225,54 @@ mod tests {
         assert_eq!(reg.for_ext(Some("UNKNOWN")).extensions().to_vec(), default_exts);
         // Case-insensitive match.
         assert!(reg.for_ext(Some("MD")).extensions().contains(&"md"));
+    }
+
+    use tzlint_ast::{NodeKind, Span};
+
+    fn region(slices: &[(u32, u32)], mode: ParseMode) -> Region {
+        Region {
+            slices: slices.iter().map(|(s, e)| Span::new(*s, *e)).collect(),
+            tag: RegionTag::whole(),
+            parse_mode: mode,
+        }
+    }
+
+    #[test]
+    fn plaintext_slice_builds_absolute_root_paragraph_text() {
+        let source = "id,body\n1,hello\n";
+        // "hello" is at bytes 10..15.
+        let asts = build_region_asts(&[region(&[(10, 15)], ParseMode::PlainText)], source).unwrap();
+        assert_eq!(asts.len(), 1);
+        let ast = &asts[0];
+        // text is the whole source; spans are absolute into it.
+        assert_eq!(ast.text, source);
+        assert_eq!(ast.nodes[ast.root.0 as usize].kind, NodeKind::ROOT);
+        let text_node = ast.nodes.iter().find(|n| n.kind == NodeKind::TEXT).unwrap();
+        assert_eq!(text_node.span, Span::new(10, 15));
+        assert_eq!(&ast.text[text_node.span.start as usize..text_node.span.end as usize], "hello");
+    }
+
+    #[test]
+    fn markdown_slice_shifts_spans_to_absolute() {
+        let source = "id,body\n1,**bold**\n";
+        // "**bold**" is at bytes 10..18.
+        let asts = build_region_asts(&[region(&[(10, 18)], ParseMode::Markdown)], source).unwrap();
+        let ast = &asts[0];
+        assert_eq!(ast.text, source);
+        // The STRONG node's span must be absolute into the whole source.
+        let strong = ast.nodes.iter().find(|n| n.kind == NodeKind::STRONG).unwrap();
+        assert_eq!(&ast.text[strong.span.start as usize..strong.span.end as usize], "**bold**");
+        assert_eq!(strong.span, Span::new(10, 18));
+    }
+
+    #[test]
+    fn one_mini_ast_per_slice() {
+        let source = "a\nbb\nccc\n";
+        let asts = build_region_asts(
+            &[region(&[(0, 1), (2, 4)], ParseMode::PlainText)],
+            source,
+        )
+        .unwrap();
+        assert_eq!(asts.len(), 2); // independent mini-document per slice
     }
 }
