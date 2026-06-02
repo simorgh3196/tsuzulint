@@ -139,12 +139,15 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// The registry of built-in processors. Markdown is the default; later plans push CSV/TSV.
+    /// The registry of built-in processors. Markdown is the default; CSV/TSV are registered.
     #[must_use]
     pub fn with_builtins() -> Self {
         Registry {
             default: Box::new(MarkdownProcessor),
-            others: Vec::new(),
+            others: vec![
+                Box::new(DelimitedProcessor::csv()),
+                Box::new(DelimitedProcessor::tsv()),
+            ],
         }
     }
 
@@ -282,6 +285,24 @@ fn plaintext_slice_ast(start: u32, end: u32, source: &str) -> Ast {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_includes_csv_and_tsv() {
+        let reg = Registry::with_builtins();
+        assert!(reg.for_ext(Some("csv")).extensions().contains(&"csv"));
+        assert!(reg.for_ext(Some("tsv")).extensions().contains(&"tsv"));
+        // Unknown still falls back to Markdown.
+        assert!(reg.for_ext(Some("rtf")).extensions().contains(&"md"));
+    }
+
+    #[test]
+    fn csv_with_default_config_lints_nothing_end_to_end() {
+        // Through the dispatch entry, a .csv with the default (empty) ProcessorConfig yields no
+        // diagnostics — opt-in safety.
+        let reg = Registry::with_builtins();
+        let diags = lint_document(Some("csv"), "id,body\n1,ﾊﾛｰ\n", &reg, &[]).unwrap();
+        assert!(diags.is_empty());
+    }
 
     #[test]
     fn delimited_config_constructs() {
