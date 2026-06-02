@@ -193,6 +193,58 @@ fn fingerprint_config(config: &Config) -> Result<[u8; 32], serde_json::Error> {
             }
         }
     }
+
+    // Format settings: which columns are linted, with what parse mode and rule overlay.
+    hasher.update(&(config.formats.len() as u64).to_le_bytes());
+    for (fmt_id, fmt) in &config.formats {
+        put(&mut hasher, fmt_id.as_bytes());
+        hasher.update(&[u8::from(fmt.has_header)]);
+        match fmt.delimiter {
+            None => {
+                hasher.update(&[0x00]);
+            }
+            Some(c) => {
+                hasher.update(&[0x01]);
+                put(&mut hasher, c.to_string().as_bytes());
+            }
+        }
+        hasher.update(&(fmt.columns.len() as u64).to_le_bytes());
+        for col in &fmt.columns {
+            match &col.selector {
+                crate::processor::ColumnSelector::Name(n) => {
+                    hasher.update(&[0x00]);
+                    put(&mut hasher, n.as_bytes());
+                }
+                crate::processor::ColumnSelector::Index(i) => {
+                    hasher.update(&[0x01]);
+                    hasher.update(&i.to_le_bytes());
+                }
+            }
+            hasher.update(&[parse_mode_byte(col.parse_mode)]);
+            // Column rule overlay (same encoding as the base rules above).
+            hasher.update(&(col.rules.len() as u64).to_le_bytes());
+            for (id, setting) in &col.rules {
+                put(&mut hasher, id.as_str().as_bytes());
+                match setting {
+                    RuleSetting::Off => {
+                        hasher.update(&[0x00]);
+                    }
+                    RuleSetting::On { severity, options } => {
+                        hasher.update(&[0x01]);
+                        match severity {
+                            None => {
+                                hasher.update(&[0x00]);
+                            }
+                            Some(sev) => {
+                                hasher.update(&[0x01, severity_byte(*sev)]);
+                            }
+                        }
+                        put(&mut hasher, &serde_json::to_vec(options)?);
+                    }
+                }
+            }
+        }
+    }
     Ok(*hasher.finalize().as_bytes())
 }
 
@@ -216,6 +268,14 @@ fn severity_byte(severity: Severity) -> u8 {
         Severity::Warning => 1,
         Severity::Info => 2,
         Severity::Hint => 3,
+    }
+}
+
+/// Stable parse-mode discriminant for the format-settings fold in the fingerprint.
+fn parse_mode_byte(mode: crate::processor::ParseMode) -> u8 {
+    match mode {
+        crate::processor::ParseMode::Markdown => 0,
+        crate::processor::ParseMode::PlainText => 1,
     }
 }
 
@@ -610,6 +670,34 @@ mod tests {
             key_of("x", &cfg(r#"{"rules":{"r":{"options":{"max":1}}}}"#)),
             key_of("x", &cfg(r#"{"rules":{"r":{"options":{"max":2}}}}"#))
         );
+    }
+
+    #[test]
+    fn formats_change_the_cache_key() {
+        use crate::processor::{ColumnSelector, ParseMode};
+        use crate::{ColumnConfig, Config, FormatConfig};
+        use std::collections::BTreeMap;
+
+        let base = Config::default();
+        let mut with_cols = Config::default();
+        let mut formats = BTreeMap::new();
+        formats.insert(
+            "csv".to_string(),
+            FormatConfig {
+                has_header: true,
+                delimiter: None,
+                columns: vec![ColumnConfig {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::Markdown,
+                    rules: BTreeMap::new(),
+                }],
+            },
+        );
+        with_cols.formats = formats;
+
+        let k1 = key_of("x", &base);
+        let k2 = key_of("x", &with_cols);
+        assert_ne!(k1, k2);
     }
 
     #[test]
