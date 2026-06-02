@@ -56,6 +56,8 @@ pub(crate) fn scan_records(source: &str, delimiter: u8) -> Vec<Vec<Span>> {
             content_end = j;
             after_field = j;
         }
+        // `as u32` is safe: byte offsets index `source`, and `io::MAX_FILE` (16 MiB) is far below
+        // `u32::MAX`, so an offset always fits.
         record.push(Span::new(content_start as u32, content_end as u32));
 
         // --- advance to the separator (delimiter / newline / EOF) ---
@@ -180,7 +182,42 @@ mod tests {
 
     #[test]
     fn never_panics_on_unterminated_quote() {
-        // Best-effort: an unterminated quote takes content to EOF, no panic.
-        let _ = scan_records("\"unterminated", b',');
+        // Best-effort: an unterminated quote takes content to EOF, no panic — and the recovered
+        // content (inside the opening quote) runs all the way to end-of-input.
+        let records = scan_records("\"abc", b',');
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].len(), 1);
+        let span = records[0][0];
+        assert_eq!(span, Span::new(1, 4)); // content starts just after the opening quote, to EOF
+        assert_eq!(cells("\"abc", b','), vec![vec!["abc"]]);
+    }
+
+    #[test]
+    fn cell_spans_are_exact_byte_offsets() {
+        // The scanner's contract is its spans, so assert raw `Span` values, not just text.
+        // `a,"x,y",b\n` → field 0 = bytes 0..1, field 1 (quoted) = inside the quotes 3..6,
+        // field 2 = bytes 8..9.
+        let records = scan_records("a,\"x,y\",b\n", b',');
+        assert_eq!(records.len(), 1);
+        let row = &records[0];
+        assert_eq!(row[0], Span::new(0, 1));
+        assert_eq!(row[1], Span::new(3, 6));
+        assert_eq!(row[2], Span::new(8, 9));
+    }
+
+    #[test]
+    fn trailing_delimiter_yields_empty_last_field() {
+        // A trailing delimiter produces an empty final field, with or without a final newline.
+        assert_eq!(cells("a,b,\n", b','), vec![vec!["a", "b", ""]]);
+        assert_eq!(cells("a,b,", b','), vec![vec!["a", "b", ""]]);
+    }
+
+    #[test]
+    fn lone_cr_separates_records() {
+        // A bare CR (no following LF) ends a record, like classic Mac line endings.
+        assert_eq!(
+            cells("a,b\rc,d\r", b','),
+            vec![vec!["a", "b"], vec!["c", "d"]]
+        );
     }
 }

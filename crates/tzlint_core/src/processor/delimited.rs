@@ -161,6 +161,13 @@ mod tests {
                 ),
             )
             .unwrap();
+        // The region must carry the "column" kind (guards against a regression to
+        // `RegionTag::whole()`).
+        let Parsed::Regions(rs) = &parsed else {
+            panic!("expected regions");
+        };
+        assert_eq!(rs.len(), 1);
+        assert_eq!(rs[0].tag.kind, Some("column"));
         assert_eq!(
             regions_of(source, parsed),
             vec![(Some(1), Some("body".to_string()), vec!["hello", "world"])],
@@ -216,5 +223,52 @@ mod tests {
             .parse("id,body\n1,x\n", &ProcessorConfig::default())
             .unwrap();
         assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
+    }
+
+    #[test]
+    fn index_zero_is_silently_skipped() {
+        // `Index` is 1-based, so `0` is out of range: `checked_sub(1)` → None → no region.
+        // (Plan 3 surfaces a note for such unresolved targets.)
+        let source = "a,1\nb,2\n";
+        let p = DelimitedProcessor::csv();
+        let parsed = p
+            .parse(
+                source,
+                &cfg(
+                    vec![ColumnTarget {
+                        selector: ColumnSelector::Index(0),
+                        parse_mode: ParseMode::PlainText,
+                    }],
+                    false,
+                ),
+            )
+            .unwrap();
+        assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
+    }
+
+    #[test]
+    fn tsv_processor_uses_tab_via_default_delimiter() {
+        // `delimiter: 0` means "use the processor default"; for `tsv()` that is a tab.
+        let source = "id\tbody\n1\thello\n";
+        let p = DelimitedProcessor::tsv();
+        let parsed = p
+            .parse(
+                source,
+                &ProcessorConfig {
+                    delimited: Some(DelimitedConfig {
+                        delimiter: 0, // sentinel → processor default (tab)
+                        has_header: true,
+                        columns: vec![ColumnTarget {
+                            selector: ColumnSelector::Name("body".into()),
+                            parse_mode: ParseMode::Markdown,
+                        }],
+                    }),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            regions_of(source, parsed),
+            vec![(Some(1), Some("body".to_string()), vec!["hello"])],
+        );
     }
 }

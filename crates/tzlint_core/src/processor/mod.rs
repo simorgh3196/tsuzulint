@@ -96,6 +96,11 @@ pub struct ProcessorConfig {
 #[derive(Debug, Clone)]
 pub struct DelimitedConfig {
     /// The field delimiter byte (`b','` for CSV, `b'\t'` for TSV; overridable).
+    ///
+    /// The sentinel `0` (`b'\0'`) means "use the processor's default delimiter"; the
+    /// [`DelimitedProcessor`] resolves it to `,` (CSV) or tab (TSV). As a consequence `b'\0'`
+    /// cannot be used as a real delimiter. (Plan 3's config builder sets the real byte or leaves
+    /// `0`.)
     pub delimiter: u8,
     /// Whether the first record is a header row (excluded from linting; enables name lookup).
     pub has_header: bool,
@@ -115,9 +120,14 @@ pub struct ColumnTarget {
 /// How a target column is identified.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColumnSelector {
-    /// Match by header name (requires `has_header`).
+    /// Match by header name (requires `has_header`). Header cells are trimmed before comparison,
+    /// while this selector string is compared as-is, so callers should pass an already-trimmed
+    /// name.
     Name(String),
-    /// Match by 1-based column number (as written in config).
+    /// Match by 1-based column number (as written in config). `1` is the first column; `0` is
+    /// out of range (the number is 1-based) and resolves to no column — the processor converts
+    /// via `checked_sub(1)`, so `Index(0)` yields `None` and the column is skipped. Plan 3 will
+    /// surface a note for such unresolved targets.
     Index(u32),
 }
 
@@ -311,8 +321,14 @@ mod tests {
                 delimiter: b',',
                 has_header: true,
                 columns: vec![
-                    ColumnTarget { selector: ColumnSelector::Name("body".into()), parse_mode: ParseMode::Markdown },
-                    ColumnTarget { selector: ColumnSelector::Index(2), parse_mode: ParseMode::PlainText },
+                    ColumnTarget {
+                        selector: ColumnSelector::Name("body".into()),
+                        parse_mode: ParseMode::Markdown,
+                    },
+                    ColumnTarget {
+                        selector: ColumnSelector::Index(2),
+                        parse_mode: ParseMode::PlainText,
+                    },
                 ],
             }),
         };
