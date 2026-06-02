@@ -150,6 +150,7 @@ fn lint(
         }
     }
     for path in &inputs.files {
+        note_unconfigured_format(&config, path, stderr);
         match read_and_lint(&registry, host, cache.as_mut(), path, &config) {
             Ok(report) => reports.push(report),
             Err(message) => {
@@ -553,6 +554,27 @@ fn note_unknown_rules(config: &Config, stderr: &mut dyn Write) {
             stderr,
             "note: config references unknown rule '{id}' (ignored)"
         );
+    }
+}
+
+/// Note (best-effort, on stderr) when `path` is a known delimited format (csv/tsv) but the config
+/// has no columns configured for it — so a `.csv`/`.tsv` that lints nothing is not mistaken for a
+/// clean file. Explicitly-named files reach the linter even without config (opt-in columns), so
+/// this is the most common point of confusion.
+fn note_unconfigured_format(config: &Config, path: &Path, stderr: &mut dyn Write) {
+    let known = ["csv", "tsv"];
+    if let Some(ext) = extension_of(path) {
+        let ext = ext.to_ascii_lowercase();
+        let configured = config
+            .formats
+            .get(&ext)
+            .is_some_and(|f| !f.columns.is_empty());
+        if known.contains(&ext.as_str()) && !configured {
+            let _ = writeln!(
+                stderr,
+                "note: no columns configured for '{ext}'; nothing to lint"
+            );
+        }
     }
 }
 
@@ -1360,6 +1382,14 @@ mod tests {
         let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
         assert_eq!(status, ExitStatus::Findings);
         assert!(out.contains("no-hankaku-kana"), "{out}");
+    }
+
+    #[test]
+    fn notes_when_csv_has_no_columns_configured() {
+        // A .csv argument with no formats config → a note that nothing was linted.
+        let host = MockHost::with("data.csv", "id,body\n1,x\n");
+        let (_status, _out, err) = run_capture(&lint_cli("data.csv", OutputFormat::Text), &host);
+        assert!(err.contains("no columns configured for 'csv'"), "{err}");
     }
 
     #[test]
