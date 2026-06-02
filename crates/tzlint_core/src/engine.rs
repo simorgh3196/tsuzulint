@@ -25,6 +25,20 @@ impl Engine {
             .map(|meta| Context::new(ast, meta.id.clone(), meta.default_severity))
             .collect();
 
+        // Pre-compute rule dispatch mapping by node kind
+        // ⚡ Bolt Optimization: This avoids an O(rules * nodes) loop during the hot-path traversal,
+        // replacing it with an O(1) array lookup.
+        let mut dispatch: Vec<Vec<usize>> = Vec::new();
+        for (index, meta) in metas.iter().enumerate() {
+            for kind in &meta.node_kinds {
+                let k = kind.as_u32() as usize;
+                if k >= dispatch.len() {
+                    dispatch.resize(k + 1, Vec::new());
+                }
+                dispatch[k].push(index);
+            }
+        }
+
         // Single pre-order walk. A `visited` bitmap makes it cycle-safe and bounds total
         // work to the node count, so a malformed archive — whose links `access` validates as
         // bytes but not as a graph — can neither loop nor OOM here.
@@ -35,10 +49,10 @@ impl Engine {
             }
             let mut stack = vec![root];
             while let Some(node) = stack.pop() {
-                let kind = node.kind();
-                for (index, cx) in contexts.iter_mut().enumerate() {
-                    if metas[index].visits(kind) {
-                        rules[index].check(node, cx);
+                let kind_idx = node.kind().as_u32() as usize;
+                if let Some(indices) = dispatch.get(kind_idx) {
+                    for &index in indices {
+                        rules[index].check(node, &mut contexts[index]);
                     }
                 }
                 for child in node.children() {
