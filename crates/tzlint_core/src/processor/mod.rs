@@ -131,6 +131,60 @@ pub enum ColumnSelector {
     Index(u32),
 }
 
+/// The rule sets to apply per region: a base set plus per-column sets. The CLI builds each set
+/// (base, and `base ⊕ column-overlay` for every column) so this type stays rule-agnostic.
+pub struct RegionRules {
+    base: Vec<Box<dyn Rule>>,
+    columns: Vec<ColumnRuleSet>,
+}
+
+/// One column's rule set plus the index/name it matches against a [`RegionTag`].
+struct ColumnRuleSet {
+    /// 0-based column index to match against `RegionTag.index`, if this column was selected by index.
+    index: Option<u32>,
+    /// Header name to match against `RegionTag.name`, if this column was selected by name.
+    name: Option<String>,
+    rules: Vec<Box<dyn Rule>>,
+}
+
+impl RegionRules {
+    /// A `RegionRules` with only a base set (used for Markdown / un-tagged documents).
+    #[must_use]
+    pub fn base_only(base: Vec<Box<dyn Rule>>) -> Self {
+        RegionRules {
+            base,
+            columns: Vec::new(),
+        }
+    }
+
+    /// Register the rule set for a column selected by 0-based `index` and/or header `name`.
+    pub fn push_column(
+        &mut self,
+        index: Option<u32>,
+        name: Option<String>,
+        rules: Vec<Box<dyn Rule>>,
+    ) {
+        self.columns.push(ColumnRuleSet {
+            index,
+            name,
+            rules,
+        });
+    }
+
+    /// The rules to run for a region with `tag`: the first matching column set, else the base set.
+    #[must_use]
+    pub fn for_tag(&self, tag: &RegionTag) -> Vec<&dyn Rule> {
+        for set in &self.columns {
+            let by_index = set.index.is_some() && set.index == tag.index;
+            let by_name = set.name.is_some() && set.name.as_deref() == tag.name.as_deref();
+            if by_index || by_name {
+                return set.rules.iter().map(|r| r.as_ref()).collect();
+            }
+        }
+        self.base.iter().map(|r| r.as_ref()).collect()
+    }
+}
+
 mod markdown;
 pub use markdown::MarkdownProcessor;
 
@@ -504,6 +558,48 @@ mod tests {
         let direct = crate::Engine::lint(archived, &rules);
 
         assert_eq!(diag_spans(&via_document), diag_spans(&direct));
+    }
+
+    #[test]
+    fn region_rules_resolve_by_name_then_index_then_base() {
+        // Build with a tiny rule so we can identify which set was returned by its meta id.
+        fn rule(id: &'static str) -> Box<dyn Rule> {
+            struct R(RuleMeta);
+            impl Rule for R {
+                fn meta(&self) -> &RuleMeta {
+                    &self.0
+                }
+                fn check<'a>(&self, _n: NodeRef<'a>, _c: &mut Context<'a>) {}
+            }
+            Box::new(R(RuleMeta::new(
+                id,
+                Severity::Warning,
+                vec![NodeKind::TEXT],
+            )))
+        }
+        let mut rr = RegionRules::base_only(vec![rule("base")]);
+        rr.push_column(None, Some("body".into()), vec![rule("body")]);
+        rr.push_column(Some(2), None, vec![rule("col2")]);
+
+        let ids = |v: Vec<&dyn Rule>| {
+            v.iter()
+                .map(|r| r.meta().id.as_str().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(rr.for_tag(&RegionTag::whole())), vec!["base"]);
+        assert_eq!(
+            ids(rr.for_tag(&RegionTag::column(1, Some("body".into())))),
+            vec!["body"]
+        );
+        assert_eq!(
+            ids(rr.for_tag(&RegionTag::column(2, Some("other".into())))),
+            vec!["col2"]
+        );
+        // No match → base.
+        assert_eq!(
+            ids(rr.for_tag(&RegionTag::column(9, Some("nope".into())))),
+            vec!["base"]
+        );
     }
 
     #[test]

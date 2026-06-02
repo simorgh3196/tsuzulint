@@ -40,7 +40,7 @@ pub use parse::{ParseError, parse};
 pub use position::LineIndex;
 pub use processor::{
     ColumnSelector, ColumnTarget, DelimitedConfig, DelimitedProcessor, ParseMode, Parsed,
-    Processor, ProcessorConfig, Region, RegionTag, Registry, lint_document,
+    Processor, ProcessorConfig, Region, RegionRules, RegionTag, Registry, lint_document,
 };
 
 #[cfg(test)]
