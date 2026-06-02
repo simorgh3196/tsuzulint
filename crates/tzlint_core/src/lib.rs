@@ -39,7 +39,8 @@ pub use io::{DirEntry, EntryKind, Host, IoError};
 pub use parse::{ParseError, parse};
 pub use position::LineIndex;
 pub use processor::{
-    ParseMode, Parsed, Processor, ProcessorConfig, Region, RegionTag, Registry, lint_document,
+    ColumnSelector, ColumnTarget, DelimitedConfig, ParseMode, Parsed, Processor, ProcessorConfig,
+    Region, RegionTag, Registry, lint_document,
 };
 
 #[cfg(test)]

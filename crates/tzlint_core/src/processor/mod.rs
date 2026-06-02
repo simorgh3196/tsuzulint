@@ -83,10 +83,43 @@ pub enum ParseMode {
     PlainText,
 }
 
-/// Per-format configuration handed to [`Processor::parse`]. Empty for now; later plans add
-/// delimited-format settings (columns, header, delimiter, parse modes).
+/// Per-format configuration handed to [`Processor::parse`]. Markdown ignores it; delimited
+/// processors read [`delimited`](ProcessorConfig::delimited).
 #[derive(Debug, Clone, Default)]
-pub struct ProcessorConfig;
+pub struct ProcessorConfig {
+    /// Settings for the delimited (CSV/TSV) processor, or `None` when no columns are configured
+    /// (in which case the processor lints nothing).
+    pub delimited: Option<DelimitedConfig>,
+}
+
+/// Resolved settings for one delimited format (the `formats.csv` / `formats.tsv` section).
+#[derive(Debug, Clone)]
+pub struct DelimitedConfig {
+    /// The field delimiter byte (`b','` for CSV, `b'\t'` for TSV; overridable).
+    pub delimiter: u8,
+    /// Whether the first record is a header row (excluded from linting; enables name lookup).
+    pub has_header: bool,
+    /// The columns to lint, in config order.
+    pub columns: Vec<ColumnTarget>,
+}
+
+/// One target column: how to select it and how to interpret its cells.
+#[derive(Debug, Clone)]
+pub struct ColumnTarget {
+    /// How this column is identified.
+    pub selector: ColumnSelector,
+    /// How each cell's text is parsed before linting.
+    pub parse_mode: ParseMode,
+}
+
+/// How a target column is identified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnSelector {
+    /// Match by header name (requires `has_header`).
+    Name(String),
+    /// Match by 1-based column number (as written in config).
+    Index(u32),
+}
 
 mod markdown;
 pub use markdown::MarkdownProcessor;
@@ -147,7 +180,7 @@ pub fn lint_document(
     rules: &[&dyn Rule],
 ) -> Result<Vec<Diagnostic>, ParseError> {
     let processor = registry.for_ext(ext);
-    let parsed = processor.parse(source, &ProcessorConfig)?;
+    let parsed = processor.parse(source, &ProcessorConfig::default())?;
     let asts: Vec<Ast> = match parsed {
         Parsed::Ast(ast) => vec![ast],
         Parsed::Regions(regions) => build_region_asts(&regions, source)?,
@@ -245,6 +278,25 @@ fn plaintext_slice_ast(start: u32, end: u32, source: &str) -> Ast {
 mod tests {
     use super::*;
 
+    #[test]
+    fn delimited_config_constructs() {
+        let cfg = ProcessorConfig {
+            delimited: Some(DelimitedConfig {
+                delimiter: b',',
+                has_header: true,
+                columns: vec![
+                    ColumnTarget { selector: ColumnSelector::Name("body".into()), parse_mode: ParseMode::Markdown },
+                    ColumnTarget { selector: ColumnSelector::Index(2), parse_mode: ParseMode::PlainText },
+                ],
+            }),
+        };
+        let d = cfg.delimited.as_ref().unwrap();
+        assert_eq!(d.delimiter, b',');
+        assert!(d.has_header);
+        assert_eq!(d.columns.len(), 2);
+        assert_eq!(d.columns[1].selector, ColumnSelector::Index(2));
+    }
+
     /// A test-only processor that reports a fixed extension and returns no regions.
     struct Fake;
     impl Processor for Fake {
@@ -271,7 +323,7 @@ mod tests {
     fn fake_processor_reports_extension() {
         let f = Fake;
         assert_eq!(f.extensions(), &["fake"]);
-        let parsed = f.parse("x", &ProcessorConfig).unwrap();
+        let parsed = f.parse("x", &ProcessorConfig::default()).unwrap();
         assert!(matches!(parsed, Parsed::Regions(rs) if rs.is_empty()));
     }
 
