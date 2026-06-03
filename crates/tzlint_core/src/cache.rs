@@ -26,6 +26,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 
 use blake3::Hasher;
 use serde_json::Value;
@@ -225,7 +226,7 @@ fn severity_byte(severity: Severity) -> u8 {
 /// (single-owner); a multi-threaded caller wraps it in its own lock. Stored entries are cloned
 /// on insert and on read, so a returned `Vec` can never alias (and mutate) a cached one.
 pub struct DocumentCache {
-    entries: HashMap<CacheKey, Vec<Diagnostic>>,
+    entries: HashMap<CacheKey, Arc<[Diagnostic]>>,
     /// Recency order: front = least-recently-used, back = most-recently-used.
     recency: VecDeque<CacheKey>,
     capacity: usize,
@@ -248,7 +249,7 @@ impl DocumentCache {
 
     /// Look up `key`, returning a clone and marking it most-recently-used. Takes `&mut self`
     /// because a read updates recency.
-    pub fn get(&mut self, key: &CacheKey) -> Option<Vec<Diagnostic>> {
+    pub fn get(&mut self, key: &CacheKey) -> Option<Arc<[Diagnostic]>> {
         let hit = self.entries.get(key).cloned()?;
         self.mark_recent(key);
         Some(hit)
@@ -256,7 +257,7 @@ impl DocumentCache {
 
     /// Insert (or replace) the diagnostics for `key`, evicting the least-recently-used entries
     /// if over capacity.
-    pub fn insert(&mut self, key: CacheKey, diagnostics: Vec<Diagnostic>) {
+    pub fn insert(&mut self, key: CacheKey, diagnostics: Arc<[Diagnostic]>) {
         if self.entries.insert(key, diagnostics).is_some() {
             self.mark_recent(&key); // replaced an existing entry
             return;
@@ -273,11 +274,11 @@ impl DocumentCache {
     }
 
     /// Return the cached diagnostics for `key`, or compute them with `f`, cache, and return them.
-    pub fn get_or_lint<F: FnOnce() -> Vec<Diagnostic>>(
+    pub fn get_or_lint<F: FnOnce() -> Arc<[Diagnostic]>>(
         &mut self,
         key: CacheKey,
         f: F,
-    ) -> Vec<Diagnostic> {
+    ) -> Arc<[Diagnostic]> {
         if let Some(hit) = self.get(&key) {
             return hit;
         }
@@ -325,7 +326,7 @@ impl DocumentCache {
             let diagnostics: Option<Vec<Diagnostic>> =
                 array.iter().map(diagnostic_from_value).collect();
             if let Some(diagnostics) = diagnostics {
-                cache.insert(key, diagnostics);
+                cache.insert(key, diagnostics.into());
             }
         }
         cache
@@ -447,7 +448,7 @@ pub fn lint_cached(
     .map_err(CacheError::Key)?;
 
     if let Some(hit) = cache.get(&key) {
-        return Ok(hit);
+        return Ok(hit.to_vec());
     }
 
     let ast = parse(content).map_err(CacheError::Parse)?;
@@ -456,8 +457,9 @@ pub fn lint_cached(
     // Morphology is not provisioned on the cached path yet (M2e wires the table and its
     // fingerprint into the key); rules run without it for now.
     let diagnostics = Engine::lint(archived, None, rules);
+    let diagnostics: Arc<[Diagnostic]> = diagnostics.into();
     cache.insert(key, diagnostics.clone());
-    Ok(diagnostics)
+    Ok(diagnostics.to_vec())
 }
 
 /// The on-disk wire name for a severity (round-trips with [`severity_from_name`]).
@@ -690,12 +692,12 @@ mod tests {
         let key = key_of("x", &Config::default());
         assert!(cache.get(&key).is_none());
         let diag = Diagnostic::new("r", Severity::Warning, Span::new(0, 1), "m");
-        cache.insert(key, vec![diag.clone()]);
-        let mut hit = cache.get(&key).unwrap();
+        cache.insert(key, vec![diag.clone()].into());
+        let mut hit = cache.get(&key).unwrap().to_vec();
         assert_eq!(hit, vec![diag.clone()]);
         // Mutating the returned Vec must not corrupt the stored entry.
         hit.clear();
-        assert_eq!(cache.get(&key).unwrap(), vec![diag]);
+        assert_eq!(cache.get(&key).unwrap().to_vec(), vec![diag]);
     }
 
     #[test]
@@ -703,11 +705,11 @@ mod tests {
         let mut cache = DocumentCache::with_capacity(2);
         let c = Config::default();
         let (k1, k2, k3) = (key_of("1", &c), key_of("2", &c), key_of("3", &c));
-        cache.insert(k1, vec![]);
-        cache.insert(k2, vec![]);
+        cache.insert(k1, vec![].into());
+        cache.insert(k2, vec![].into());
         // Touch k1 so k2 becomes the LRU.
         assert!(cache.get(&k1).is_some());
-        cache.insert(k3, vec![]); // evicts k2
+        cache.insert(k3, vec![].into()); // evicts k2
         assert!(cache.get(&k1).is_some());
         assert!(cache.get(&k2).is_none(), "k2 should have been evicted");
         assert!(cache.get(&k3).is_some());
@@ -718,11 +720,11 @@ mod tests {
     fn cache_insert_replaces_existing_entry() {
         let mut cache = DocumentCache::with_capacity(4);
         let key = key_of("x", &Config::default());
-        cache.insert(key, vec![]);
+        cache.insert(key, vec![].into());
         let diag = Diagnostic::new("r", Severity::Info, Span::new(0, 1), "m");
-        cache.insert(key, vec![diag.clone()]); // replace, not a second entry
+        cache.insert(key, vec![diag.clone()].into()); // replace, not a second entry
         assert_eq!(cache.len(), 1);
-        assert_eq!(cache.get(&key).unwrap(), vec![diag]);
+        assert_eq!(cache.get(&key).unwrap().to_vec(), vec![diag]);
     }
 
     #[test]
@@ -730,7 +732,7 @@ mod tests {
         let mut cache = DocumentCache::default(); // also exercises Default
         let key = key_of("x", &Config::default());
         let diag = Diagnostic::new("r", Severity::Hint, Span::new(2, 3), "m");
-        let want = vec![diag];
+        let want: Arc<[Diagnostic]> = vec![diag].into();
 
         let mut calls = 0;
         let first = cache.get_or_lint(key, || {
@@ -741,7 +743,7 @@ mod tests {
         // Second call hits the cache and does NOT recompute.
         let second = cache.get_or_lint(key, || {
             calls += 1;
-            Vec::new()
+            Vec::new().into()
         });
         assert_eq!(second, want);
         assert_eq!(calls, 1, "the closure must run only on the miss");
@@ -893,6 +895,7 @@ mod tests {
             Diagnostic::new("sentence-length", Severity::Hint, Span::new(3, 4), "len"),
         ];
         let mut cache = DocumentCache::new();
+        let diagnostics: Arc<[Diagnostic]> = diagnostics.into();
         cache.insert(key, diagnostics.clone());
 
         let host = MemHost::new();
@@ -902,7 +905,7 @@ mod tests {
         let loaded = DocumentCache::load(&host, path);
         assert_eq!(loaded.len(), 1);
         let mut loaded = loaded;
-        assert_eq!(loaded.get(&key).as_deref(), Some(diagnostics.as_slice()));
+        assert_eq!(loaded.get(&key).as_deref(), Some(&*diagnostics));
     }
 
     #[test]
@@ -1003,7 +1006,8 @@ mod tests {
                 Severity::Warning,
                 Span::new(0, 1),
                 "m",
-            )],
+            )]
+            .into(),
         );
         let host = MemHost::new();
         let path = Path::new("/work/.tzlintcache");
