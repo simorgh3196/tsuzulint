@@ -12,4 +12,8 @@ disallowed-methods = [
     { path = "std::fs::read_to_string", reason = "use tzlint_core::io::Host::read_to_string" },
     { path = "std::fs::write", reason = "use tzlint_core::io::Host::write_atomic" },
     { path = "std::fs::read_dir", reason = "use tzlint_core::io::Host::list_dir" },
+    { path = "std::fs::create_dir", reason = "use tzlint_core::io::Host::create_dir_all" },
+    { path = "std::fs::create_dir_all", reason = "use tzlint_core::io::Host::create_dir_all" },
 ]
+# `std::fs::DirBuilder` is the only other directory-creation route; it is unused anywhere in the
+# workspace, so it is left unguarded rather than adding a speculative entry. Revisit if introduced.

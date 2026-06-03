@@ -13,6 +13,12 @@ use std::path::Path;
 pub const MAX_FILE: usize = 16 * 1024 * 1024; // 16 MiB
 /// Maximum size, in bytes, of a configuration file.
 pub const MAX_CONFIG: usize = 1024 * 1024; // 1 MiB
+/// Maximum size, in bytes, of a single morphology-dictionary blob read through
+/// [`Host::read_bytes`]. Far larger than [`MAX_FILE`] because dictionaries (IPADIC / UniDic /
+/// ko-dic / CC-CEDICT) are multi-MB binaries, yet still bounded so a corrupt or hostile path
+/// cannot exhaust memory. Generous enough for the common ja/ko/zh dictionaries; a larger variant
+/// (e.g. full UniDic) can raise this when its provisioning lands.
+pub const MAX_DICT: usize = 512 * 1024 * 1024; // 512 MiB
 
 /// A boundary-I/O failure.
 #[derive(Debug)]
@@ -119,6 +125,31 @@ pub trait Host {
             "directory listing is not supported by this host".to_string(),
         ))
     }
+
+    /// Read the raw bytes of the file at `path`, rejecting anything larger than `limit` bytes.
+    ///
+    /// Unlike [`read_to_string`](Host::read_to_string) this does **no** UTF-8 validation — it is
+    /// the boundary for binary blobs such as morphology dictionaries (see [`MAX_DICT`]). Like
+    /// [`list_dir`](Host::list_dir) it defaults to an error, so a host without an ambient
+    /// filesystem (a browser/wasm embedder, which obtains dictionaries by other means — see the
+    /// M2k browser provider) need not implement it; [`NativeHost`] overrides it. A missing `path`
+    /// maps to [`IoError::NotFound`].
+    fn read_bytes(&self, path: &Path, limit: usize) -> Result<Vec<u8>, IoError> {
+        let _ = (path, limit);
+        Err(IoError::Other(
+            "binary file reads are not supported by this host".to_string(),
+        ))
+    }
+
+    /// Create `dir` and any missing parent directories (the dictionary cache root, e.g.), a no-op
+    /// success when it already exists. Like [`list_dir`](Host::list_dir) it defaults to an error
+    /// so a non-filesystem host need not implement it; [`NativeHost`] overrides it.
+    fn create_dir_all(&self, dir: &Path) -> Result<(), IoError> {
+        let _ = dir;
+        Err(IoError::Other(
+            "directory creation is not supported by this host".to_string(),
+        ))
+    }
 }
 
 // The real-filesystem host. Not compiled for `wasm32`, where the embedder injects its own
@@ -151,6 +182,28 @@ mod native {
                 return Err(IoError::TooLarge { limit });
             }
             String::from_utf8(bytes).map_err(|e| IoError::Other(format!("invalid UTF-8: {e}")))
+        }
+
+        fn read_bytes(&self, path: &Path, limit: usize) -> Result<Vec<u8>, IoError> {
+            let file = File::open(path)?;
+            // Same capped-read shape as `read_to_string` (one past `limit` so "exactly at the
+            // limit" is distinguishable; `saturating_add` keeps `usize::MAX` from overflowing),
+            // but no UTF-8 validation — the bytes are returned verbatim.
+            let mut bytes = Vec::new();
+            file.take((limit as u64).saturating_add(1))
+                .read_to_end(&mut bytes)?;
+            if bytes.len() > limit {
+                return Err(IoError::TooLarge { limit });
+            }
+            Ok(bytes)
+        }
+
+        fn create_dir_all(&self, dir: &Path) -> Result<(), IoError> {
+            // The single allowed `create_dir_all` call site (the io boundary); clippy's
+            // `disallowed_methods` bans it everywhere else, mirroring `read`/`write`/`read_dir`.
+            #[allow(clippy::disallowed_methods)]
+            std::fs::create_dir_all(dir)?;
+            Ok(())
         }
 
         fn write_atomic(&self, path: &Path, contents: &[u8]) -> Result<(), IoError> {
@@ -299,7 +352,7 @@ mod native {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use crate::io::{DirEntry, EntryKind, IoError, MAX_FILE};
+        use crate::io::{DirEntry, EntryKind, IoError, MAX_DICT, MAX_FILE};
         use std::sync::atomic::{AtomicU64, Ordering};
 
         /// A unique, freshly-created temp directory (cleaned up by the caller).
@@ -310,7 +363,7 @@ mod native {
                 std::process::id(),
                 N.fetch_add(1, Ordering::Relaxed)
             ));
-            std::fs::create_dir_all(&dir).unwrap();
+            NativeHost.create_dir_all(&dir).unwrap();
             dir
         }
 
@@ -361,12 +414,137 @@ mod native {
         }
 
         #[test]
+        fn read_bytes_roundtrips_binary_that_is_not_valid_utf8() {
+            let dir = temp_dir();
+            let path = dir.join("dict.bin");
+            let host = NativeHost;
+            // Bytes that are NOT valid UTF-8 (a dictionary blob is arbitrary binary).
+            let blob: &[u8] = &[0xFF, 0x00, 0xFE, 0x80, b'a'];
+            host.write_atomic(&path, blob).unwrap();
+            // `read_bytes` returns them verbatim …
+            assert_eq!(host.read_bytes(&path, MAX_DICT).unwrap(), blob);
+            // … whereas the UTF-8 read rejects the same content, confirming `read_bytes` is the
+            // binary boundary.
+            assert!(matches!(
+                host.read_to_string(&path, MAX_DICT),
+                Err(IoError::Other(_))
+            ));
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn read_bytes_rejects_oversize_at_one_past_the_limit() {
+            let dir = temp_dir();
+            let path = dir.join("big.bin");
+            let host = NativeHost;
+            host.write_atomic(&path, b"0123456789").unwrap();
+            assert!(matches!(
+                host.read_bytes(&path, 4),
+                Err(IoError::TooLarge { limit: 4 })
+            ));
+            // Exactly at the limit is accepted.
+            assert_eq!(host.read_bytes(&path, 10).unwrap(), b"0123456789");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn read_bytes_missing_path_is_not_found() {
+            let host = NativeHost;
+            let missing = Path::new("/no/such/tzlint/path/zzz.bin");
+            assert!(matches!(
+                host.read_bytes(missing, MAX_DICT),
+                Err(IoError::NotFound)
+            ));
+        }
+
+        #[test]
+        fn read_bytes_with_no_practical_cap_reads_everything() {
+            let dir = temp_dir();
+            let path = dir.join("any.bin");
+            let host = NativeHost;
+            host.write_atomic(&path, b"abcdef").unwrap();
+            // `usize::MAX` must not overflow the `take` cap; it reads the whole file.
+            assert_eq!(host.read_bytes(&path, usize::MAX).unwrap(), b"abcdef");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn create_dir_all_makes_nested_dirs_idempotently_then_writes_into_them() {
+            let dir = temp_dir();
+            let nested = dir.join("cache").join("dicts").join("ja");
+            let host = NativeHost;
+            // Creates the whole chain …
+            host.create_dir_all(&nested).unwrap();
+            // … and is a no-op success when it already exists.
+            host.create_dir_all(&nested).unwrap();
+            // The freshly-created dir is usable as a write target (the dictionary cache use case).
+            let path = nested.join("ipadic.bin");
+            host.write_atomic(&path, b"dict").unwrap();
+            assert_eq!(host.read_bytes(&path, MAX_DICT).unwrap(), b"dict");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        /// A host that implements only the required methods and relies on the trait defaults for
+        /// the optional, native-only capabilities — modeling a non-filesystem embedder.
+        struct DefaultsHost;
+        impl Host for DefaultsHost {
+            fn read_to_string(&self, _path: &Path, _limit: usize) -> Result<String, IoError> {
+                Ok(String::new())
+            }
+            fn write_atomic(&self, _path: &Path, _contents: &[u8]) -> Result<(), IoError> {
+                Ok(())
+            }
+            fn exists(&self, _path: &Path) -> bool {
+                false
+            }
+        }
+
+        #[test]
+        fn create_dir_all_errors_when_a_path_component_is_a_file() {
+            let dir = temp_dir();
+            let file = dir.join("not-a-dir");
+            let host = NativeHost;
+            host.write_atomic(&file, b"x").unwrap();
+            // Creating a directory *under* a regular file fails — the error surfaces (no panic).
+            assert!(host.create_dir_all(&file.join("sub")).is_err());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn optional_capabilities_default_to_an_error_on_a_non_filesystem_host() {
+            let host = DefaultsHost;
+            let p = Path::new("anything");
+            // The required methods it implements behave as written (exercised so the fixture
+            // carries no dead code) …
+            assert_eq!(host.read_to_string(p, MAX_DICT).unwrap(), "");
+            assert!(host.write_atomic(p, b"x").is_ok());
+            assert!(!host.exists(p));
+            // … while the optional, native-only capabilities default to a clear error, never a
+            // panic — the documented contract for `read_bytes` / `create_dir_all` / `list_dir`.
+            assert!(matches!(
+                host.read_bytes(p, MAX_DICT),
+                Err(IoError::Other(_))
+            ));
+            assert!(matches!(host.create_dir_all(p), Err(IoError::Other(_))));
+            assert!(matches!(host.list_dir(p), Err(IoError::Other(_))));
+        }
+
+        #[test]
+        fn read_bytes_on_a_directory_errors_rather_than_panicking() {
+            // Opening a directory succeeds but reading its bytes fails; the error surfaces
+            // (exercises the read error path, mirroring how `create_dir_all` is error-tested).
+            let dir = temp_dir();
+            assert!(NativeHost.read_bytes(&dir, MAX_DICT).is_err());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
         fn write_atomic_errors_and_leaves_no_temp_when_rename_fails() {
             // Renaming the temp over an existing directory fails; the error surfaces and the
             // RAII guard removes the temp (no leak), rather than panicking.
             let dir = temp_dir();
             let target = dir.join("a-directory");
-            std::fs::create_dir_all(&target).unwrap();
+            NativeHost.create_dir_all(&target).unwrap();
             assert!(NativeHost.write_atomic(&target, b"data").is_err());
             // Dogfood `list_dir` (rather than raw `read_dir`, now disallowed) to scan for a leak.
             let leaked = NativeHost
@@ -476,7 +654,7 @@ mod native {
             let dir = temp_dir();
             let host = NativeHost;
             host.write_atomic(&dir.join("a.md"), b"x").unwrap();
-            std::fs::create_dir(dir.join("sub")).unwrap();
+            NativeHost.create_dir_all(&dir.join("sub")).unwrap();
 
             let entries = by_name(host.list_dir(&dir).unwrap());
             assert_eq!(entries.get("a.md"), Some(&EntryKind::File));

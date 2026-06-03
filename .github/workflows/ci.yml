@@ -68,10 +68,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      # Belt-and-suspenders next to clippy disallowed-methods: a grep guard.
-      - name: reject raw fs::read*/serde_json in non-io modules
+      # Belt-and-suspenders next to clippy disallowed-methods: a grep guard. The alternation is
+      # unanchored, so `read` also catches `read_dir` and `create_dir` also catches `create_dir_all`.
+      - name: reject raw fs::read*/write/create_dir* in non-io modules
         run: |
-          ! git grep -nE 'std::fs::(read|write)' -- 'crates/*/src/**.rs' \
+          ! git grep -nE 'std::fs::(read|write|create_dir)' -- 'crates/*/src/**.rs' \
             ':!crates/tzlint_core/src/io*' || (echo "raw fs outside io module"; exit 1)
       # blake3 must stay pure-Rust: without `features = ["pure"]` it builds a SIMD backend via a
       # C compiler, breaking the uniform/reproducible build and wasm32. Guard the manifest.
