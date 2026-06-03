@@ -333,12 +333,21 @@ pub(crate) fn build_region_asts(regions: &[Region], source: &str) -> Result<Vec<
 }
 
 /// Parse `text` (a slice of `source` starting at byte `start`) as Markdown, then shift every
-/// node span by `start` so they are absolute into `source`, and set the AST's text to the whole
-/// `source`.
+/// node span so they are absolute into `source`, and set the AST's text to the whole `source`.
+///
+/// `crate::parse` strips a single leading BOM (`U+FEFF`) and returns spans relative to the
+/// **stripped** text, so the shift includes that BOM's byte length. Without it, a cell whose
+/// content begins with a BOM would have every span shifted 3 bytes too early — landing inside the
+/// multibyte BOM, which mis-reports `line:column` and makes `apply_fixes`' char-boundary guard
+/// silently drop fixes on that node. (The scanner only strips a BOM at file offset 0, so a BOM in
+/// a quoted or non-first cell reaches here intact.)
 fn markdown_slice_ast(text: &str, start: u32, source: &str) -> Result<Ast, ParseError> {
+    // Bytes `crate::parse` strips from the front before assigning spans (0 or the BOM length).
+    let bom_len = (text.len() - text.strip_prefix('\u{feff}').unwrap_or(text).len()) as u32;
+    let shift = start + bom_len;
     let mut ast = crate::parse(text)?;
     for node in &mut ast.nodes {
-        node.span = Span::new(node.span.start + start, node.span.end + start);
+        node.span = Span::new(node.span.start + shift, node.span.end + shift);
     }
     ast.text = source.to_string();
     Ok(ast)
@@ -543,6 +552,23 @@ mod tests {
             "**bold**"
         );
         assert_eq!(strong.span, Span::new(10, 18));
+    }
+
+    #[test]
+    fn markdown_slice_with_leading_bom_rebases_onto_visible_text() {
+        // A Markdown cell whose content starts with a BOM (U+FEFF, 3 bytes): `crate::parse`
+        // strips it, so the rebase must skip those bytes. The TEXT span must cover the visible
+        // "X" and be a valid char-boundary slice (regression for the 3-byte-too-early shift that
+        // landed inside the BOM and silently dropped autofixes).
+        let source = "id,body\n1,\u{feff}X\n"; // body cell "\u{feff}X" is bytes 10..14
+        let asts = build_region_asts(&[region(&[(10, 14)], ParseMode::Markdown)], source).unwrap();
+        let ast = &asts[0];
+        let text_node = ast.nodes.iter().find(|n| n.kind == NodeKind::TEXT).unwrap();
+        assert_eq!(text_node.span, Span::new(13, 14));
+        assert_eq!(
+            source.get(text_node.span.start as usize..text_node.span.end as usize),
+            Some("X"),
+        );
     }
 
     #[test]
