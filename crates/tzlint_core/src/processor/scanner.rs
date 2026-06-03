@@ -220,4 +220,13 @@ mod tests {
             vec![vec!["a", "b"], vec!["c", "d"]]
         );
     }
+
+    #[test]
+    fn trailing_bytes_after_closing_quote_are_skipped() {
+        // Junk between a closing quote and the next delimiter/newline is tolerated and dropped:
+        // the cell content is the quoted span only, and the junk is not part of any cell.
+        assert_eq!(cells("\"x\"junk,y\n", b','), vec![vec!["x", "y"]]);
+        // …and at end-of-record too (junk after the closing quote before EOF).
+        assert_eq!(cells("a,\"b\"tail", b','), vec![vec!["a", "b"]]);
+    }
 }

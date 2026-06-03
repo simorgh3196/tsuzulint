@@ -175,6 +175,18 @@ mod tests {
             .to_string(),
             "delimiter '；' in format 'csv' is not ASCII (only single-byte delimiters are supported)"
         );
+        assert_eq!(
+            ConfigError::UnknownFormat("xml".into()).to_string(),
+            "unknown input format 'xml' (only csv/tsv support columns)"
+        );
+        assert_eq!(
+            ConfigError::ColumnNameWithoutHeader {
+                format: "csv".into(),
+                name: "body".into(),
+            }
+            .to_string(),
+            "column 'body' in format 'csv' is selected by name but header is false"
+        );
     }
 
     #[test]
