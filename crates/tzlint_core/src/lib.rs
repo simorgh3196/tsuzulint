@@ -17,6 +17,7 @@
 
 pub mod cache;
 pub mod config;
+pub mod dict;
 pub mod engine;
 pub mod fix;
 pub mod io;
@@ -30,6 +31,7 @@ pub use config::{
     CONFIG_SCHEMA, Config, ConfigError, ConfigFormat, DiscoveredConfig, Preset, RuleSetting,
     ShadowedCandidate, discover, resolve,
 };
+pub use dict::{DictError, provision_dictionary};
 pub use engine::Engine;
 pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
 pub use io::{DirEntry, EntryKind, Host, IoError};

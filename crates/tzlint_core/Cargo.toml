@@ -19,6 +19,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 yaml_serde = { workspace = true }
 blake3 = { workspace = true }
+ruzstd = { workspace = true }
 
 [dev-dependencies]
 # Reference Draft 2020-12 validator used ONLY by `tests/config_schema.rs` to prove the published

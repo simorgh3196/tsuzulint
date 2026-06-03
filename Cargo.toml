@@ -58,6 +58,13 @@ yaml_serde = "0.10"
 # job greps that the `pure` feature stays set.)
 blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
 
+# Pure-Rust Zstandard *decoder* (no C/FFI), used to decompress downloaded morphology
+# dictionaries behind the Host boundary. Decode-only — no encoder — so it stays small and, being
+# pure Rust, builds for `wasm32` and keeps the uniform/reproducible build (same rationale as
+# blake3's `pure`). MIT-licensed. `default-features = false` drops the encoder-side `dict_builder`;
+# `std` provides the `std::io::Read` streaming decoder; `hash` keeps zstd's frame-checksum check.
+ruzstd = { version = "0.8.3", default-features = false, features = ["std", "hash"] }
+
 # Argument parsing for the native `tzlint` CLI (the `derive` API: `Parser`/`Subcommand`/
 # `ValueEnum`). CLI-only — it never reaches the AST or the `wasm32` core (the wasm CI job
 # builds `tzlint_core` lib-only), so a native-only dependency here is fine.
