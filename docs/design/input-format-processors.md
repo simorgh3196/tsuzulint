@@ -93,8 +93,8 @@ just the existing engine applied independently to each region.
   wrapper for compatibility.
 - `tzlint_core::processor::delimited`: the CSV/TSV processor (parameterized by delimiter).
 - `tzlint_core`: a new single entry point `lint_document(...)` that selects the processor,
-  resolves per-region rules, lints each region, and merges diagnostics. CLI/LSP/cache/fix
-  all go through it (dispatch parity).
+  resolves per-region rules, lints each region, and merges diagnostics. CLI, cache, and fix
+  all go through it today. LSP will route through it at M5 (CLI/LSP parity is future).
 
 ## 5. The Processor abstraction
 
@@ -242,32 +242,38 @@ scope, so it is gated separately.
 ### Single dispatch entry
 
 ```
-lint_document(ext, source, config, registry, rule_factory) -> Vec<Diagnostic>
+lint_document(ext, source, registry, processor_cfg, rules: &RegionRules) -> Result<Vec<Diagnostic>, ParseError>
   1. processor = registry.for_ext(ext)            // Markdown is the default/fallback
-  2. parsed    = processor.parse(source, cfg_for(format))
-  3. regions   = match parsed { Ast(a) => [(Whole, a)], Regions(rs) => build_region_asts(rs, source) }
-  4. for each region: lint with the rule set resolved for its tag (Engine::lint)
+  2. parsed    = processor.parse(source, processor_cfg)
+  3. regions   = match parsed { Ast(a) => lint whole with base rules, Regions(rs) => per-region }
+  4. for each region: lint with the rule set resolved for its tag (rules.for_tag(&tag))
   5. merge diagnostics; sort by the existing stable key
 ```
 
-This is the **one dispatch function**; CLI, LSP, cache, and fix all call it
-(`tzlint-dispatch-parity`).
+This is the **one dispatch function**; CLI, cache, and fix call it today. LSP will call it
+at M5, achieving CLI/LSP parity (not yet asserted in tests — the LSP crate is an 8-line
+scaffold).
 
-### Resolving rules per region (a factory keeps core rule-agnostic)
+### Resolving rules per region (prebuilt `RegionRules` keeps core rule-agnostic)
 
 `tzlint_core` must not depend on `tzlint_rules` (that would be a dependency cycle). So the
-driver takes a **rule factory**:
+CLI builds a **prebuilt `RegionRules`** and passes it into `lint_document`:
 
 ```rust
-rule_factory: &dyn Fn(&EffectiveRuleSettings) -> Vec<Box<dyn Rule>>
+// CLI-side (tzlint_cli::rules):
+let rules: RegionRules = region_rules_for(&config, ext);
+// ↑ builds base_only(resolve_rules(&config)), then push_column for each configured column.
+
+// Core entry point:
+lint_document(ext, source, registry, processor_cfg, &rules)
 ```
 
-- Precompute the **distinct** effective settings once: the base (`config.rules`) and, per
-  targeted column, `base ⊕ column.rules`. Build each rule set once via the factory and map
-  `RegionTag → prebuilt rule set`. Every cell of a column reuses its column's set (no
-  per-row rebuild).
-- The CLI passes a closure wrapping the existing `build_rule`/`resolve_rules`. Core stays
-  rule-agnostic; per-column rules are supported.
+- `region_rules_for(&Config, Option<&str>) -> RegionRules` (in `tzlint_cli::rules`) builds
+  the base rule set from `config.rules`, then for each configured column computes
+  `base ⊕ column.rules` and registers it via `RegionRules::push_column`. Every cell of a
+  column reuses the prebuilt set (no per-row rebuild).
+- `RegionRules::for_tag(&RegionTag)` picks the first matching column set, falling back to
+  the base. Core stays rule-agnostic; per-column rules are fully supported.
 
 ### Layering and opt-in semantics
 
@@ -288,10 +294,9 @@ New top-level keys (kebab-case, `deny_unknown_fields` extended to the new shapes
   integer string). Each value: optional `parse-mode` (`markdown` default | `plain`) and a
   `rules` overlay (same shape as top-level `rules`).
 - `overrides` (general, format-neutral): a list of `{ files?: glob[], region: { kind?,
-  index?, name? }, rules }`. `formats.<fmt>.columns` desugars to entries of this form; the
-  general form is the extension point for other formats. **(Not yet implemented — only
-  `formats.<csv|tsv>.columns` is wired; `deny_unknown_fields` rejects a top-level `overrides`
-  key today. See §16.)**
+  index?, name? }, rules }`. **Deferred / not implemented.** `formats.<csv|tsv>.columns` is
+  resolved **directly** in `RawConfig::into_config` (not via desugaring to `overrides`). A
+  top-level `overrides` key is rejected today by `deny_unknown_fields`. See §16.
 
 ### Examples
 
@@ -356,8 +361,9 @@ match takes priority. Duplicate header names: warn, and target all columns with 
 - **fix (`fix.rs`)**: goes through the same driver. CSV fixes land only inside disjoint
   cell spans (never delimiters/structure), so fixes across regions compose without
   overlap; iterate to a fixpoint as today.
-- **dispatch parity**: a parity test asserts the same content through `lint_document`
-  yields identical diagnostics regardless of caller (file vs stdin `--format csv`).
+- **dispatch parity**: CLI, cache, and fix all call `lint_document`; a parity test asserts
+  identical diagnostics for the same content via file vs stdin `--format csv`. LSP parity
+  (routing through `lint_document`) is planned for M5.
 
 ## 11. Error handling
 
@@ -426,6 +432,12 @@ byte-for-byte unchanged. The `golden_archived_layout_is_frozen` test is unaffect
 - General top-level `overrides` key (§9): deferred / not yet implemented. Only
   `formats.<csv|tsv>.columns` is wired; a top-level `overrides` key currently hard-errors via
   `deny_unknown_fields`. The format-neutral form lands when a non-column format needs it.
+- **Per-cell morphology (M2):** each CSV/TSV cell is an independent mini-document with its own
+  text spine and absolute spans, so a single whole-document morphology table would be wrong.
+  `lint_ast_into` today passes `morphology = None` to `Engine::lint`, meaning rules that
+  require morphology are skipped for every cell. Open question: segment-the-cell (build a
+  per-cell morphology table) vs skip-on-CSV (keep `None` for delimited formats permanently).
+  The integration is owned on the M2 side.
 - Escaped-quote content fidelity (`""` vs `"`) via content normalization + span back-map.
 - Strict IANA TSV escaping mode.
 - "One AST per column" performance optimization (gated on document-level rule scope).

@@ -16,10 +16,11 @@
   YAML (`.yaml`/`.yml`). YAML **anchors/aliases are rejected** — they are unnecessary for
   configuration and enable alias-expansion ("billion laughs") memory-exhaustion that the
   config size cap cannot bound.
-- **Validation:** serde `deny_unknown_fields` — an unknown top-level key is an error. Keys in
-  the dynamic `rules` map that are not built-in rule ids are not an error but are **warned** by
-  the CLI (`note: config references unknown rule '…'`), so a typo is surfaced rather than
-  silently ignored.
+- **Validation:** serde `deny_unknown_fields` — an unknown top-level key is an error. Accepted
+  top-level keys are: `language`, `message-language`, `rules`, `extends`, and `formats` (see
+  below). Keys in the dynamic `rules` map that are not built-in rule ids are not an error but
+  are **warned** by the CLI (`note: config references unknown rule '…'`), so a typo is surfaced
+  rather than silently ignored.
 - **Activation model (opt-out):** every built-in rule is **on by default**. A bare
   `tzlint lint` runs the full built-in set; a `rules` entry set to `false` disables that rule.
   So configuration *narrows* the default set rather than opting rules in.
@@ -56,7 +57,73 @@
   dictionary fingerprint (a placeholder until M2), so any change that could alter diagnostics
   invalidates the entry. A cache read/write failure only warns; results are unaffected.
 
+## `formats` — per-format options
+
+The `formats` key is a map from format id (`csv`, `tsv`, …) to format-specific settings. It
+is an accepted top-level key (alongside `language`, `message-language`, `rules`, and
+`extends`). See [`docs/processors.md`](processors.md) for the user-facing guide.
+
+### `formats.<csv|tsv>`
+
+- **`header`** (bool, required): when `true` the first record is read as a header row (not
+  linted; enables column lookup by name). When `false` only integer-key column selectors
+  are valid — a name key is a config error.
+- **`delimiter`** (optional): a single ASCII character that overrides the default delimiter
+  (`,` for CSV, `\t` for TSV). Non-ASCII characters are rejected with a config error; omit
+  the key to use the format default.
+- **`columns`** (map): the columns to lint. **Only listed columns are linted** (opt-in
+  semantics — unlisted columns such as IDs or timestamps are never linted).
+
+  **Key:** a **header name** (string; requires `header: true`) or a **1-based column
+  number** (bare integer string, e.g. `"2"`). With `header: true`, name match takes
+  priority; duplicate header names cause a warning and target all matching columns.
+
+  **Value** (all fields optional):
+  - `parse-mode`: `markdown` (default) | `plain`. `markdown` parses the cell as CommonMark
+    and applies Markdown-aware rules. `plain` treats the cell as a single paragraph with no
+    Markdown constructs (useful when `*`/`_`/`#` are literal).
+  - `rules`: a rule overlay in the same shape as the top-level `rules` map
+    (`false | true | { severity?, options? }`). **Layering**: the effective rule set is
+    `base ⊕ column.rules` — the column overlay wins. To drop a base rule for one column,
+    set it `false` in that column's `rules`.
+
+  A configured column name absent from the actual file header produces a per-file note (not
+  a hard error, because it is data-dependent).
+
+**Example** — header CSV with two prose columns and different rules:
+
+```yaml
+language: ja
+rules:
+  no-hankaku-kana: true      # base: applies to every linted column unless overridden
+formats:
+  csv:
+    header: true             # row 1 is a header → not linted; enables name lookup
+    columns:                 # only these columns are linted (opt-in)
+      title:
+        parse-mode: plain
+        rules:
+          max-ten: { options: { max: 1 } }
+      body:
+        rules:
+          no-todo: true
+          max-ten: { options: { max: 3 } }
+```
+
+**Example** — headerless TSV by 1-based column number:
+
+```yaml
+formats:
+  tsv:
+    header: false
+    columns:
+      "2": { rules: { no-todo: true } }
+      "5": { parse-mode: plain, rules: { max-ten: { options: { max: 0 } } } }
+```
+
 ## Planned
 
 - Per-file **`overrides`** (glob-scoped `language`/rule settings), evolving the schema to a
   `v2` `$id`.
+- General format-neutral `overrides` key (glob + region selector); only
+  `formats.<csv|tsv>.columns` is wired today.
