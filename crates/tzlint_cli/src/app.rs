@@ -220,7 +220,8 @@ fn lint_direct(source: &str, rules: &[&dyn Rule]) -> Result<Vec<Diagnostic>, Str
     let ast = parse(source).map_err(|e| e.to_string())?;
     let bytes = to_archive(&ast).map_err(|e| format!("archive failed: {e}"))?;
     let archived = access(&bytes).map_err(|e| format!("archive failed: {e}"))?;
-    Ok(Engine::lint(archived, rules))
+    // Morphology is not provisioned on the CLI path yet (lands with the provider registry, M2h).
+    Ok(Engine::lint(archived, None, rules))
 }
 
 /// `fix`: lint-and-fix each file to a fixpoint; write changed files in place (or just report

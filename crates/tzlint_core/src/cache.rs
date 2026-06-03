@@ -453,7 +453,9 @@ pub fn lint_cached(
     let ast = parse(content).map_err(CacheError::Parse)?;
     let bytes = tzlint_ast::to_archive(&ast).map_err(|e| CacheError::Archive(e.to_string()))?;
     let archived = tzlint_ast::access(&bytes).map_err(|e| CacheError::Archive(e.to_string()))?;
-    let diagnostics = Engine::lint(archived, rules);
+    // Morphology is not provisioned on the cached path yet (M2e wires the table and its
+    // fingerprint into the key); rules run without it for now.
+    let diagnostics = Engine::lint(archived, None, rules);
     cache.insert(key, diagnostics.clone());
     Ok(diagnostics)
 }

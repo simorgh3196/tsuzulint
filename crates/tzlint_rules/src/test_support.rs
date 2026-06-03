@@ -12,5 +12,5 @@ pub(crate) fn diagnose(rule: &dyn Rule, source: &str) -> Vec<Diagnostic> {
     let ast = tzlint_core::parse(source).expect("test source parses");
     let bytes = tzlint_ast::to_archive(&ast).expect("archive");
     let archived = tzlint_ast::access(&bytes).expect("access");
-    tzlint_core::Engine::lint(archived, &[rule])
+    tzlint_core::Engine::lint(archived, None, &[rule])
 }

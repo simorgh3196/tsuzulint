@@ -86,7 +86,8 @@ pub fn fix(source: &str, rules: &[&dyn Rule]) -> String {
         let Ok(archived) = tzlint_ast::access(&bytes) else {
             break;
         };
-        let diagnostics = Engine::lint(archived, rules);
+        // No morphology on the fix path yet (wired alongside the cached/CLI paths in M2e/M2h).
+        let diagnostics = Engine::lint(archived, None, rules);
         let pass = apply_fixes(&text, &diagnostics);
         if pass.output == text {
             break; // fixpoint: nothing changed
