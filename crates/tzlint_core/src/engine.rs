@@ -35,7 +35,9 @@ impl Engine {
                 if k >= dispatch.len() {
                     dispatch.resize(k + 1, Vec::new());
                 }
-                dispatch[k].push(index);
+                if dispatch[k].last().copied() != Some(index) {
+                    dispatch[k].push(index);
+                }
             }
         }
 
