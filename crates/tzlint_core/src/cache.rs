@@ -37,7 +37,7 @@ use crate::io::{Host, IoError};
 use crate::parse::ParseError;
 
 /// Cache-key recipe version. Bump to invalidate every key if the key *construction* changes.
-const KEY_SCHEMA_VERSION: u32 = 1;
+const KEY_SCHEMA_VERSION: u32 = 2;
 /// The markdown parser pin. Bump when the `markdown` dependency's major/minor changes.
 const PARSER_VERSION: &str = "markdown@1.0";
 /// The mdast → index-AST transform and enabled constructs. Bump on any change to the transform,
@@ -113,6 +113,11 @@ pub struct CacheKeyInput<'a> {
     /// The exact document source. It MUST be the same `&str` later handed to `parse` (see
     /// [`lint_cached`]), so the key and the parsed spans describe the same bytes.
     pub content: &'a str,
+    /// A stable identity for the processor that parses `content` — its primary extension
+    /// (`"md"`, `"csv"`, `"tsv"`, …). Two processors can yield different diagnostics for
+    /// byte-identical content (e.g. Markdown vs an un-configured CSV that lints nothing), so the
+    /// key must distinguish them even when the resolved rule set coincides (spec §10).
+    pub processor: &'a str,
     /// The resolved configuration.
     pub config: &'a Config,
     /// `(rule-id, rule-version)` for the enabled rules, in any order (sorted internally). Empty
@@ -135,6 +140,9 @@ pub fn document_cache_key(input: &CacheKeyInput) -> Result<CacheKey, serde_json:
         &mut hasher,
         blake3::hash(input.content.as_bytes()).as_bytes(),
     );
+    // 2b. Processor identity — byte-identical content under a different processor must not share
+    // a key (see `CacheKeyInput::processor`).
+    put(&mut hasher, input.processor.as_bytes());
     // 3. Config fingerprint.
     put(&mut hasher, &fingerprint_config(input.config)?);
     // 4. Parser/transform/engine/ABI versions, as one canonical string.
@@ -499,8 +507,18 @@ pub fn lint_cached(
     // rule set.) The `config` fold already covers the `formats` settings (Task 3.3).
     let rule_versions: Vec<(&str, &str)> =
         rules.rule_ids().into_iter().map(|id| (id, "")).collect();
+    // The selected processor's primary extension identifies it in the key, so byte-identical
+    // content linted under two processors (e.g. `.md` vs an un-configured `.csv`) never collides
+    // even when `rule_ids()` coincide.
+    let processor = registry
+        .for_ext(ext)
+        .extensions()
+        .first()
+        .copied()
+        .unwrap_or("");
     let key = document_cache_key(&CacheKeyInput {
         content,
+        processor,
         config,
         rule_versions: &rule_versions,
         morphology_fingerprint: &[],
@@ -597,6 +615,7 @@ mod tests {
     fn key_of(content: &str, config: &Config) -> CacheKey {
         document_cache_key(&CacheKeyInput {
             content,
+            processor: "md",
             config,
             rule_versions: &[],
             morphology_fingerprint: &[],
@@ -700,6 +719,80 @@ mod tests {
     }
 
     #[test]
+    fn processor_identity_is_in_the_cache_key() {
+        // Byte-identical content + config under two processors yields different keys (spec §10).
+        let config = Config::default();
+        let key = |processor| {
+            document_cache_key(&CacheKeyInput {
+                content: "x",
+                processor,
+                config: &config,
+                rule_versions: &[],
+                morphology_fingerprint: &[],
+            })
+            .unwrap()
+        };
+        assert_ne!(key("md"), key("csv"));
+        assert_eq!(key("md"), key("md"));
+    }
+
+    #[test]
+    fn csv_without_columns_does_not_reuse_markdown_cache_entry() {
+        // Regression: the same content + config (no `formats`) linted as `.md` then as `.csv`
+        // must NOT share a cache entry. Markdown flags a TEXT node; an un-configured CSV has no
+        // target columns, so it lints nothing. Their `rule_ids()` coincide (base-only), so before
+        // the processor identity was folded into the key the CSV wrongly reused the Markdown hit.
+        use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
+
+        struct FlagText(RuleMeta);
+        impl Rule for FlagText {
+            fn meta(&self) -> &RuleMeta {
+                &self.0
+            }
+            fn check<'a>(&self, node: NodeRef<'a>, cx: &mut Context<'a>) {
+                cx.report(node.span(), "text");
+            }
+        }
+
+        let rules = crate::RegionRules::base_only(vec![Box::new(FlagText(RuleMeta::new(
+            "flag-text",
+            Severity::Warning,
+            vec![tzlint_ast::NodeKind::TEXT],
+        )))]);
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
+        let config = Config::default();
+        let mut cache = DocumentCache::new();
+
+        let md = lint_cached(
+            &mut cache,
+            Some("md"),
+            "abc",
+            &config,
+            &registry,
+            &pcfg,
+            &rules,
+        )
+        .unwrap();
+        assert!(!md.is_empty(), "markdown should flag the text node");
+
+        let csv = lint_cached(
+            &mut cache,
+            Some("csv"),
+            "abc",
+            &config,
+            &registry,
+            &pcfg,
+            &rules,
+        )
+        .unwrap();
+        assert!(
+            csv.is_empty(),
+            "an un-configured csv must lint nothing, not reuse the markdown cache entry"
+        );
+    }
+
+    #[test]
     fn key_is_invariant_to_option_key_order() {
         // The canonical JSON fingerprint must not depend on object-key order.
         let a = cfg(r#"{"rules":{"r":{"options":{"a":1,"b":2}}}}"#);
@@ -723,6 +816,7 @@ mod tests {
         let k = |rv: &[(&str, &str)]| {
             document_cache_key(&CacheKeyInput {
                 content: "x",
+                processor: "md",
                 config: &c,
                 rule_versions: rv,
                 morphology_fingerprint: &[],
@@ -739,6 +833,7 @@ mod tests {
         let c = Config::default();
         let none = document_cache_key(&CacheKeyInput {
             content: "x",
+            processor: "md",
             config: &c,
             rule_versions: &[],
             morphology_fingerprint: &[],
@@ -746,6 +841,7 @@ mod tests {
         .unwrap();
         let present = document_cache_key(&CacheKeyInput {
             content: "x",
+            processor: "md",
             config: &c,
             rule_versions: &[],
             morphology_fingerprint: &[0xAB; 32],
