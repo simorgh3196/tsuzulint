@@ -28,6 +28,9 @@ tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
 tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
 # Argument parsing (derive API).
 clap = { workspace = true }
+# Blocking HTTPS client for `CliHost::fetch` — the CLI's network-egress boundary for dictionary
+# acquisition (rustls TLS, pure Rust). Native/CLI-only, so the wasm-clean core stays network-free.
+ureq = { workspace = true }
 # Glob pattern matching for `lint`/`fix` PATH arguments. Used ONLY for `Pattern::matches_path`
 # (pure string matching); the directory walk itself goes through `Host::list_dir`, never
 # `glob::glob()` (which would touch `std::fs` directly and bypass the io boundary). CLI-only —

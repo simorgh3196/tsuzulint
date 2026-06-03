@@ -20,6 +20,10 @@ allow = [
     "ISC",
     "Unicode-3.0",
     "Zlib",
+    # Data (not code) license: the Mozilla CA root bundle shipped by `webpki-roots`, pulled in by
+    # `ureq`'s rustls TLS for the CLI dictionary fetch. CDLA-Permissive-2.0 is a permissive,
+    # attribution-only data-sharing license, compatible with this Apache-2.0 project.
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]

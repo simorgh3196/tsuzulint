@@ -65,10 +65,24 @@ blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
 # `std` provides the `std::io::Read` streaming decoder; `hash` keeps zstd's frame-checksum check.
 ruzstd = { version = "0.8.3", default-features = false, features = ["std", "hash"] }
 
+# WHATWG-URL parser (servo) for the dictionary-fetch SSRF guard (`tzlint_core::net`). A robust,
+# spec-conformant parser is mandatory here: hand-rolling scheme/authority/host parsing is exactly
+# where parser-differential SSRF bypasses hide. Pure Rust (idna/percent-encoding/form_urlencoded,
+# no C/FFI), so it builds for `wasm32` and keeps the uniform/reproducible build; MIT/Apache-2.0.
+# The guard itself does no I/O, so this never pulls networking into the wasm-clean core.
+url = "2"
+
 # Argument parsing for the native `tzlint` CLI (the `derive` API: `Parser`/`Subcommand`/
 # `ValueEnum`). CLI-only — it never reaches the AST or the `wasm32` core (the wasm CI job
 # builds `tzlint_core` lib-only), so a native-only dependency here is fine.
 clap = { version = "4", features = ["derive"] }
+
+# Blocking HTTPS client for the native CLI's dictionary fetch (`CliHost::fetch`, the single
+# network-egress boundary). `rustls` keeps TLS pure-Rust (no OpenSSL/C toolchain), matching the
+# project's uniform/reproducible build. CLI-only and native by construction — it never reaches
+# `tzlint_core` or the `wasm32` build, so the core stays network-free. A deliberately minimal
+# feature set (no gzip/json/cookies) keeps the dependency/audit surface small.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 # Lints applied workspace-wide. `unwrap`/`expect`/`panic` are denied in library code
 # (per the design's error-handling rules); the io-guard CI job adds the disallowed-methods

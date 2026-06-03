@@ -21,6 +21,7 @@ pub mod dict;
 pub mod engine;
 pub mod fix;
 pub mod io;
+pub mod net;
 pub mod parse;
 pub mod position;
 
@@ -31,9 +32,10 @@ pub use config::{
     CONFIG_SCHEMA, Config, ConfigError, ConfigFormat, DiscoveredConfig, Preset, RuleSetting,
     ShadowedCandidate, discover, resolve,
 };
-pub use dict::{DictError, provision_dictionary};
+pub use dict::{DictError, provision_dictionary, provision_dictionary_from_url};
 pub use engine::Engine;
 pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
 pub use io::{DirEntry, EntryKind, Host, IoError};
+pub use net::{UrlPolicyError, validate_dictionary_url};
 pub use parse::{ParseError, parse};
 pub use position::LineIndex;

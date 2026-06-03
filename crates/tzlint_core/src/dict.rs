@@ -19,10 +19,13 @@ use std::path::Path;
 use ruzstd::decoding::StreamingDecoder;
 
 use crate::io::{Host, IoError, MAX_DICT};
+use crate::net::{UrlPolicyError, validate_dictionary_url};
 
 /// A failure while provisioning a dictionary.
 #[derive(Debug)]
 pub enum DictError {
+    /// The fetch URL failed the SSRF safety guard (see [`crate::net`]).
+    InvalidUrl(UrlPolicyError),
     /// The compressed blob's BLAKE3 hash did not equal the pinned value (wrong or tampered file).
     HashMismatch,
     /// The blob is not valid zstd / could not be decompressed.
@@ -39,6 +42,7 @@ pub enum DictError {
 impl core::fmt::Display for DictError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            DictError::InvalidUrl(error) => write!(f, "{error}"),
             DictError::HashMismatch => {
                 write!(f, "dictionary hash does not match the pinned value")
             }
@@ -57,6 +61,7 @@ impl std::error::Error for DictError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             DictError::Io(error) => Some(error),
+            DictError::InvalidUrl(error) => Some(error),
             _ => None,
         }
     }
@@ -65,6 +70,12 @@ impl std::error::Error for DictError {
 impl From<IoError> for DictError {
     fn from(error: IoError) -> Self {
         DictError::Io(error)
+    }
+}
+
+impl From<UrlPolicyError> for DictError {
+    fn from(error: UrlPolicyError) -> Self {
+        DictError::InvalidUrl(error)
     }
 }
 
@@ -116,14 +127,55 @@ pub fn provision_dictionary(
     }
 
     let compressed = host.read_bytes(compressed_source, MAX_DICT)?;
+    verify_decompress_and_cache(host, cache_dir, &cache_path, &compressed, pinned_hash)
+}
+
+/// Provision the dictionary pinned to `pinned_hash`, **fetching** the compressed blob from `url`
+/// when it is not already cached.
+///
+/// Identical to [`provision_dictionary`] except the cache-miss source is the network rather than a
+/// local path: `url` is first run through [`validate_dictionary_url`] (the SSRF guard) and only a
+/// URL that passes is handed to [`Host::fetch`]. Everything after acquisition is shared — verify
+/// `blake3 == pin` **before** decompressing, zstd-decompress (bounded by [`MAX_DICT`]), cache the
+/// result, and return it in memory. A cache hit never touches the network at all (so a pinned, already
+/// provisioned dictionary works offline).
+pub fn provision_dictionary_from_url(
+    host: &dyn Host,
+    cache_dir: &Path,
+    url: &str,
+    pinned_hash: &[u8; 32],
+) -> Result<Vec<u8>, DictError> {
+    let cache_path = cache_dir.join(cache_file_name(pinned_hash));
+    if host.exists(&cache_path) {
+        return Ok(host.read_bytes(&cache_path, MAX_DICT)?);
+    }
+
+    // Guard the URL *before* any network access, then fetch through the single egress boundary.
+    let validated = validate_dictionary_url(url)?;
+    let compressed = host.fetch(validated.as_str(), MAX_DICT)?;
+    verify_decompress_and_cache(host, cache_dir, &cache_path, &compressed, pinned_hash)
+}
+
+/// Verify `compressed` against `pinned_hash`, decompress it (bounded by [`MAX_DICT`]), cache the
+/// result at `cache_path` (creating `cache_dir`), and return the decompressed bytes.
+///
+/// The shared **verify → decompress → cache** tail of both provisioning entry points; they differ
+/// only in how `compressed` was acquired (a local read vs a network fetch).
+fn verify_decompress_and_cache(
+    host: &dyn Host,
+    cache_dir: &Path,
+    cache_path: &Path,
+    compressed: &[u8],
+    pinned_hash: &[u8; 32],
+) -> Result<Vec<u8>, DictError> {
     // Verify before decompressing: never process the contents of an unverified blob.
-    if blake3::hash(&compressed).as_bytes() != pinned_hash {
+    if blake3::hash(compressed).as_bytes() != pinned_hash {
         return Err(DictError::HashMismatch);
     }
-    let decompressed = zstd_decompress(&compressed, MAX_DICT)?;
+    let decompressed = zstd_decompress(compressed, MAX_DICT)?;
 
     host.create_dir_all(cache_dir)?;
-    host.write_atomic(&cache_path, &decompressed)?;
+    host.write_atomic(cache_path, &decompressed)?;
     Ok(decompressed)
 }
 
@@ -177,6 +229,66 @@ mod tests {
     fn pin_of(blob: &[u8]) -> [u8; 32] {
         *blake3::hash(blob).as_bytes()
     }
+
+    /// A [`Host`] whose filesystem operations are the real [`NativeHost`] (so caching is exercised
+    /// against a temp dir) but whose [`fetch`](Host::fetch) returns a canned response — modeling the
+    /// CLI's network host without any actual networking. Counts fetches so a test can assert a cache
+    /// hit (or a rejected URL) never reached the network.
+    struct FetchHost {
+        fs: NativeHost,
+        response: Vec<u8>,
+        fail: bool,
+        fetches: std::cell::Cell<u32>,
+    }
+
+    impl FetchHost {
+        fn serving(response: &[u8]) -> Self {
+            FetchHost {
+                fs: NativeHost,
+                response: response.to_vec(),
+                fail: false,
+                fetches: std::cell::Cell::new(0),
+            }
+        }
+        fn failing() -> Self {
+            FetchHost {
+                fs: NativeHost,
+                response: Vec::new(),
+                fail: true,
+                fetches: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    impl Host for FetchHost {
+        fn read_to_string(&self, path: &Path, limit: usize) -> Result<String, IoError> {
+            self.fs.read_to_string(path, limit)
+        }
+        fn write_atomic(&self, path: &Path, contents: &[u8]) -> Result<(), IoError> {
+            self.fs.write_atomic(path, contents)
+        }
+        fn exists(&self, path: &Path) -> bool {
+            self.fs.exists(path)
+        }
+        fn read_bytes(&self, path: &Path, limit: usize) -> Result<Vec<u8>, IoError> {
+            self.fs.read_bytes(path, limit)
+        }
+        fn create_dir_all(&self, dir: &Path) -> Result<(), IoError> {
+            self.fs.create_dir_all(dir)
+        }
+        fn fetch(&self, _url: &str, limit: usize) -> Result<Vec<u8>, IoError> {
+            self.fetches.set(self.fetches.get() + 1);
+            if self.fail {
+                return Err(IoError::Other("network down".to_string()));
+            }
+            if self.response.len() > limit {
+                return Err(IoError::TooLarge { limit });
+            }
+            Ok(self.response.clone())
+        }
+    }
+
+    const SOURCE_URL: &str = "https://dict.example.com/ja/ipadic.dict.zst";
 
     #[test]
     fn provision_decompresses_caches_and_then_serves_from_the_cache() {
@@ -258,7 +370,83 @@ mod tests {
     }
 
     #[test]
+    fn provision_from_url_fetches_verifies_caches_then_serves_offline() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        let pinned = pin_of(FIXTURE);
+        let host = FetchHost::serving(FIXTURE);
+
+        // Cache miss: the SSRF guard passes, the blob is fetched, verified, decompressed, cached.
+        let first = provision_dictionary_from_url(&host, &cache_dir, SOURCE_URL, &pinned).unwrap();
+        assert_eq!(first, PAYLOAD.as_bytes());
+        assert_eq!(host.fetches.get(), 1);
+        assert!(host.exists(&cache_dir.join(cache_file_name(&pinned))));
+
+        // Second call hits the cache and must NOT touch the network (works offline once pinned).
+        let second = provision_dictionary_from_url(&host, &cache_dir, SOURCE_URL, &pinned).unwrap();
+        assert_eq!(second, PAYLOAD.as_bytes());
+        assert_eq!(host.fetches.get(), 1, "a cache hit must not fetch");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn provision_from_url_rejects_an_unsafe_url_before_fetching() {
+        let dir = temp_dir();
+        let host = FetchHost::serving(FIXTURE);
+        let pinned = pin_of(FIXTURE);
+        // A cleartext (non-https) URL is refused by the guard …
+        let err = provision_dictionary_from_url(
+            &host,
+            &dir.join("cache"),
+            "http://dict.example.com/d.zst",
+            &pinned,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DictError::InvalidUrl(_)));
+        // … as is a loopback host (an SSRF probe).
+        let err = provision_dictionary_from_url(
+            &host,
+            &dir.join("cache"),
+            "https://127.0.0.1/d.zst",
+            &pinned,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DictError::InvalidUrl(_)));
+        assert_eq!(host.fetches.get(), 0, "an unsafe URL must never be fetched");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn provision_from_url_rejects_a_fetched_blob_whose_hash_is_not_pinned() {
+        let dir = temp_dir();
+        let host = FetchHost::serving(FIXTURE);
+        // The fetched bytes are FIXTURE, but the pin is wrong → rejected after fetch, before
+        // decompression, with nothing cached.
+        let wrong = [0u8; 32];
+        let err = provision_dictionary_from_url(&host, &dir.join("cache"), SOURCE_URL, &wrong)
+            .unwrap_err();
+        assert!(matches!(err, DictError::HashMismatch));
+        assert_eq!(host.fetches.get(), 1);
+        assert!(!host.exists(&dir.join("cache").join(cache_file_name(&wrong))));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn provision_from_url_propagates_a_fetch_failure_as_an_io_error() {
+        let dir = temp_dir();
+        let host = FetchHost::failing();
+        let err =
+            provision_dictionary_from_url(&host, &dir.join("cache"), SOURCE_URL, &pin_of(FIXTURE))
+                .unwrap_err();
+        assert!(matches!(err, DictError::Io(IoError::Other(_))));
+        assert_eq!(host.fetches.get(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn dict_error_display_and_source() {
+        use crate::net::UrlPolicyError;
         use std::error::Error;
         assert_eq!(
             DictError::HashMismatch.to_string(),
@@ -277,5 +465,9 @@ mod tests {
         assert_eq!(io.to_string(), "file not found");
         assert!(io.source().is_some()); // the Io variant chains its source
         assert!(DictError::HashMismatch.source().is_none());
+        // The InvalidUrl variant forwards the guard's message and chains its source.
+        let bad_url = DictError::InvalidUrl(UrlPolicyError::NotHttps);
+        assert_eq!(bad_url.to_string(), "dictionary URL must use https");
+        assert!(bad_url.source().is_some());
     }
 }
