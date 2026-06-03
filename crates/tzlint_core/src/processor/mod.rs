@@ -283,6 +283,13 @@ pub fn lint_document(
 }
 
 /// Archive `ast`, lint it with `rules`, and append the diagnostics into `out`.
+///
+/// This is the **M2 morphology integration point**. Morphology is `None` for now, matching the
+/// cached/CLI/fix paths (M2e/M2h wire the document table elsewhere). For a region produced by a
+/// delimited processor, each cell is an *independent mini-document* with its own text spine and
+/// absolute spans, so a whole-document morphology table would be wrong; per-region provisioning
+/// (segment-the-cell vs skip-on-CSV) is an open question — see design §16. Until then, rules that
+/// require morphology are skipped here by `Engine::lint`.
 fn lint_ast_into(
     ast: &Ast,
     rules: &[&dyn Rule],
@@ -294,7 +301,7 @@ fn lint_ast_into(
     let archived = tzlint_ast::access(&bytes).map_err(|e| ParseError {
         message: format!("archive failed: {e}"),
     })?;
-    out.extend(crate::Engine::lint(archived, rules));
+    out.extend(crate::Engine::lint(archived, None, rules));
     Ok(())
 }
 
@@ -603,7 +610,7 @@ mod tests {
         let ast = crate::parse(source).unwrap();
         let bytes = tzlint_ast::to_archive(&ast).unwrap();
         let archived = tzlint_ast::access(&bytes).unwrap();
-        let direct = crate::Engine::lint(archived, &rules);
+        let direct = crate::Engine::lint(archived, None, &rules);
 
         assert_eq!(diag_spans(&via_document), diag_spans(&direct));
     }
