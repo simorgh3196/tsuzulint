@@ -167,15 +167,27 @@ impl RegionRules {
         self.columns.push(ColumnRuleSet { index, name, rules });
     }
 
-    /// The rules to run for a region with `tag`: the first matching column set, else the base set.
+    /// The rules to run for a region with `tag`: a matching column set, else the base set.
+    ///
+    /// Resolution is **name first, then index** (independent of column insertion order): a region
+    /// tag carries both a 0-based index and a header name, so a name-selected set and an
+    /// index-selected set can both match the same column. Searching by name first makes the
+    /// documented "name match takes priority" contract hold regardless of how the columns were
+    /// pushed.
     #[must_use]
     pub fn for_tag(&self, tag: &RegionTag) -> Vec<&dyn Rule> {
-        for set in &self.columns {
-            let by_index = set.index.is_some() && set.index == tag.index;
-            let by_name = set.name.is_some() && set.name.as_deref() == tag.name.as_deref();
-            if by_index || by_name {
-                return set.rules.iter().map(|r| r.as_ref()).collect();
-            }
+        if let Some(name) = tag.name.as_deref()
+            && let Some(set) = self
+                .columns
+                .iter()
+                .find(|set| set.name.as_deref() == Some(name))
+        {
+            return set.rules.iter().map(|r| r.as_ref()).collect();
+        }
+        if let Some(index) = tag.index
+            && let Some(set) = self.columns.iter().find(|set| set.index == Some(index))
+        {
+            return set.rules.iter().map(|r| r.as_ref()).collect();
         }
         self.base.iter().map(|r| r.as_ref()).collect()
     }
@@ -738,6 +750,46 @@ mod tests {
             ids(rr.for_tag(&RegionTag::column(9, Some("nope".into())))),
             vec!["base"]
         );
+    }
+
+    #[test]
+    fn for_tag_prefers_name_over_index_regardless_of_push_order() {
+        // A column region tag carries BOTH an index and a header name, so a name-selected set and
+        // an index-selected set can both match it. Name must win either way — independent of which
+        // column was pushed first (config-key order would otherwise decide it).
+        fn rule(id: &'static str) -> Box<dyn Rule> {
+            struct R(RuleMeta);
+            impl Rule for R {
+                fn meta(&self) -> &RuleMeta {
+                    &self.0
+                }
+                fn check<'a>(&self, _n: NodeRef<'a>, _c: &mut Context<'a>) {}
+            }
+            Box::new(R(RuleMeta::new(
+                id,
+                Severity::Warning,
+                vec![NodeKind::TEXT],
+            )))
+        }
+        let ids = |v: Vec<&dyn Rule>| {
+            v.iter()
+                .map(|r| r.meta().id.as_str().to_string())
+                .collect::<Vec<_>>()
+        };
+        // The colliding region: column 0 (1st), header "body" — matched by both sets below.
+        let tag = RegionTag::column(0, Some("body".into()));
+
+        // index pushed first…
+        let mut index_first = RegionRules::base_only(vec![rule("base")]);
+        index_first.push_column(Some(0), None, vec![rule("by-index")]);
+        index_first.push_column(None, Some("body".into()), vec![rule("by-name")]);
+        assert_eq!(ids(index_first.for_tag(&tag)), vec!["by-name"]);
+
+        // …and name pushed first — same result.
+        let mut name_first = RegionRules::base_only(vec![rule("base")]);
+        name_first.push_column(None, Some("body".into()), vec![rule("by-name")]);
+        name_first.push_column(Some(0), None, vec![rule("by-index")]);
+        assert_eq!(ids(name_first.for_tag(&tag)), vec!["by-name"]);
     }
 
     #[test]
