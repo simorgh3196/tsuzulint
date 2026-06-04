@@ -40,6 +40,27 @@ pub fn resolve_rules(config: &Config) -> Vec<Box<dyn Rule>> {
     resolve_rules_from_map(&config.rules)
 }
 
+/// Whether **any** rule runs anywhere under `config`: the base set, or any column overlay
+/// (`formats.*.columns.*.rules`). A column overlay can re-enable a rule the base turned off, so a
+/// check against the base alone (`resolve_rules`) is not enough to decide whether the run will
+/// report nothing — the CLI uses this for that note.
+#[must_use]
+pub fn any_effective_rules(config: &Config) -> bool {
+    if !resolve_rules(config).is_empty() {
+        return true;
+    }
+    config.formats.values().any(|fmt| {
+        fmt.columns.iter().any(|col| {
+            // base ⊕ column overlay (column wins) — same layering as `region_rules_for`.
+            let mut merged = config.rules.clone();
+            for (id, setting) in &col.rules {
+                merged.insert(id.clone(), setting.clone());
+            }
+            !resolve_rules_from_map(&merged).is_empty()
+        })
+    })
+}
+
 /// The [`ProcessorConfig`] for a file with extension `ext` under `config`: the matching
 /// `formats.<ext>` section becomes the delimited extraction config, or empty for other formats.
 #[must_use]
@@ -425,5 +446,55 @@ mod processing_builders {
         // A markdown file (no csv overlay) yields only the base set, never the column overlay.
         let md = region_rules_for(&config, Some("md"));
         assert!(!has(&md.for_tag(&RegionTag::whole()), "no-todo"));
+    }
+
+    /// A config that disables every built-in rule in the base set.
+    fn all_base_off() -> BTreeMap<RuleId, RuleSetting> {
+        RULE_IDS
+            .iter()
+            .map(|id| (RuleId::from(*id), RuleSetting::Off))
+            .collect()
+    }
+
+    #[test]
+    fn any_effective_rules_false_when_base_off_and_no_overlay() {
+        let config = Config {
+            rules: all_base_off(),
+            ..Default::default()
+        };
+        assert!(!any_effective_rules(&config));
+    }
+
+    #[test]
+    fn any_effective_rules_true_when_a_column_overlay_re_enables_a_rule() {
+        // Base disables everything, but the csv `body` column re-enables no-todo — so the run does
+        // report something, and the "everything disabled" note must be suppressed.
+        let mut overlay = BTreeMap::new();
+        overlay.insert(
+            RuleId::from("no-todo"),
+            RuleSetting::On {
+                severity: None,
+                options: Value::Null,
+            },
+        );
+        let mut formats = BTreeMap::new();
+        formats.insert(
+            "csv".into(),
+            FormatConfig {
+                has_header: true,
+                delimiter: None,
+                columns: vec![ColumnConfig {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::PlainText,
+                    rules: overlay,
+                }],
+            },
+        );
+        let config = Config {
+            rules: all_base_off(),
+            formats,
+            ..Default::default()
+        };
+        assert!(any_effective_rules(&config));
     }
 }

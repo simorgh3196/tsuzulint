@@ -23,13 +23,14 @@ use tzlint_core::io::{MAX_CONFIG, MAX_FILE};
 use tzlint_core::{
     Config, ConfigFormat, DocumentCache, Host, Registry, discover, lint_cached, lint_document,
 };
-use tzlint_pdk::{Diagnostic, Rule};
+use tzlint_pdk::Diagnostic;
 
 use crate::cli::{Cli, Command, OutputFormat, RuleListFormat, RulesCommand};
 use crate::expand;
 use crate::output::{self, FileReport};
 use crate::rules::{
-    processor_config_for, region_rules_for, resolve_rules, rule_info, rule_infos, unknown_rule_ids,
+    any_effective_rules, processor_config_for, region_rules_for, rule_info, rule_infos,
+    unknown_rule_ids,
 };
 
 /// The path label used for diagnostics linted from standard input.
@@ -113,8 +114,7 @@ fn lint(
     let stdout: &mut dyn Write = &mut *streams.stdout;
     let stderr: &mut dyn Write = &mut *streams.stderr;
     let config = load_config(cli, host, cwd, stderr)?;
-    let rules = resolve_rules(&config);
-    note_if_no_rules(&rules, stderr);
+    note_if_no_rules(&config, stderr);
     note_unknown_rules(&config, stderr);
     // One processor registry for the whole run, shared by every file and the stdin source.
     let registry = Registry::with_builtins();
@@ -269,8 +269,7 @@ fn fix(
     let stdout: &mut dyn Write = &mut *streams.stdout;
     let stderr: &mut dyn Write = &mut *streams.stderr;
     let config = load_config(cli, host, cwd, stderr)?;
-    let rules = resolve_rules(&config);
-    note_if_no_rules(&rules, stderr);
+    note_if_no_rules(&config, stderr);
     note_unknown_rules(&config, stderr);
     let registry = Registry::with_builtins();
 
@@ -322,6 +321,9 @@ fn fix(
     }
 
     for path in &inputs.files {
+        // Mirror `lint`: a known delimited file with no columns configured fixes nothing, so note
+        // why up front (otherwise `tzlint fix data.csv` silently makes no changes).
+        note_unconfigured_format(&config, path, stderr);
         let source = match host.read_to_string(path, MAX_FILE) {
             Ok(source) => source,
             Err(e) => {
@@ -537,8 +539,10 @@ fn load_config(
 
 /// Print a one-line note to stderr when the resolved rule set is empty (every built-in rule was
 /// turned off by config), so an empty result is not mistaken for "your text is clean".
-fn note_if_no_rules(rules: &[Box<dyn Rule>], stderr: &mut dyn Write) {
-    if rules.is_empty() {
+fn note_if_no_rules(config: &Config, stderr: &mut dyn Write) {
+    // A column overlay (`formats.*.columns.*.rules`) can re-enable a rule the base disabled, so
+    // check the effective set across base AND overlays — not just the base.
+    if !any_effective_rules(config) {
         let _ = writeln!(
             stderr,
             "note: every built-in rule is disabled by config; the pipeline runs but reports nothing"
