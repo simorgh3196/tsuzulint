@@ -74,6 +74,13 @@ jobs:
         run: |
           ! git grep -nE 'std::fs::(read|write|create_dir)' -- 'crates/*/src/**.rs' \
             ':!crates/tzlint_core/src/io*' || (echo "raw fs outside io module"; exit 1)
+      # Network egress has a single boundary too: the dictionary fetch goes through
+      # `Host::fetch`, implemented only in the CLI's `host.rs` with `ureq`. Keep the HTTP client
+      # out of every other module (and out of `tzlint_core`, which must stay network-free / wasm).
+      - name: reject network clients outside the CLI host boundary
+        run: |
+          ! git grep -nE '\bureq\b' -- 'crates/*/src/**.rs' \
+            ':!crates/tzlint_cli/src/host.rs' || (echo "network egress (ureq) must go through CliHost::fetch in host.rs"; exit 1)
       # blake3 must stay pure-Rust: without `features = ["pure"]` it builds a SIMD backend via a
       # C compiler, breaking the uniform/reproducible build and wasm32. Guard the manifest.
       - name: blake3 must keep features = ["pure"]

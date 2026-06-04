@@ -3,7 +3,8 @@
 //! Wires the `lint` / `fix` / `init` / `rules` subcommands over `tzlint_core`: config discovery,
 //! the parse → archive → `Engine::lint` pipeline (with the in-memory document cache), autofix,
 //! and text / JSON / SARIF output via the position mapper. `rules` reports the resolved rule set.
-//! All file access goes through the `Host` boundary (`NativeHost`), never raw `std::fs`.
+//! All I/O goes through the `Host` boundary — here [`host::CliHost`] (the real filesystem plus an
+//! HTTPS dictionary fetch), never raw `std::fs` or a raw socket.
 //!
 //! The rule set is resolved from config by [`rules::resolve_rules`]: every built-in rule
 //! (`tzlint_rules::builtin_rules`) runs by default, and a `config.rules` entry can disable one.
@@ -12,19 +13,20 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use tzlint_core::io::NativeHost;
 
 use crate::cli::Cli;
+use crate::host::CliHost;
 
 mod app;
 mod cli;
 mod expand;
+mod host;
 mod output;
 mod rules;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let host = NativeHost;
+    let host = CliHost::new();
     // Resolve the working directory once, here at the edge, and pass it in — the orchestration
     // stays independent of process-global state (and so hermetically testable).
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));

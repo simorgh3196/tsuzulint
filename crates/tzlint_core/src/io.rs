@@ -150,6 +150,27 @@ pub trait Host {
             "directory creation is not supported by this host".to_string(),
         ))
     }
+
+    /// Fetch the bytes at the (already SSRF-validated) `url` over the network, rejecting a response
+    /// larger than `limit` bytes.
+    ///
+    /// This is the **single network-egress boundary**: morphology-dictionary acquisition reaches
+    /// the network only here, never via a raw socket / HTTP client elsewhere. It is the network
+    /// analogue of [`read_bytes`](Host::read_bytes) and follows the same contract — bounded by
+    /// `limit` (over-size ⇒ [`IoError::TooLarge`]) and **default-`Err`** so a host without network
+    /// access (the wasm-clean core's own [`NativeHost`], a browser embedder) need not provide it.
+    /// The native CLI supplies an implementation (an HTTPS client living *outside* this crate, so
+    /// `tzlint_core` stays free of any networking dependency and keeps building for `wasm32`).
+    ///
+    /// `url` is expected to have already passed [`crate::net::validate_dictionary_url`]; an
+    /// implementation should still apply connect/read timeouts and, ideally, re-validate the
+    /// resolved address (DNS-rebinding defense — see the `net` module docs).
+    fn fetch(&self, url: &str, limit: usize) -> Result<Vec<u8>, IoError> {
+        let _ = (url, limit);
+        Err(IoError::Other(
+            "network fetch is not supported by this host".to_string(),
+        ))
+    }
 }
 
 // The real-filesystem host. Not compiled for `wasm32`, where the embedder injects its own
@@ -527,6 +548,23 @@ mod native {
             ));
             assert!(matches!(host.create_dir_all(p), Err(IoError::Other(_))));
             assert!(matches!(host.list_dir(p), Err(IoError::Other(_))));
+            // `fetch` is likewise optional and network-free hosts (this one, and the core's own
+            // `NativeHost`) inherit the default error rather than reaching the network.
+            assert!(matches!(
+                host.fetch("https://example.com/d.zst", MAX_DICT),
+                Err(IoError::Other(_))
+            ));
+        }
+
+        #[test]
+        fn native_host_does_not_fetch_keeping_the_core_network_free() {
+            // The core's `NativeHost` deliberately does NOT implement `fetch`: the HTTPS client
+            // lives in the CLI so `tzlint_core` carries no networking dependency and stays
+            // wasm-clean. So it inherits the default error rather than reaching the network.
+            assert!(matches!(
+                NativeHost.fetch("https://example.com/d.zst", MAX_DICT),
+                Err(IoError::Other(_))
+            ));
         }
 
         #[test]
