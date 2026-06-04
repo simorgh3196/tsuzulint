@@ -30,15 +30,14 @@ use std::path::Path;
 use blake3::Hasher;
 use serde_json::Value;
 use tzlint_ast::Span;
-use tzlint_pdk::{Diagnostic, Fix, Rule, Severity};
+use tzlint_pdk::{Diagnostic, Fix, Severity};
 
 use crate::config::{Config, RuleSetting};
-use crate::engine::Engine;
 use crate::io::{Host, IoError};
-use crate::parse::{ParseError, parse};
+use crate::parse::ParseError;
 
 /// Cache-key recipe version. Bump to invalidate every key if the key *construction* changes.
-const KEY_SCHEMA_VERSION: u32 = 1;
+const KEY_SCHEMA_VERSION: u32 = 2;
 /// The markdown parser pin. Bump when the `markdown` dependency's major/minor changes.
 const PARSER_VERSION: &str = "markdown@1.0";
 /// The mdast → index-AST transform and enabled constructs. Bump on any change to the transform,
@@ -114,6 +113,11 @@ pub struct CacheKeyInput<'a> {
     /// The exact document source. It MUST be the same `&str` later handed to `parse` (see
     /// [`lint_cached`]), so the key and the parsed spans describe the same bytes.
     pub content: &'a str,
+    /// A stable identity for the processor that parses `content` — its primary extension
+    /// (`"md"`, `"csv"`, `"tsv"`, …). Two processors can yield different diagnostics for
+    /// byte-identical content (e.g. Markdown vs an un-configured CSV that lints nothing), so the
+    /// key must distinguish them even when the resolved rule set coincides (spec §10).
+    pub processor: &'a str,
     /// The resolved configuration.
     pub config: &'a Config,
     /// `(rule-id, rule-version)` for the enabled rules, in any order (sorted internally). Empty
@@ -136,6 +140,9 @@ pub fn document_cache_key(input: &CacheKeyInput) -> Result<CacheKey, serde_json:
         &mut hasher,
         blake3::hash(input.content.as_bytes()).as_bytes(),
     );
+    // 2b. Processor identity — byte-identical content under a different processor must not share
+    // a key (see `CacheKeyInput::processor`).
+    put(&mut hasher, input.processor.as_bytes());
     // 3. Config fingerprint.
     put(&mut hasher, &fingerprint_config(input.config)?);
     // 4. Parser/transform/engine/ABI versions, as one canonical string.
@@ -193,6 +200,58 @@ fn fingerprint_config(config: &Config) -> Result<[u8; 32], serde_json::Error> {
             }
         }
     }
+
+    // Format settings: which columns are linted, with what parse mode and rule overlay.
+    hasher.update(&(config.formats.len() as u64).to_le_bytes());
+    for (fmt_id, fmt) in &config.formats {
+        put(&mut hasher, fmt_id.as_bytes());
+        hasher.update(&[u8::from(fmt.has_header)]);
+        match fmt.delimiter {
+            None => {
+                hasher.update(&[0x00]);
+            }
+            Some(c) => {
+                hasher.update(&[0x01]);
+                put(&mut hasher, c.to_string().as_bytes());
+            }
+        }
+        hasher.update(&(fmt.columns.len() as u64).to_le_bytes());
+        for col in &fmt.columns {
+            match &col.selector {
+                crate::processor::ColumnSelector::Name(n) => {
+                    hasher.update(&[0x00]);
+                    put(&mut hasher, n.as_bytes());
+                }
+                crate::processor::ColumnSelector::Index(i) => {
+                    hasher.update(&[0x01]);
+                    hasher.update(&i.to_le_bytes());
+                }
+            }
+            hasher.update(&[parse_mode_byte(col.parse_mode)]);
+            // Column rule overlay (same encoding as the base rules above).
+            hasher.update(&(col.rules.len() as u64).to_le_bytes());
+            for (id, setting) in &col.rules {
+                put(&mut hasher, id.as_str().as_bytes());
+                match setting {
+                    RuleSetting::Off => {
+                        hasher.update(&[0x00]);
+                    }
+                    RuleSetting::On { severity, options } => {
+                        hasher.update(&[0x01]);
+                        match severity {
+                            None => {
+                                hasher.update(&[0x00]);
+                            }
+                            Some(sev) => {
+                                hasher.update(&[0x01, severity_byte(*sev)]);
+                            }
+                        }
+                        put(&mut hasher, &serde_json::to_vec(options)?);
+                    }
+                }
+            }
+        }
+    }
     Ok(*hasher.finalize().as_bytes())
 }
 
@@ -216,6 +275,14 @@ fn severity_byte(severity: Severity) -> u8 {
         Severity::Warning => 1,
         Severity::Info => 2,
         Severity::Hint => 3,
+    }
+}
+
+/// Stable parse-mode discriminant for the format-settings fold in the fingerprint.
+fn parse_mode_byte(mode: crate::processor::ParseMode) -> u8 {
+    match mode {
+        crate::processor::ParseMode::Markdown => 0,
+        crate::processor::ParseMode::PlainText => 1,
     }
 }
 
@@ -427,19 +494,31 @@ impl std::error::Error for CacheError {
 /// `(id, version)` pairs derived below.
 pub fn lint_cached(
     cache: &mut DocumentCache,
+    ext: Option<&str>,
     content: &str,
     config: &Config,
-    rules: &[&dyn Rule],
+    registry: &crate::Registry,
+    processor_cfg: &crate::ProcessorConfig,
+    rules: &crate::RegionRules,
 ) -> Result<Vec<Diagnostic>, CacheError> {
-    // Derive rule identity from the rules actually run, so the key reflects the real rule set.
-    // (Keying off a separately-supplied list would let it drift from `rules` — the staleness
-    // this avoids: e.g. an empty-rules result must not be reused for a non-empty rule set.)
-    let rule_versions: Vec<(&str, &str)> = rules
-        .iter()
-        .map(|rule| (rule.meta().id.as_str(), ""))
-        .collect();
+    // Derive rule identity from every rule across the base and column sets, so the key reflects
+    // the real rule set. (Keying off a separately-supplied list would let it drift from `rules`
+    // — the staleness this avoids: e.g. an empty-rules result must not be reused for a non-empty
+    // rule set.) The `config` fold already covers the `formats` settings (Task 3.3).
+    let rule_versions: Vec<(&str, &str)> =
+        rules.rule_ids().into_iter().map(|id| (id, "")).collect();
+    // The selected processor's primary extension identifies it in the key, so byte-identical
+    // content linted under two processors (e.g. `.md` vs an un-configured `.csv`) never collides
+    // even when `rule_ids()` coincide.
+    let processor = registry
+        .for_ext(ext)
+        .extensions()
+        .first()
+        .copied()
+        .unwrap_or("");
     let key = document_cache_key(&CacheKeyInput {
         content,
+        processor,
         config,
         rule_versions: &rule_versions,
         morphology_fingerprint: &[],
@@ -450,12 +529,8 @@ pub fn lint_cached(
         return Ok(hit);
     }
 
-    let ast = parse(content).map_err(CacheError::Parse)?;
-    let bytes = tzlint_ast::to_archive(&ast).map_err(|e| CacheError::Archive(e.to_string()))?;
-    let archived = tzlint_ast::access(&bytes).map_err(|e| CacheError::Archive(e.to_string()))?;
-    // Morphology is not provisioned on the cached path yet (M2e wires the table and its
-    // fingerprint into the key); rules run without it for now.
-    let diagnostics = Engine::lint(archived, None, rules);
+    let diagnostics = crate::lint_document(ext, content, registry, processor_cfg, rules)
+        .map_err(CacheError::Parse)?;
     cache.insert(key, diagnostics.clone());
     Ok(diagnostics)
 }
@@ -531,7 +606,7 @@ fn span_from_value(value: &Value) -> Option<Span> {
 mod tests {
     use super::*;
     use tzlint_ast::{NodeKind, Span};
-    use tzlint_pdk::{Context, NodeRef, RuleMeta};
+    use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta};
 
     fn cfg(json: &str) -> Config {
         Config::parse(json, crate::config::ConfigFormat::Json).unwrap()
@@ -540,6 +615,7 @@ mod tests {
     fn key_of(content: &str, config: &Config) -> CacheKey {
         document_cache_key(&CacheKeyInput {
             content,
+            processor: "md",
             config,
             rule_versions: &[],
             morphology_fingerprint: &[],
@@ -615,6 +691,108 @@ mod tests {
     }
 
     #[test]
+    fn formats_change_the_cache_key() {
+        use crate::processor::{ColumnSelector, ParseMode};
+        use crate::{ColumnConfig, Config, FormatConfig};
+        use std::collections::BTreeMap;
+
+        let base = Config::default();
+        let mut with_cols = Config::default();
+        let mut formats = BTreeMap::new();
+        formats.insert(
+            "csv".to_string(),
+            FormatConfig {
+                has_header: true,
+                delimiter: None,
+                columns: vec![ColumnConfig {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::Markdown,
+                    rules: BTreeMap::new(),
+                }],
+            },
+        );
+        with_cols.formats = formats;
+
+        let k1 = key_of("x", &base);
+        let k2 = key_of("x", &with_cols);
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn processor_identity_is_in_the_cache_key() {
+        // Byte-identical content + config under two processors yields different keys (spec §10).
+        let config = Config::default();
+        let key = |processor| {
+            document_cache_key(&CacheKeyInput {
+                content: "x",
+                processor,
+                config: &config,
+                rule_versions: &[],
+                morphology_fingerprint: &[],
+            })
+            .unwrap()
+        };
+        assert_ne!(key("md"), key("csv"));
+        assert_eq!(key("md"), key("md"));
+    }
+
+    #[test]
+    fn csv_without_columns_does_not_reuse_markdown_cache_entry() {
+        // Regression: the same content + config (no `formats`) linted as `.md` then as `.csv`
+        // must NOT share a cache entry. Markdown flags a TEXT node; an un-configured CSV has no
+        // target columns, so it lints nothing. Their `rule_ids()` coincide (base-only), so before
+        // the processor identity was folded into the key the CSV wrongly reused the Markdown hit.
+        use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
+
+        struct FlagText(RuleMeta);
+        impl Rule for FlagText {
+            fn meta(&self) -> &RuleMeta {
+                &self.0
+            }
+            fn check<'a>(&self, node: NodeRef<'a>, cx: &mut Context<'a>) {
+                cx.report(node.span(), "text");
+            }
+        }
+
+        let rules = crate::RegionRules::base_only(vec![Box::new(FlagText(RuleMeta::new(
+            "flag-text",
+            Severity::Warning,
+            vec![tzlint_ast::NodeKind::TEXT],
+        )))]);
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
+        let config = Config::default();
+        let mut cache = DocumentCache::new();
+
+        let md = lint_cached(
+            &mut cache,
+            Some("md"),
+            "abc",
+            &config,
+            &registry,
+            &pcfg,
+            &rules,
+        )
+        .unwrap();
+        assert!(!md.is_empty(), "markdown should flag the text node");
+
+        let csv = lint_cached(
+            &mut cache,
+            Some("csv"),
+            "abc",
+            &config,
+            &registry,
+            &pcfg,
+            &rules,
+        )
+        .unwrap();
+        assert!(
+            csv.is_empty(),
+            "an un-configured csv must lint nothing, not reuse the markdown cache entry"
+        );
+    }
+
+    #[test]
     fn key_is_invariant_to_option_key_order() {
         // The canonical JSON fingerprint must not depend on object-key order.
         let a = cfg(r#"{"rules":{"r":{"options":{"a":1,"b":2}}}}"#);
@@ -638,6 +816,7 @@ mod tests {
         let k = |rv: &[(&str, &str)]| {
             document_cache_key(&CacheKeyInput {
                 content: "x",
+                processor: "md",
                 config: &c,
                 rule_versions: rv,
                 morphology_fingerprint: &[],
@@ -654,6 +833,7 @@ mod tests {
         let c = Config::default();
         let none = document_cache_key(&CacheKeyInput {
             content: "x",
+            processor: "md",
             config: &c,
             rule_versions: &[],
             morphology_fingerprint: &[],
@@ -661,6 +841,7 @@ mod tests {
         .unwrap();
         let present = document_cache_key(&CacheKeyInput {
             content: "x",
+            processor: "md",
             config: &c,
             rule_versions: &[],
             morphology_fingerprint: &[0xAB; 32],
@@ -761,15 +942,109 @@ mod tests {
     fn lint_cached_miss_then_hit_matches_fresh() {
         let mut cache = DocumentCache::new();
         let c = Config::default();
-        let rule = FlagKind::new(NodeKind::HEADING);
-        let rules: &[&dyn Rule] = &[&rule];
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
+        let new_rules =
+            || crate::RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::HEADING))]);
 
-        let fresh = lint_cached(&mut cache, "# H\n\nbody", &c, rules).unwrap();
+        let fresh = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n\nbody",
+            &c,
+            &registry,
+            &pcfg,
+            &new_rules(),
+        )
+        .unwrap();
         assert_eq!(fresh.len(), 1, "one heading flagged");
         assert_eq!(cache.len(), 1);
         // Second call is a hit returning identical diagnostics.
-        let hit = lint_cached(&mut cache, "# H\n\nbody", &c, rules).unwrap();
+        let hit = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n\nbody",
+            &c,
+            &registry,
+            &pcfg,
+            &new_rules(),
+        )
+        .unwrap();
         assert_eq!(hit, fresh);
+        assert_eq!(cache.len(), 1, "no new entry on a hit");
+    }
+
+    #[test]
+    fn lint_cached_csv_round_trip_matches_fresh_compute() {
+        use crate::processor::{
+            ColumnSelector, ColumnTarget, DelimitedConfig, ParseMode, ProcessorConfig, RegionRules,
+            Registry,
+        };
+        use crate::{ColumnConfig, FormatConfig};
+        use std::collections::BTreeMap;
+
+        // A FlagText-style rule that flags TEXT nodes, applied only to the "body" column.
+        let source = "id,body\n1,hello\n2,world\n";
+        let registry = Registry::with_builtins();
+        let pcfg = ProcessorConfig {
+            delimited: Some(DelimitedConfig {
+                delimiter: b',',
+                has_header: true,
+                columns: vec![ColumnTarget {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::PlainText,
+                }],
+            }),
+        };
+        // The config must carry the formats so the cache key reflects them.
+        let mut formats = BTreeMap::new();
+        formats.insert(
+            "csv".to_string(),
+            FormatConfig {
+                has_header: true,
+                delimiter: None,
+                columns: vec![ColumnConfig {
+                    selector: ColumnSelector::Name("body".into()),
+                    parse_mode: ParseMode::PlainText,
+                    rules: BTreeMap::new(),
+                }],
+            },
+        );
+        let config = Config {
+            formats,
+            ..Default::default()
+        };
+
+        let build_rules = || RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::TEXT))]);
+
+        let fresh =
+            crate::lint_document(Some("csv"), source, &registry, &pcfg, &build_rules()).unwrap();
+        assert_eq!(fresh.len(), 2, "two body cells flagged");
+
+        let mut cache = DocumentCache::new();
+        let miss = lint_cached(
+            &mut cache,
+            Some("csv"),
+            source,
+            &config,
+            &registry,
+            &pcfg,
+            &build_rules(),
+        )
+        .unwrap();
+        assert_eq!(miss, fresh, "cached miss equals a fresh compute");
+        assert_eq!(cache.len(), 1);
+        let hit = lint_cached(
+            &mut cache,
+            Some("csv"),
+            source,
+            &config,
+            &registry,
+            &pcfg,
+            &build_rules(),
+        )
+        .unwrap();
+        assert_eq!(hit, fresh, "cached hit equals a fresh compute");
         assert_eq!(cache.len(), 1, "no new entry on a hit");
     }
 
@@ -778,12 +1053,31 @@ mod tests {
         // Regression: a result computed with one rule set must never be reused for another.
         let mut cache = DocumentCache::new();
         let c = Config::default();
-        let rule = FlagKind::new(NodeKind::HEADING);
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
 
-        let empty = lint_cached(&mut cache, "# H\n", &c, &[]).unwrap();
+        let empty = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &crate::RegionRules::base_only(vec![]),
+        )
+        .unwrap();
         assert!(empty.is_empty());
         // A different rule set must miss (not reuse the empty-rules entry) and produce its own.
-        let with_rule = lint_cached(&mut cache, "# H\n", &c, &[&rule]).unwrap();
+        let with_rule = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &crate::RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::HEADING))]),
+        )
+        .unwrap();
         assert_eq!(
             with_rule.len(),
             1,
@@ -799,16 +1093,36 @@ mod tests {
     #[test]
     fn lint_cached_empty_rules_is_no_diagnostics() {
         let mut cache = DocumentCache::new();
-        let diags = lint_cached(&mut cache, "# H\n", &Config::default(), &[]).unwrap();
+        let registry = crate::Registry::with_builtins();
+        let diags = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &Config::default(),
+            &registry,
+            &crate::ProcessorConfig::default(),
+            &crate::RegionRules::base_only(vec![]),
+        )
+        .unwrap();
         assert!(diags.is_empty());
     }
 
     #[test]
     fn lint_cached_surfaces_parse_error_without_caching() {
         let mut cache = DocumentCache::new();
+        let registry = crate::Registry::with_builtins();
         // Deeply nested block containers make `parse` reject the input.
         let pathological = "> ".repeat(5000);
-        let err = lint_cached(&mut cache, &pathological, &Config::default(), &[]).unwrap_err();
+        let err = lint_cached(
+            &mut cache,
+            Some("md"),
+            &pathological,
+            &Config::default(),
+            &registry,
+            &crate::ProcessorConfig::default(),
+            &crate::RegionRules::base_only(vec![]),
+        )
+        .unwrap_err();
         assert!(matches!(err, CacheError::Parse(_)));
         assert!(
             cache.is_empty(),

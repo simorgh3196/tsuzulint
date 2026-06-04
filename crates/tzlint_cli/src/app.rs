@@ -19,17 +19,19 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use tzlint_ast::{access, to_archive};
 use tzlint_core::io::{MAX_CONFIG, MAX_FILE};
 use tzlint_core::{
-    Config, ConfigFormat, DocumentCache, Engine, Host, discover, lint_cached, parse,
+    Config, ConfigFormat, DocumentCache, Host, Registry, discover, lint_cached, lint_document,
 };
-use tzlint_pdk::{Diagnostic, Rule};
+use tzlint_pdk::Diagnostic;
 
 use crate::cli::{Cli, Command, OutputFormat, RuleListFormat, RulesCommand};
 use crate::expand;
 use crate::output::{self, FileReport};
-use crate::rules::{resolve_rules, rule_info, rule_infos, unknown_rule_ids};
+use crate::rules::{
+    any_effective_rules, processor_config_for, region_rules_for, rule_info, rule_infos,
+    unknown_rule_ids,
+};
 
 /// The path label used for diagnostics linted from standard input.
 const STDIN_LABEL: &str = "<stdin>";
@@ -112,14 +114,15 @@ fn lint(
     let stdout: &mut dyn Write = &mut *streams.stdout;
     let stderr: &mut dyn Write = &mut *streams.stderr;
     let config = load_config(cli, host, cwd, stderr)?;
-    let rules = resolve_rules(&config);
-    note_if_no_rules(&rules, stderr);
+    note_if_no_rules(&config, stderr);
     note_unknown_rules(&config, stderr);
-    let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
+    // One processor registry for the whole run, shared by every file and the stdin source.
+    let registry = Registry::with_builtins();
 
     // Resolve the PATH arguments into concrete files (globs / directories expanded, sorted and
     // de-duplicated) plus an optional stdin source; surface any discovery notes on stderr.
-    let inputs = expand::expand(host, cwd, paths);
+    let dir_exts = discovery_extensions(&config);
+    let inputs = expand::expand(host, cwd, paths, &dir_exts);
     note_expansion(&inputs.notes, stderr);
 
     // Persistent cache: load the on-disk file (best-effort) so a repeat run on unchanged content
@@ -132,7 +135,7 @@ fn lint(
     // stdin is reported first so the work order is fixed and the summary count is stable.
     if inputs.stdin {
         match read_stdin(stdin).and_then(|source| {
-            let diagnostics = lint_direct(&source, &rule_refs)?;
+            let diagnostics = lint_source(&registry, &config, None, &source)?;
             Ok(FileReport {
                 path: PathBuf::from(STDIN_LABEL),
                 source,
@@ -147,7 +150,8 @@ fn lint(
         }
     }
     for path in &inputs.files {
-        match read_and_lint(host, cache.as_mut(), path, &config, &rule_refs) {
+        note_unconfigured_format(&config, path, stderr);
+        match read_and_lint(&registry, host, cache.as_mut(), path, &config) {
             Ok(report) => reports.push(report),
             Err(message) => {
                 let _ = writeln!(stderr, "error: {}: {message}", path.display());
@@ -191,21 +195,29 @@ fn lint_exit_status(had_error: bool, has_findings: bool) -> ExitStatus {
     }
 }
 
-/// Read `path` through the host and lint it, via the cache when enabled or the direct
-/// parse→archive→lint bridge otherwise.
+/// Read `path` through the host and lint it, via the cache when enabled or the processor seam
+/// ([`lint_document`]) otherwise. Both paths build the file's [`ProcessorConfig`] and
+/// [`RegionRules`] from its extension (so CSV/TSV columns are extracted and per-column rules
+/// applied; Markdown gets the base set and the Markdown processor).
 fn read_and_lint(
+    registry: &Registry,
     host: &dyn Host,
     cache: Option<&mut DocumentCache>,
     path: &Path,
     config: &Config,
-    rules: &[&dyn Rule],
 ) -> Result<FileReport, String> {
     let source = host
         .read_to_string(path, MAX_FILE)
         .map_err(|e| e.to_string())?;
+    let ext = extension_of(path);
     let diagnostics = match cache {
-        Some(cache) => lint_cached(cache, &source, config, rules).map_err(|e| e.to_string())?,
-        None => lint_direct(&source, rules)?,
+        Some(cache) => {
+            let pcfg = processor_config_for(config, ext);
+            let rr = region_rules_for(config, ext);
+            lint_cached(cache, ext, &source, config, registry, &pcfg, &rr)
+                .map_err(|e| e.to_string())?
+        }
+        None => lint_source(registry, config, ext, &source)?,
     };
     Ok(FileReport {
         path: path.to_path_buf(),
@@ -214,14 +226,32 @@ fn read_and_lint(
     })
 }
 
-/// The no-cache path: parse → archive → access → [`Engine::lint`], surfacing parse/archive
-/// failures as a message (mirrors what [`lint_cached`] reports on the cached path).
-fn lint_direct(source: &str, rules: &[&dyn Rule]) -> Result<Vec<Diagnostic>, String> {
-    let ast = parse(source).map_err(|e| e.to_string())?;
-    let bytes = to_archive(&ast).map_err(|e| format!("archive failed: {e}"))?;
-    let archived = access(&bytes).map_err(|e| format!("archive failed: {e}"))?;
-    // Morphology is not provisioned on the CLI path yet (lands with the provider registry, M2h).
-    Ok(Engine::lint(archived, None, rules))
+/// The extension of `path` (dot-less, as-is), or `None`. Case is preserved here; [`Registry::for_ext`]
+/// lowercases when matching.
+fn extension_of(path: &Path) -> Option<&str> {
+    path.extension().and_then(|e| e.to_str())
+}
+
+/// Extensions discovered when walking a directory: Markdown always, plus any configured
+/// delimited formats (so data CSVs are not linted unless the user opted in).
+fn discovery_extensions(config: &Config) -> Vec<String> {
+    let mut exts = vec!["md".to_string(), "markdown".to_string()];
+    for fmt in config.formats.keys() {
+        exts.push(fmt.clone()); // "csv" / "tsv"
+    }
+    exts
+}
+
+/// Lint one already-read source with the processor seam, given the file's extension.
+fn lint_source(
+    registry: &Registry,
+    config: &Config,
+    ext: Option<&str>,
+    source: &str,
+) -> Result<Vec<Diagnostic>, String> {
+    let pcfg = processor_config_for(config, ext);
+    let rr = region_rules_for(config, ext);
+    lint_document(ext, source, registry, &pcfg, &rr).map_err(|e| e.to_string())
 }
 
 /// `fix`: lint-and-fix each file to a fixpoint; write changed files in place (or just report
@@ -239,12 +269,12 @@ fn fix(
     let stdout: &mut dyn Write = &mut *streams.stdout;
     let stderr: &mut dyn Write = &mut *streams.stderr;
     let config = load_config(cli, host, cwd, stderr)?;
-    let rules = resolve_rules(&config);
-    note_if_no_rules(&rules, stderr);
+    note_if_no_rules(&config, stderr);
     note_unknown_rules(&config, stderr);
-    let rule_refs: Vec<&dyn Rule> = rules.iter().map(|rule| rule.as_ref()).collect();
+    let registry = Registry::with_builtins();
 
-    let inputs = expand::expand(host, cwd, paths);
+    let dir_exts = discovery_extensions(&config);
+    let inputs = expand::expand(host, cwd, paths, &dir_exts);
     note_expansion(&inputs.notes, stderr);
 
     // When stdin is a target, stdout carries the fixed stdin document (a pass-through filter), so
@@ -259,7 +289,9 @@ fn fix(
     if inputs.stdin {
         match read_stdin(stdin) {
             Ok(source) => {
-                let fixed = tzlint_core::fix(&source, &rule_refs);
+                let pcfg = processor_config_for(&config, None);
+                let rr = region_rules_for(&config, None);
+                let fixed = tzlint_core::fix(None, &source, &registry, &pcfg, &rr);
                 let did_change = fixed != source;
                 if dry_run {
                     if did_change {
@@ -289,6 +321,9 @@ fn fix(
     }
 
     for path in &inputs.files {
+        // Mirror `lint`: a known delimited file with no columns configured fixes nothing, so note
+        // why up front (otherwise `tzlint fix data.csv` silently makes no changes).
+        note_unconfigured_format(&config, path, stderr);
         let source = match host.read_to_string(path, MAX_FILE) {
             Ok(source) => source,
             Err(e) => {
@@ -299,7 +334,10 @@ fn fix(
         };
         // `fix` parses internally and returns the source unchanged on a parse failure, so the
         // only failure to handle here is the write below.
-        let fixed = tzlint_core::fix(&source, &rule_refs);
+        let ext = extension_of(path);
+        let pcfg = processor_config_for(&config, ext);
+        let rr = region_rules_for(&config, ext);
+        let fixed = tzlint_core::fix(ext, &source, &registry, &pcfg, &rr);
         if fixed == source {
             continue;
         }
@@ -501,8 +539,10 @@ fn load_config(
 
 /// Print a one-line note to stderr when the resolved rule set is empty (every built-in rule was
 /// turned off by config), so an empty result is not mistaken for "your text is clean".
-fn note_if_no_rules(rules: &[Box<dyn Rule>], stderr: &mut dyn Write) {
-    if rules.is_empty() {
+fn note_if_no_rules(config: &Config, stderr: &mut dyn Write) {
+    // A column overlay (`formats.*.columns.*.rules`) can re-enable a rule the base disabled, so
+    // check the effective set across base AND overlays — not just the base.
+    if !any_effective_rules(config) {
         let _ = writeln!(
             stderr,
             "note: every built-in rule is disabled by config; the pipeline runs but reports nothing"
@@ -518,6 +558,27 @@ fn note_unknown_rules(config: &Config, stderr: &mut dyn Write) {
             stderr,
             "note: config references unknown rule '{id}' (ignored)"
         );
+    }
+}
+
+/// Note (best-effort, on stderr) when `path` is a known delimited format (csv/tsv) but the config
+/// has no columns configured for it — so a `.csv`/`.tsv` that lints nothing is not mistaken for a
+/// clean file. Explicitly-named files reach the linter even without config (opt-in columns), so
+/// this is the most common point of confusion.
+fn note_unconfigured_format(config: &Config, path: &Path, stderr: &mut dyn Write) {
+    let known = ["csv", "tsv"];
+    if let Some(ext) = extension_of(path) {
+        let ext = ext.to_ascii_lowercase();
+        let configured = config
+            .formats
+            .get(&ext)
+            .is_some_and(|f| !f.columns.is_empty());
+        if known.contains(&ext.as_str()) && !configured {
+            let _ = writeln!(
+                stderr,
+                "note: no columns configured for '{ext}'; nothing to lint"
+            );
+        }
     }
 }
 
@@ -1315,6 +1376,187 @@ mod tests {
         assert_eq!(status, ExitStatus::Clean);
         assert!(out.contains("\"max\":0"), "{out}");
         assert!(out.contains("from config"), "{out}");
+    }
+
+    #[test]
+    fn lint_routes_through_processor_seam_unchanged_for_markdown() {
+        // Same half-width-kana input as `lint_reports_a_violation_*`: routing through the
+        // processor seam must still produce the `no-hankaku-kana` diagnostic identically.
+        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Findings);
+        assert!(out.contains("no-hankaku-kana"), "{out}");
+    }
+
+    #[test]
+    fn changing_column_config_invalidates_cache() {
+        // Run once with body→no-todo on; then a config that turns it off must NOT reuse the
+        // cached (findings) result. The body cell carries a real marker ("TODO " has the trailing
+        // space the default `no-todo` pattern requires).
+        let host = MockHost::new();
+        host.put("data.csv", "id,body\n1,TODO fix\n");
+        host.put(
+            "on.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        host.put(
+            "off.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": false } } } } } }"#,
+        );
+
+        let mut on = lint_cli("data.csv", OutputFormat::Text);
+        on.config = Some(PathBuf::from("on.json"));
+        let (s_on, out_on, _e) = run_capture(&on, &host);
+        assert_eq!(s_on, ExitStatus::Findings, "{out_on}");
+
+        let mut off = lint_cli("data.csv", OutputFormat::Text);
+        off.config = Some(PathBuf::from("off.json"));
+        let (s_off, out_off, _e) = run_capture(&off, &host);
+        assert_eq!(
+            s_off,
+            ExitStatus::Clean,
+            "cache must invalidate on column-rule change: {out_off}"
+        );
+    }
+
+    #[test]
+    fn notes_when_csv_has_no_columns_configured() {
+        // A .csv argument with no formats config → a note that nothing was linted.
+        let host = MockHost::with("data.csv", "id,body\n1,x\n");
+        let (_status, _out, err) = run_capture(&lint_cli("data.csv", OutputFormat::Text), &host);
+        assert!(err.contains("no columns configured for 'csv'"), "{err}");
+    }
+
+    #[test]
+    fn directory_walk_includes_csv_only_when_configured() {
+        // Without csv config, a directory walk skips .csv; with it, the .csv is linted.
+        let host = MockHost::new();
+        host.put("docs/a.md", "本文。\n");
+        host.put("docs/data.csv", "id,body\n1,x\n");
+        // No config → csv skipped, only the .md is checked.
+        let (s1, out1, _e1) = run_capture(&lint_cli("docs", OutputFormat::Text), &host);
+        assert_eq!(s1, ExitStatus::Clean);
+        assert!(out1.contains("1 file(s) checked"), "{out1}");
+
+        // With csv config → both files are checked.
+        host.put(
+            "c.json",
+            r#"{ "formats": { "csv": { "header": true, "columns": { "body": {} } } } }"#,
+        );
+        let mut c = lint_cli("docs", OutputFormat::Text);
+        c.config = Some(PathBuf::from("c.json"));
+        let (s2, out2, _e2) = run_capture(&c, &host);
+        assert_eq!(s2, ExitStatus::Clean);
+        assert!(out2.contains("2 file(s) checked"), "{out2}");
+    }
+
+    #[test]
+    fn explicitly_named_csv_is_linted_without_config_gate() {
+        // A literal .csv path is always a target (even with no formats config); it just yields
+        // no diagnostics (opt-in columns).
+        let host = MockHost::with("data.csv", "id,body\n1,x\n");
+        let (status, out, _err) = run_capture(&lint_cli("data.csv", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Clean);
+        assert!(out.contains("1 file(s) checked"), "{out}");
+    }
+
+    #[test]
+    fn lint_csv_with_per_column_rule_reports_in_the_right_cell() {
+        // Config lints only the `body` column; `no-todo` is on. The TODO in the `body` cell is
+        // flagged; the TODO in the un-linted `note` column is not.
+        let host = MockHost::new();
+        host.put("data.csv", "id,body,note\n1,TODO fix,TODO ignore\n");
+        host.put(
+            "c.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        let mut c = lint_cli("data.csv", OutputFormat::Json);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let diags = &v[0]["diagnostics"];
+        assert_eq!(
+            diags.as_array().unwrap().len(),
+            1,
+            "only the body TODO: {out}"
+        );
+        assert!(out.contains("no-todo"), "{out}");
+    }
+
+    #[test]
+    fn lint_csv_column_targeted_by_name_and_index_reports_each_cell_once() {
+        // Regression: when one physical column is targeted by BOTH a header name and a 1-based
+        // index, its cells must be linted exactly once (not twice). Here `body` (column 0 by name)
+        // and `1` (column 0 by index) resolve to the same column; the single TODO must yield ONE
+        // diagnostic, not two.
+        let host = MockHost::new();
+        host.put("data.csv", "body,x\nTODO fix,9\n");
+        host.put(
+            "c.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": true } }, "1": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        let mut c = lint_cli("data.csv", OutputFormat::Json);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let diags = v[0]["diagnostics"].as_array().unwrap();
+        assert_eq!(
+            diags.len(),
+            1,
+            "the cell must be linted once, not doubled: {out}"
+        );
+        assert_eq!(diags[0]["rule_id"], "no-todo", "{out}");
+    }
+
+    #[test]
+    fn lint_csv_index_selected_column_reports_in_the_right_cell() {
+        // A column selected by 1-based INDEX (not name) is linted, and the diagnostic lands inside
+        // that cell. Column "2" → 0-based 1 → the `body` cell "TODO fix" (bytes 10..18 of the
+        // source); the `id` column is untouched.
+        let source = "id,body\n1,TODO fix\n";
+        let host = MockHost::new();
+        host.put("data.csv", source);
+        host.put(
+            "c.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "csv": { "header": true, "columns": { "2": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        let mut c = lint_cli("data.csv", OutputFormat::Json);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let diags = v[0]["diagnostics"].as_array().unwrap();
+        assert_eq!(diags.len(), 1, "{out}");
+        assert_eq!(diags[0]["rule_id"], "no-todo", "{out}");
+        // The diagnostic must fall inside the body cell ("TODO fix" begins at byte 10).
+        let start = diags[0]["span"]["start"].as_u64().unwrap();
+        let end = diags[0]["span"]["end"].as_u64().unwrap();
+        let cell_start = source.find("TODO fix").unwrap() as u64;
+        assert!(
+            start >= cell_start && end <= (cell_start + "TODO fix".len() as u64),
+            "diagnostic span {start}..{end} should be inside the body cell at {cell_start}: {out}"
+        );
+    }
+
+    #[test]
+    fn lint_tsv_column_is_linted_end_to_end() {
+        // A `.tsv` file with a `formats.tsv` config: the tab-delimited `body` column is linted.
+        let host = MockHost::new();
+        host.put("data.tsv", "id\tbody\n1\tTODO fix\n");
+        host.put(
+            "c.json",
+            r#"{ "rules": { "no-hankaku-kana": false }, "formats": { "tsv": { "header": true, "columns": { "body": { "parse-mode": "plain", "rules": { "no-todo": true } } } } } }"#,
+        );
+        let mut c = lint_cli("data.tsv", OutputFormat::Json);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Findings, "{out}");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let diags = v[0]["diagnostics"].as_array().unwrap();
+        assert_eq!(diags.len(), 1, "the tsv body TODO: {out}");
+        assert_eq!(diags[0]["rule_id"], "no-todo", "{out}");
     }
 
     #[test]

@@ -19,6 +19,7 @@
 
 mod discover;
 mod format;
+mod format_config;
 mod model;
 mod preset;
 mod schema;
@@ -30,6 +31,7 @@ use tzlint_pdk::RuleId;
 
 pub use discover::{DiscoveredConfig, ShadowedCandidate, discover};
 pub use format::ConfigFormat;
+pub use format_config::{ColumnConfig, FormatConfig};
 pub use model::RuleSetting;
 pub use preset::{Preset, resolve};
 pub use schema::CONFIG_SCHEMA;
@@ -49,6 +51,8 @@ pub struct Config {
     pub message_language: Option<String>,
     /// Per-rule settings, keyed by [`RuleId`]. Absent ids fall back to a rule's own defaults.
     pub rules: BTreeMap<RuleId, RuleSetting>,
+    /// Per-format settings (e.g. `formats.csv`), keyed by format id. Empty by default.
+    pub formats: BTreeMap<String, FormatConfig>,
 }
 
 impl Config {
@@ -75,6 +79,23 @@ pub enum ConfigError {
     },
     /// `extends` referenced a preset id that is not a known [`Preset`].
     UnknownPreset(String),
+    /// A `formats` key that is not a known input format (only `csv`/`tsv` support columns).
+    UnknownFormat(String),
+    /// A column was selected by name under a format with `header: false`.
+    ColumnNameWithoutHeader {
+        /// The format id (`csv`/`tsv`) whose column was selected by name.
+        format: String,
+        /// The header name that cannot be resolved without a header row.
+        name: String,
+    },
+    /// A format's `delimiter` override is not an ASCII character. The delimited scanner is
+    /// byte-oriented, so a multi-byte delimiter cannot be represented; reject it at parse time.
+    NonAsciiDelimiter {
+        /// The format id (`csv`/`tsv`) whose delimiter override is non-ASCII.
+        format: String,
+        /// The offending delimiter character.
+        delimiter: char,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -86,6 +107,24 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::UnknownPreset(id) => {
                 write!(f, "`extends` references unknown preset `{id}`")
+            }
+            ConfigError::UnknownFormat(format) => {
+                write!(
+                    f,
+                    "unknown input format '{format}' (only csv/tsv support columns)"
+                )
+            }
+            ConfigError::ColumnNameWithoutHeader { format, name } => {
+                write!(
+                    f,
+                    "column '{name}' in format '{format}' is selected by name but header is false"
+                )
+            }
+            ConfigError::NonAsciiDelimiter { format, delimiter } => {
+                write!(
+                    f,
+                    "delimiter '{delimiter}' in format '{format}' is not ASCII (only single-byte delimiters are supported)"
+                )
             }
         }
     }
@@ -128,6 +167,26 @@ mod tests {
             ConfigError::UnknownPreset("nope".into()).to_string(),
             "`extends` references unknown preset `nope`"
         );
+        assert_eq!(
+            ConfigError::NonAsciiDelimiter {
+                format: "csv".into(),
+                delimiter: '；',
+            }
+            .to_string(),
+            "delimiter '；' in format 'csv' is not ASCII (only single-byte delimiters are supported)"
+        );
+        assert_eq!(
+            ConfigError::UnknownFormat("xml".into()).to_string(),
+            "unknown input format 'xml' (only csv/tsv support columns)"
+        );
+        assert_eq!(
+            ConfigError::ColumnNameWithoutHeader {
+                format: "csv".into(),
+                name: "body".into(),
+            }
+            .to_string(),
+            "column 'body' in format 'csv' is selected by name but header is false"
+        );
     }
 
     #[test]
@@ -153,5 +212,16 @@ mod tests {
             Config::parse("{ not json", ConfigFormat::Json),
             Err(ConfigError::Parse { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod format_config_tests {
+    use super::*;
+
+    #[test]
+    fn config_default_has_no_formats() {
+        let c = Config::default();
+        assert!(c.formats.is_empty());
     }
 }

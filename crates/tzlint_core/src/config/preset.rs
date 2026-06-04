@@ -105,6 +105,8 @@ pub fn resolve(preset: Option<Preset>, user: Config) -> Config {
         language: user.language,
         message_language: user.message_language,
         rules: merge(base, user.rules),
+        // Formats are not preset-layered; layering preserves the user's resolved formats.
+        formats: user.formats,
     }
 }
 
@@ -167,6 +169,7 @@ mod tests {
                 m.insert(RuleId::from("custom-rule"), on()); // user-only
                 m
             },
+            ..Default::default()
         };
         let resolved = resolve(Some(Preset::JaBasic), user.clone());
         // Languages come from the user.

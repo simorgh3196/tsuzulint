@@ -2,7 +2,11 @@
 //!
 //! Compiles for native and `wasm32`. Houses:
 //! - the markdown-rs parser + mdast → index-AST transform,
-//! - the single-traversal multi-visitor `Engine::lint` (the one dispatch entry point),
+//! - the format-neutral `processor` seam (`Processor`/`Registry`/`lint_document`) that selects a
+//!   parser by file extension (defaulting to Markdown) — `lint_document` is the single
+//!   document-level dispatch entry point,
+//! - the single-traversal multi-visitor `Engine::lint`, the AST-level executor `lint_document`
+//!   runs over each already-parsed region,
 //! - multi-format config loading (+ presets), the document-level cache,
 //! - the position mapper, and the centralized boundary `io` module (`Host::read_to_string`
 //!   with a size cap, `Host::write_atomic`), behind a `Host` provider abstraction so
@@ -23,13 +27,14 @@ pub mod fix;
 pub mod io;
 pub mod parse;
 pub mod position;
+pub mod processor;
 
 pub use cache::{
     CacheError, CacheKey, CacheKeyInput, DocumentCache, document_cache_key, lint_cached,
 };
 pub use config::{
-    CONFIG_SCHEMA, Config, ConfigError, ConfigFormat, DiscoveredConfig, Preset, RuleSetting,
-    ShadowedCandidate, discover, resolve,
+    CONFIG_SCHEMA, ColumnConfig, Config, ConfigError, ConfigFormat, DiscoveredConfig, FormatConfig,
+    Preset, RuleSetting, ShadowedCandidate, discover, resolve,
 };
 pub use dict::{DictError, provision_dictionary};
 pub use engine::Engine;
@@ -37,3 +42,26 @@ pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
 pub use io::{DirEntry, EntryKind, Host, IoError};
 pub use parse::{ParseError, parse};
 pub use position::LineIndex;
+pub use processor::{
+    ColumnSelector, ColumnTarget, DelimitedConfig, DelimitedProcessor, ParseMode, Parsed,
+    Processor, ProcessorConfig, Region, RegionRules, RegionTag, Registry, lint_document,
+};
+
+#[cfg(test)]
+mod tests {
+    use crate::{ProcessorConfig, RegionRules, Registry, lint_document};
+
+    #[test]
+    fn processor_seam_is_reexported_at_crate_root() {
+        let reg = Registry::with_builtins();
+        let diags = lint_document(
+            Some("md"),
+            "x\n",
+            &reg,
+            &ProcessorConfig::default(),
+            &RegionRules::base_only(vec![]),
+        )
+        .unwrap();
+        assert!(diags.is_empty());
+    }
+}
