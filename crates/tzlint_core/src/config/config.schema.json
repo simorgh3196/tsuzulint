@@ -43,10 +43,12 @@
       }
     },
     "formats": {
-      "description": "Per-input-format settings, keyed by format id. Only `csv` and `tsv` are wired (an unknown id is rejected by the loader at resolve time — not expressible here, so this allows arbitrary keys). Each value describes how to extract and lint that format's columns.",
+      "description": "Per-input-format settings for the supported built-in formats. Each value describes how to extract and lint that format's columns. (When a new format is wired into the loader, add its key here.)",
       "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/format"
+      "additionalProperties": false,
+      "properties": {
+        "csv": { "$ref": "#/$defs/format" },
+        "tsv": { "$ref": "#/$defs/format" }
       }
     },
     "format": {
