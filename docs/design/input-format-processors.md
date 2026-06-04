@@ -1,6 +1,7 @@
 # Pluggable Input-Format Processors
 
-> Design spec. Status: approved design, pending implementation plan.
+> Design spec. Status: implemented — the processor seam (`Processor`/`Registry`/`lint_document`)
+> and the CSV/TSV column processors are in `tzlint_core`; this doc is the contract reference.
 > Scope: introduce a processor layer so TsuzuLint can lint natural-language text in
 > formats beyond Markdown — starting with CSV/TSV (lint specific columns, with
 > per-column rules), and built so new formats (e.g. Re:VIEW) are easy to add in-tree.
@@ -58,7 +59,7 @@ contribution.
 
 ## 4. Architecture overview
 
-```
+```text
 file (path, bytes)
       │  ext → Registry selects a Processor (Markdown is the default/fallback)
       ▼
@@ -214,7 +215,7 @@ slice and add `slice.start` to every resulting span to get absolute offsets (§7
 The key invariant that removes the need for a separate offset table: **`Ast.text` is the
 whole original source, and every node span is an absolute offset into it.**
 
-```
+```text
 slice  = &source[start..end]                  // a cell's contiguous content
 mini   = parse_mode.parse(slice)              // Markdown (existing parser) or PlainText
 for n in mini.nodes: n.span += start          // shift every span by the slice start
@@ -241,7 +242,7 @@ scope, so it is gated separately.
 
 ### Single dispatch entry
 
-```
+```text
 lint_document(ext, source, registry, processor_cfg, rules: &RegionRules) -> Result<Vec<Diagnostic>, ParseError>
   1. processor = registry.for_ext(ext)            // Markdown is the default/fallback
   2. parsed    = processor.parse(source, processor_cfg)

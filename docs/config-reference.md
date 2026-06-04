@@ -65,9 +65,9 @@ is an accepted top-level key (alongside `language`, `message-language`, `rules`,
 
 ### `formats.<csv|tsv>`
 
-- **`header`** (bool, required): when `true` the first record is read as a header row (not
-  linted; enables column lookup by name). When `false` only integer-key column selectors
-  are valid — a name key is a config error.
+- **`header`** (bool, optional; defaults to `false`): when `true` the first record is read
+  as a header row (not linted; enables column lookup by name). When `false` (the default)
+  only integer-key column selectors are valid — a name key is a config error.
 - **`delimiter`** (optional): a single ASCII character that overrides the default delimiter
   (`,` for CSV, `\t` for TSV). Non-ASCII characters are rejected with a config error; omit
   the key to use the format default.
@@ -75,8 +75,15 @@ is an accepted top-level key (alongside `language`, `message-language`, `rules`,
   semantics — unlisted columns such as IDs or timestamps are never linted).
 
   **Key:** a **header name** (string; requires `header: true`) or a **1-based column
-  number** (bare integer string, e.g. `"2"`). With `header: true`, name match takes
-  priority; duplicate header names cause a warning and target all matching columns.
+  number** (bare integer string, e.g. `"2"`). When a region matches both a name-keyed and a
+  number-keyed target, the **name** target's rules win (resolution is name-then-index,
+  independent of key order).
+
+  A **bare-integer key is always read as a column number**, even under `header: true` — so a
+  header literally named `"2024"` cannot currently be selected by name (it would resolve to
+  column 2024 and, if out of range, be skipped). Use a non-numeric header name, or select that
+  column by its position. An explicit name/number disambiguation syntax is a possible future
+  addition.
 
   **Value** (all fields optional):
   - `parse-mode`: `markdown` (default) | `plain`. `markdown` parses the cell as CommonMark

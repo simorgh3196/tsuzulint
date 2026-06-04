@@ -3,8 +3,10 @@
 //! Compiles for native and `wasm32`. Houses:
 //! - the markdown-rs parser + mdast → index-AST transform,
 //! - the format-neutral `processor` seam (`Processor`/`Registry`/`lint_document`) that selects a
-//!   parser by file extension, defaulting to Markdown,
-//! - the single-traversal multi-visitor `Engine::lint` (the one dispatch entry point),
+//!   parser by file extension (defaulting to Markdown) — `lint_document` is the single
+//!   document-level dispatch entry point,
+//! - the single-traversal multi-visitor `Engine::lint`, the AST-level executor `lint_document`
+//!   runs over each already-parsed region,
 //! - multi-format config loading (+ presets), the document-level cache,
 //! - the position mapper, and the centralized boundary `io` module (`Host::read_to_string`
 //!   with a size cap, `Host::write_atomic`), behind a `Host` provider abstraction so
