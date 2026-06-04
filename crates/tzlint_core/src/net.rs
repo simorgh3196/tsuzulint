@@ -123,10 +123,8 @@ fn ipv4_is_blocked(addr: Ipv4Addr) -> bool {
 /// (`::ffff:a.b.c.d`) is re-checked through the IPv4 rules so a mapped private address cannot slip
 /// through as "just an IPv6 host".
 fn ipv6_is_blocked(addr: Ipv6Addr) -> bool {
-    if let Some(mapped) = addr.to_ipv4() {
-        if ipv4_is_blocked(mapped) {
-            return true;
-        }
+    if addr.to_ipv4().is_some_and(ipv4_is_blocked) {
+        return true;
     }
     let segments = addr.segments();
     addr.is_loopback()        // ::1
