@@ -214,7 +214,9 @@ fn read_and_lint(
         Some(cache) => {
             let pcfg = processor_config_for(config, ext);
             let rr = region_rules_for(config, ext);
-            lint_cached(cache, ext, &source, config, registry, &pcfg, &rr)
+            // No morphology providers are wired into the CLI yet (the native backend is M2j), so
+            // pass `None`: the cache key stays byte-identical to the pre-morphology key.
+            lint_cached(cache, ext, &source, config, registry, &pcfg, &rr, None)
                 .map_err(|e| e.to_string())?
         }
         None => lint_source(registry, config, ext, &source)?,

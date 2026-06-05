@@ -201,6 +201,25 @@ impl RegionRules {
         }
         ids
     }
+
+    /// The dictionary languages every enabled base+column rule requires (duplicates allowed; the
+    /// caller dedupes). Mirrors [`rule_ids`](RegionRules::rule_ids); the morphology provider
+    /// registry intersects this with its registered languages to fingerprint the active
+    /// dictionaries into the cache key. A rule that declares no morphology requirement contributes
+    /// nothing — the `filter_map` relies on the `Requirements` invariant that `required_lang()` is
+    /// `Some` exactly when the rule needs morphology.
+    #[must_use]
+    pub fn required_langs(&self) -> Vec<tzlint_ast::morphology::Lang> {
+        let mut langs: Vec<tzlint_ast::morphology::Lang> = self
+            .base
+            .iter()
+            .filter_map(|r| r.meta().required_lang())
+            .collect();
+        for set in &self.columns {
+            langs.extend(set.rules.iter().filter_map(|r| r.meta().required_lang()));
+        }
+        langs
+    }
 }
 
 mod markdown;
@@ -750,6 +769,56 @@ mod tests {
             ids(rr.for_tag(&RegionTag::column(9, Some("nope".into())))),
             vec!["base"]
         );
+    }
+
+    #[test]
+    fn required_langs_unions_base_and_column_morphology_rules() {
+        use tzlint_ast::morphology::Lang;
+
+        fn morph_rule(id: &'static str, lang: Lang) -> Box<dyn Rule> {
+            struct R(RuleMeta);
+            impl Rule for R {
+                fn meta(&self) -> &RuleMeta {
+                    &self.0
+                }
+                fn check<'a>(&self, _n: NodeRef<'a>, _c: &mut Context<'a>) {}
+            }
+            Box::new(R(RuleMeta::new(
+                id,
+                Severity::Warning,
+                vec![NodeKind::TEXT],
+            )
+            .with_morphology(lang)))
+        }
+        fn plain_rule(id: &'static str) -> Box<dyn Rule> {
+            struct R(RuleMeta);
+            impl Rule for R {
+                fn meta(&self) -> &RuleMeta {
+                    &self.0
+                }
+                fn check<'a>(&self, _n: NodeRef<'a>, _c: &mut Context<'a>) {}
+            }
+            Box::new(R(RuleMeta::new(
+                id,
+                Severity::Warning,
+                vec![NodeKind::TEXT],
+            )))
+        }
+
+        // base needs JA + a plain rule (contributes nothing); a column needs JA + KO.
+        let mut rr = RegionRules::base_only(vec![morph_rule("ja", Lang::JA), plain_rule("plain")]);
+        rr.push_column(
+            Some(0),
+            None,
+            vec![morph_rule("ja2", Lang::JA), morph_rule("ko", Lang::KO)],
+        );
+
+        let langs = rr.required_langs();
+        assert!(langs.contains(&Lang::JA));
+        assert!(langs.contains(&Lang::KO));
+        // The plain rule contributes nothing; every entry is a real morphology language.
+        assert!(langs.iter().all(|l| *l == Lang::JA || *l == Lang::KO));
+        assert_eq!(langs.iter().filter(|l| **l == Lang::KO).count(), 1);
     }
 
     #[test]

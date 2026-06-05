@@ -492,6 +492,18 @@ impl std::error::Error for CacheError {
 /// version): two different implementations sharing an id are distinguished only by
 /// `ENGINE_BEHAVIOR_VERSION` until a per-rule version lands, at which point it joins the
 /// `(id, version)` pairs derived below.
+///
+/// `morphology` is the per-run provider registry (M2h). Its
+/// [`fingerprint`](crate::MorphologyRegistry::fingerprint) of the dictionaries *active* for `rules`
+/// is folded into the key, so a dictionary upgrade invalidates stale entries. `None` (or an empty
+/// registry, or a registry whose languages no enabled rule needs) yields an empty fingerprint and a
+/// **byte-identical** pre-morphology key. The fingerprint affects **keying only** — the miss path
+/// still runs [`Engine::lint`] with no morphology table (the analysis pass is M2l), so registry
+/// presence never changes diagnostics.
+// Eight references, none of which bundle naturally (one is `&mut`, the rest are disjoint `&`s):
+// the trailing `morphology: Option<&MorphologyRegistry>` is the deliberate, reviewed shape, so the
+// arg-count lint is allowed here rather than forcing an artificial context struct.
+#[allow(clippy::too_many_arguments)]
 pub fn lint_cached(
     cache: &mut DocumentCache,
     ext: Option<&str>,
@@ -500,6 +512,7 @@ pub fn lint_cached(
     registry: &crate::Registry,
     processor_cfg: &crate::ProcessorConfig,
     rules: &crate::RegionRules,
+    morphology: Option<&crate::MorphologyRegistry>,
 ) -> Result<Vec<Diagnostic>, CacheError> {
     // Derive rule identity from every rule across the base and column sets, so the key reflects
     // the real rule set. (Keying off a separately-supplied list would let it drift from `rules`
@@ -516,12 +529,18 @@ pub fn lint_cached(
         .first()
         .copied()
         .unwrap_or("");
+    // M2e: fold the active-dictionary fingerprint into the key. Empty (no registry / no active
+    // dictionary) ⇒ a byte-identical pre-morphology key.
+    let morphology_fingerprint: Vec<u8> = match morphology {
+        Some(reg) => reg.fingerprint(rules),
+        None => Vec::new(),
+    };
     let key = document_cache_key(&CacheKeyInput {
         content,
         processor,
         config,
         rule_versions: &rule_versions,
-        morphology_fingerprint: &[],
+        morphology_fingerprint: &morphology_fingerprint,
     })
     .map_err(CacheError::Key)?;
 
@@ -640,6 +659,29 @@ mod tests {
         }
         fn check<'ast>(&self, node: NodeRef<'ast>, cx: &mut Context<'ast>) {
             cx.report(node.span(), "flagged");
+        }
+    }
+
+    /// A morphology-requiring rule (pinned to JA): the engine skips it when no table is available
+    /// (`lint_document` passes `None`), so it never reports — its purpose is to put a `required_lang`
+    /// into the rule set so the morphology fingerprint becomes active.
+    struct MorphFlag {
+        meta: RuleMeta,
+    }
+    impl MorphFlag {
+        fn new(id: &str) -> Self {
+            MorphFlag {
+                meta: RuleMeta::new(id, Severity::Warning, vec![NodeKind::HEADING])
+                    .with_morphology(tzlint_ast::morphology::Lang::JA),
+            }
+        }
+    }
+    impl Rule for MorphFlag {
+        fn meta(&self) -> &RuleMeta {
+            &self.meta
+        }
+        fn check<'ast>(&self, node: NodeRef<'ast>, cx: &mut Context<'ast>) {
+            cx.report(node.span(), "morph");
         }
     }
 
@@ -772,6 +814,7 @@ mod tests {
             &registry,
             &pcfg,
             &rules,
+            None,
         )
         .unwrap();
         assert!(!md.is_empty(), "markdown should flag the text node");
@@ -784,6 +827,7 @@ mod tests {
             &registry,
             &pcfg,
             &rules,
+            None,
         )
         .unwrap();
         assert!(
@@ -850,6 +894,202 @@ mod tests {
         assert_ne!(
             none, present,
             "an M2 dictionary must invalidate pre-M2 keys"
+        );
+    }
+
+    #[test]
+    fn key_schema_version_is_unchanged() {
+        // Guards against silent whole-key drift; the no-morphology path must stay pre-M2.
+        assert_eq!(KEY_SCHEMA_VERSION, 2);
+    }
+
+    #[test]
+    fn lint_cached_none_and_empty_registry_are_pre_m2_byte_identical() {
+        use crate::MorphologyRegistry;
+        let mut cache = DocumentCache::new();
+        let c = Config::default();
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
+        // A morphology-requiring rule present but NO provider registered: `required_langs` is [JA]
+        // yet the active set is empty, so the fingerprint must still be empty (a pre-M2 key). Using
+        // a morphology rule makes a fresh MISS distinguishable from a HIT: on a miss `lint_document`
+        // passes a None table, so MorphFlag is SKIPPED → 0 diagnostics; the seeded reference has 1.
+        let rules = crate::RegionRules::base_only(vec![Box::new(MorphFlag::new("mf"))]);
+
+        // The reference pre-M2 key: built directly with an empty morphology fingerprint.
+        let processor = registry
+            .for_ext(Some("md"))
+            .extensions()
+            .first()
+            .copied()
+            .unwrap_or("");
+        let rule_versions: Vec<(&str, &str)> =
+            rules.rule_ids().into_iter().map(|id| (id, "")).collect();
+        let reference = document_cache_key(&CacheKeyInput {
+            content: "# H\n",
+            processor,
+            config: &c,
+            rule_versions: &rule_versions,
+            morphology_fingerprint: &[],
+        })
+        .unwrap();
+
+        // Seed the reference key with one marker diagnostic. If None / empty-registry compute the
+        // SAME key they HIT and return the marker (len 1); any drift would MISS and recompute to
+        // len 0 (MorphFlag skipped). So `len == 1` discriminates key-equality.
+        cache.insert(
+            reference,
+            vec![Diagnostic::new("x", Severity::Info, Span::new(0, 0), "m")],
+        );
+        let none = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &rules,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            none.len(),
+            1,
+            "None must key-match the pre-M2 reference (hit, not recompute)"
+        );
+        assert_eq!(none[0].message, "m");
+        let empty = MorphologyRegistry::new();
+        let with_empty = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &rules,
+            Some(&empty),
+        )
+        .unwrap();
+        assert_eq!(
+            with_empty.len(),
+            1,
+            "an empty registry must key-match the pre-M2 reference"
+        );
+        assert_eq!(with_empty[0].message, "m");
+    }
+
+    #[test]
+    fn lint_cached_with_morphology_miss_then_hit() {
+        use crate::{DictId, MorphologyRegistry};
+        use tzlint_ast::morphology::Lang;
+        use tzlint_pdk::WhitespaceProvider;
+        let mut cache = DocumentCache::new();
+        let c = Config::default();
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
+        // A rule that needs JA morphology, so the JA provider lands in the active set.
+        let rules = crate::RegionRules::base_only(vec![Box::new(MorphFlag::new("mf"))]);
+
+        let mut reg = MorphologyRegistry::new();
+        reg.insert(
+            Box::new(WhitespaceProvider::new(Lang::JA)),
+            DictId::from_pin([0x9; 32]),
+        );
+
+        let miss = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &rules,
+            Some(&reg),
+        )
+        .unwrap();
+        assert_eq!(
+            cache.len(),
+            1,
+            "miss caches one entry under the morphology-fingerprinted key"
+        );
+        let hit = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &rules,
+            Some(&reg),
+        )
+        .unwrap();
+        assert_eq!(hit, miss, "second call hits the same key");
+        assert_eq!(cache.len(), 1, "no new entry on a hit");
+    }
+
+    #[test]
+    fn lint_cached_active_registry_misses_the_pre_m2_key() {
+        // The slice's load-bearing behavior, asserted across the `lint_cached` boundary: an ACTIVE
+        // registry must produce a DIFFERENT key than the pre-M2 (empty-fingerprint) key. This is
+        // the inverse of `lint_cached_none_and_empty_registry_are_pre_m2_byte_identical`: seed the
+        // pre-M2 key, then assert an active registry does NOT hit it. Kills the
+        // `Some(_reg) => Vec::new()` mutant — which would collapse the fingerprint to empty, giving
+        // the same key and a spurious HIT — that the miss-then-hit self-consistency test cannot.
+        use crate::{DictId, MorphologyRegistry};
+        use tzlint_ast::morphology::Lang;
+        use tzlint_pdk::WhitespaceProvider;
+        let mut cache = DocumentCache::new();
+        let c = Config::default();
+        let registry = crate::Registry::with_builtins();
+        let pcfg = crate::ProcessorConfig::default();
+        let rules = crate::RegionRules::base_only(vec![Box::new(MorphFlag::new("mf"))]);
+
+        // Pre-M2 reference key (empty morphology fingerprint), seeded with a marker diagnostic.
+        let processor = registry
+            .for_ext(Some("md"))
+            .extensions()
+            .first()
+            .copied()
+            .unwrap_or("");
+        let rule_versions: Vec<(&str, &str)> =
+            rules.rule_ids().into_iter().map(|id| (id, "")).collect();
+        let pre_m2 = document_cache_key(&CacheKeyInput {
+            content: "# H\n",
+            processor,
+            config: &c,
+            rule_versions: &rule_versions,
+            morphology_fingerprint: &[],
+        })
+        .unwrap();
+        cache.insert(
+            pre_m2,
+            vec![Diagnostic::new("x", Severity::Info, Span::new(0, 0), "m")],
+        );
+
+        // An active registry (a JA provider + the JA-needing MorphFlag rule) yields a non-empty
+        // fingerprint, so the key differs from `pre_m2`: the call MISSES the seed and recomputes
+        // (MorphFlag is skipped on the None-table path → 0 diagnostics), rather than returning the
+        // marker (len 1). Under the mutant the fingerprint is empty → same key → HIT → marker.
+        let mut active = MorphologyRegistry::new();
+        active.insert(
+            Box::new(WhitespaceProvider::new(Lang::JA)),
+            DictId::from_pin([0x9; 32]),
+        );
+        let out = lint_cached(
+            &mut cache,
+            Some("md"),
+            "# H\n",
+            &c,
+            &registry,
+            &pcfg,
+            &rules,
+            Some(&active),
+        )
+        .unwrap();
+        assert_eq!(
+            out.len(),
+            0,
+            "an active registry must MISS the pre-M2 key (a hit means the fingerprint was not applied)"
         );
     }
 
@@ -955,6 +1195,7 @@ mod tests {
             &registry,
             &pcfg,
             &new_rules(),
+            None,
         )
         .unwrap();
         assert_eq!(fresh.len(), 1, "one heading flagged");
@@ -968,6 +1209,7 @@ mod tests {
             &registry,
             &pcfg,
             &new_rules(),
+            None,
         )
         .unwrap();
         assert_eq!(hit, fresh);
@@ -1030,6 +1272,7 @@ mod tests {
             &registry,
             &pcfg,
             &build_rules(),
+            None,
         )
         .unwrap();
         assert_eq!(miss, fresh, "cached miss equals a fresh compute");
@@ -1042,6 +1285,7 @@ mod tests {
             &registry,
             &pcfg,
             &build_rules(),
+            None,
         )
         .unwrap();
         assert_eq!(hit, fresh, "cached hit equals a fresh compute");
@@ -1064,6 +1308,7 @@ mod tests {
             &registry,
             &pcfg,
             &crate::RegionRules::base_only(vec![]),
+            None,
         )
         .unwrap();
         assert!(empty.is_empty());
@@ -1076,6 +1321,7 @@ mod tests {
             &registry,
             &pcfg,
             &crate::RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::HEADING))]),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -1102,6 +1348,7 @@ mod tests {
             &registry,
             &crate::ProcessorConfig::default(),
             &crate::RegionRules::base_only(vec![]),
+            None,
         )
         .unwrap();
         assert!(diags.is_empty());
@@ -1121,6 +1368,7 @@ mod tests {
             &registry,
             &crate::ProcessorConfig::default(),
             &crate::RegionRules::base_only(vec![]),
+            None,
         )
         .unwrap_err();
         assert!(matches!(err, CacheError::Parse(_)));
