@@ -26,5 +26,9 @@ url = { workspace = true }
 # Reference Draft 2020-12 validator used ONLY by `tests/config_schema.rs` to prove the published
 # `CONFIG_SCHEMA` matches the loader. Dev-only: never shipped, never in the wasm32 lib build or
 # the MSRV `cargo build --workspace`. Pinned because its API churns across minor versions.
-jsonschema = "=0.46.5"
+# `default-features = false` drops jsonschema's `resolve-http` retriever (which pulls `reqwest` +
+# `rustls`/`aws-lc-rs` + `tokio`): the test validates a self-contained schema in memory and never
+# fetches remote `$ref`s, so no HTTP client is needed. Keeps the lone vetted HTTP client `ureq`
+# (CLI host) as the only network stack in the tree.
+jsonschema = { version = "=0.46.5", default-features = false }
 serde_json = { workspace = true }
