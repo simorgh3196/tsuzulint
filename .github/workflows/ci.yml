@@ -61,7 +61,14 @@ jobs:
         with:
           targets: wasm32-unknown-unknown, wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p tzlint_core --target wasm32-unknown-unknown
+      # The morphology seam must stay wasm-clean with NO native backend (M2i): the frozen model
+      # (`tzlint_ast`), the injected-provider trait (`tzlint_pdk`), and the engine + provider
+      # registry + cache fingerprint (`tzlint_core`) are dictionary-free by default — embedders
+      # inject providers Host-style. Build all three wasm-facing crates for both wasm targets. When
+      # the native morphology backend lands (M2j, lindera) it MUST be cfg/feature-gated so it can
+      # never enter this build; a regression here is the tripwire.
+      - run: cargo build -p tzlint_ast -p tzlint_pdk -p tzlint_core --target wasm32-unknown-unknown
+      - run: cargo build -p tzlint_ast -p tzlint_pdk -p tzlint_core --target wasm32-wasip1
 
   io-guard:
     name: io-guard

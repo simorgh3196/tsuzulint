@@ -23,8 +23,12 @@ lint:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
 
+# wasm32 build of the morphology-seam crates (model + injected-provider seam + engine), no native
+# backend — mirrors CI. Both wasm targets; run `rustup target add wasm32-unknown-unknown
+# wasm32-wasip1` once if missing.
 wasm:
-    cargo build -p tzlint_core --target wasm32-unknown-unknown
+    cargo build -p tzlint_ast -p tzlint_pdk -p tzlint_core --target wasm32-unknown-unknown
+    cargo build -p tzlint_ast -p tzlint_pdk -p tzlint_core --target wasm32-wasip1
 
 bench:
     cargo bench --workspace
