@@ -548,8 +548,9 @@ pub fn lint_cached(
         return Ok(hit);
     }
 
-    let diagnostics = crate::lint_document(ext, content, registry, processor_cfg, rules)
-        .map_err(CacheError::Parse)?;
+    let diagnostics =
+        crate::lint_document(ext, content, registry, processor_cfg, rules, morphology)
+            .map_err(CacheError::Parse)?;
     cache.insert(key, diagnostics.clone());
     Ok(diagnostics)
 }
@@ -1012,6 +1013,12 @@ mod tests {
             1,
             "miss caches one entry under the morphology-fingerprinted key"
         );
+        // The analysis pass ran through lint_cached: MorphFlag saw the table and fired.
+        assert_eq!(
+            miss.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["morph"],
+            "lint_cached must forward the registry so the morphology rule fires"
+        );
         let hit = lint_cached(
             &mut cache,
             Some("md"),
@@ -1067,9 +1074,12 @@ mod tests {
         );
 
         // An active registry (a JA provider + the JA-needing MorphFlag rule) yields a non-empty
-        // fingerprint, so the key differs from `pre_m2`: the call MISSES the seed and recomputes
-        // (MorphFlag is skipped on the None-table path → 0 diagnostics), rather than returning the
-        // marker (len 1). Under the mutant the fingerprint is empty → same key → HIT → marker.
+        // fingerprint, so the key differs from `pre_m2`: the call MISSES the seed and recomputes.
+        // The analysis pass then feeds the table to `Engine::lint`, so MorphFlag FIRES ("morph") —
+        // distinct from the seeded marker ("m") a hit would return. This kills two mutants at once:
+        //   * fingerprint ignores the registry (`Some(_) => Vec::new()`) → same key → HIT → "m";
+        //   * lint_cached drops the registry instead of forwarding it to lint_document → MISS but
+        //     MorphFlag skipped (None table) → empty.
         let mut active = MorphologyRegistry::new();
         active.insert(
             Box::new(WhitespaceProvider::new(Lang::JA)),
@@ -1088,8 +1098,12 @@ mod tests {
         .unwrap();
         assert_eq!(
             out.len(),
-            0,
-            "an active registry must MISS the pre-M2 key (a hit means the fingerprint was not applied)"
+            1,
+            "an active registry must MISS the seed and recompute"
+        );
+        assert_eq!(
+            out[0].message, "morph",
+            "the recompute must run morphology (MorphFlag fired), not return the seeded marker"
         );
     }
 
@@ -1260,7 +1274,8 @@ mod tests {
         let build_rules = || RegionRules::base_only(vec![Box::new(FlagKind::new(NodeKind::TEXT))]);
 
         let fresh =
-            crate::lint_document(Some("csv"), source, &registry, &pcfg, &build_rules()).unwrap();
+            crate::lint_document(Some("csv"), source, &registry, &pcfg, &build_rules(), None)
+                .unwrap();
         assert_eq!(fresh.len(), 2, "two body cells flagged");
 
         let mut cache = DocumentCache::new();

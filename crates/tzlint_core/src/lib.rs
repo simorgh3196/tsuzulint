@@ -64,6 +64,7 @@ mod tests {
             &reg,
             &ProcessorConfig::default(),
             &RegionRules::base_only(vec![]),
+            None,
         )
         .unwrap();
         assert!(diags.is_empty());

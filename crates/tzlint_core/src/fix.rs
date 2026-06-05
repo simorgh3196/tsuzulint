@@ -88,7 +88,9 @@ pub fn fix(
 ) -> String {
     let mut text = source.to_string();
     for _ in 0..MAX_FIX_PASSES {
-        let Ok(diagnostics) = crate::lint_document(ext, &text, registry, processor_cfg, rules)
+        // Morphology is not threaded into the fix loop yet (no provider source until M2j); `None`.
+        let Ok(diagnostics) =
+            crate::lint_document(ext, &text, registry, processor_cfg, rules, None)
         else {
             break;
         };

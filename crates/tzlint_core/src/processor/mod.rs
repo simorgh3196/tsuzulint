@@ -289,6 +289,7 @@ pub fn lint_document(
     registry: &Registry,
     processor_cfg: &ProcessorConfig,
     rules: &RegionRules,
+    morphology: Option<&crate::MorphologyRegistry>,
 ) -> Result<Vec<Diagnostic>, ParseError> {
     let processor = registry.for_ext(ext);
     let parsed = processor.parse(source, processor_cfg)?;
@@ -296,13 +297,13 @@ pub fn lint_document(
     match parsed {
         Parsed::Ast(ast) => {
             let region_rules = rules.for_tag(&RegionTag::whole());
-            lint_ast_into(&ast, &region_rules, &mut diagnostics)?;
+            lint_ast_into(&ast, &region_rules, morphology, &mut diagnostics)?;
         }
         Parsed::Regions(regions) => {
             for region in &regions {
                 let region_rules = rules.for_tag(&region.tag);
                 for ast in build_region_asts(core::slice::from_ref(region), source)? {
-                    lint_ast_into(&ast, &region_rules, &mut diagnostics)?;
+                    lint_ast_into(&ast, &region_rules, morphology, &mut diagnostics)?;
                 }
             }
         }
@@ -313,17 +314,22 @@ pub fn lint_document(
     Ok(diagnostics)
 }
 
-/// Archive `ast`, lint it with `rules`, and append the diagnostics into `out`.
+/// Archive `ast`, build the morphology table (if a registry is supplied and active for `rules`),
+/// lint with `rules`, and append the diagnostics into `out`.
 ///
-/// This is the **M2 morphology integration point**. Morphology is `None` for now, matching the
-/// cached/CLI/fix paths (M2e/M2h wire the document table elsewhere). For a region produced by a
-/// delimited processor, each cell is an *independent mini-document* with its own text spine and
-/// absolute spans, so a whole-document morphology table would be wrong; per-region provisioning
-/// (segment-the-cell vs skip-on-CSV) is an open question — see design §16. Until then, rules that
-/// require morphology are skipped here by `Engine::lint`.
+/// This is the **M2 morphology integration point**. When `morphology` is `Some` and some enabled
+/// rule requires a registered language, the registry's providers tokenize this AST's nodes into a
+/// [`MorphologyV1`] table that is archived and passed to [`Engine::lint`]; otherwise the table is
+/// `None` and morphology-requiring rules are skipped, byte-for-byte as before. The archived AST and
+/// morphology buffers are siblings in this scope, so both outlive the borrow `Engine::lint` takes.
+///
+/// For a region produced by a delimited processor, each cell is an *independent mini-document* with
+/// its own text spine and absolute spans, so it is tokenized independently here (correct per-cell);
+/// reconciling that with the whole-`RegionRules` cache fingerprint is deferred (see design §16).
 fn lint_ast_into(
     ast: &Ast,
     rules: &[&dyn Rule],
+    morphology: Option<&crate::MorphologyRegistry>,
     out: &mut Vec<Diagnostic>,
 ) -> Result<(), ParseError> {
     let bytes = tzlint_ast::to_archive(ast).map_err(|e| ParseError {
@@ -332,7 +338,33 @@ fn lint_ast_into(
     let archived = tzlint_ast::access(&bytes).map_err(|e| ParseError {
         message: format!("archive failed: {e}"),
     })?;
-    out.extend(crate::Engine::lint(archived, None, rules));
+    // Build the per-document morphology table (None when no provider is active for these rules).
+    let table = match morphology {
+        Some(registry) => registry
+            .build_table(archived, rules)
+            .map_err(|e| ParseError {
+                message: format!("morphology failed: {e}"),
+            })?,
+        None => None,
+    };
+    // Archive it into a sibling buffer that outlives the `Engine::lint` borrow below.
+    let morph_bytes = match &table {
+        Some(table) => Some(
+            tzlint_ast::morphology::to_archive_morphology(table).map_err(|e| ParseError {
+                message: format!("morphology archive failed: {e}"),
+            })?,
+        ),
+        None => None,
+    };
+    let morphology = match &morph_bytes {
+        Some(bytes) => Some(
+            tzlint_ast::morphology::access_morphology(bytes).map_err(|e| ParseError {
+                message: format!("morphology archive failed: {e}"),
+            })?,
+        ),
+        None => None,
+    };
+    out.extend(crate::Engine::lint(archived, morphology, rules));
     Ok(())
 }
 
@@ -456,6 +488,7 @@ mod tests {
             &reg,
             &ProcessorConfig::default(),
             &RegionRules::base_only(vec![]),
+            None,
         )
         .unwrap();
         assert!(diags.is_empty());
@@ -661,8 +694,15 @@ mod tests {
         let rules: Vec<&dyn Rule> = vec![&rule];
         let rr = RegionRules::base_only(vec![Box::new(FlagText::new())]);
 
-        let via_document =
-            lint_document(Some("md"), source, &reg, &ProcessorConfig::default(), &rr).unwrap();
+        let via_document = lint_document(
+            Some("md"),
+            source,
+            &reg,
+            &ProcessorConfig::default(),
+            &rr,
+            None,
+        )
+        .unwrap();
 
         let ast = crate::parse(source).unwrap();
         let bytes = tzlint_ast::to_archive(&ast).unwrap();
@@ -706,6 +746,7 @@ mod tests {
             &reg,
             &ProcessorConfig::default(),
             &rr,
+            None,
         )
         .unwrap();
         assert!(
@@ -718,6 +759,7 @@ mod tests {
             &reg,
             &ProcessorConfig::default(),
             &rr_with_col,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -876,9 +918,297 @@ mod tests {
             &reg,
             &ProcessorConfig::default(),
             &rr,
+            None,
         )
         .unwrap();
         // The single TEXT node spans the slice 2..7 absolutely.
         assert_eq!(diag_spans(&diags), vec![(2, 7)]);
+    }
+
+    /// End-to-end: an injected `WhitespaceProvider` is run over the document, the per-node
+    /// `MorphologyV1` is built + archived, and a morphology rule reads its tokens via the engine.
+    #[test]
+    fn lint_document_runs_morphology_via_injected_provider() {
+        use crate::{DictId, MorphologyRegistry};
+        use tzlint_ast::morphology::Lang;
+        use tzlint_pdk::WhitespaceProvider;
+
+        struct MorphCount(RuleMeta);
+        impl Rule for MorphCount {
+            fn meta(&self) -> &RuleMeta {
+                &self.0
+            }
+            fn check<'a>(&self, node: NodeRef<'a>, cx: &mut Context<'a>) {
+                let n = cx.tokens_of(node.id()).count();
+                cx.report(node.span(), format!("{n}"));
+            }
+        }
+        let rules = RegionRules::base_only(vec![Box::new(MorphCount(
+            RuleMeta::new("morph-count", Severity::Warning, vec![NodeKind::TEXT])
+                .with_morphology(Lang::JA),
+        ))]);
+        let mut reg = MorphologyRegistry::new();
+        reg.insert(
+            Box::new(WhitespaceProvider::new(Lang::JA)),
+            DictId::from_pin([9; 32]),
+        );
+
+        let diags = lint_document(
+            Some("md"),
+            "one two\n\nthree",
+            &Registry::with_builtins(),
+            &ProcessorConfig::default(),
+            &rules,
+            Some(&reg),
+        )
+        .unwrap();
+
+        // Two TEXT leaves: "one two" → 2 whitespace tokens, "three" → 1. Sorted by span,
+        // paragraph-1's leaf (count 2) precedes paragraph-2's (count 1).
+        assert_eq!(
+            diags.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["2", "1"]
+        );
+    }
+
+    /// With no registry (or one with no active language), the morphology rule is skipped and the
+    /// document lints exactly as before — no panic, no spurious tokens.
+    #[test]
+    fn lint_document_without_registry_skips_morphology_rules() {
+        use crate::MorphologyRegistry;
+        use tzlint_ast::morphology::Lang;
+
+        struct MorphFlag(RuleMeta);
+        impl Rule for MorphFlag {
+            fn meta(&self) -> &RuleMeta {
+                &self.0
+            }
+            fn check<'a>(&self, node: NodeRef<'a>, cx: &mut Context<'a>) {
+                cx.report(node.span(), "morph");
+            }
+        }
+        let rules = RegionRules::base_only(vec![Box::new(MorphFlag(
+            RuleMeta::new("morph", Severity::Warning, vec![NodeKind::TEXT])
+                .with_morphology(Lang::JA),
+        ))]);
+        let reg = Registry::with_builtins();
+        let pcfg = ProcessorConfig::default();
+        // None registry and an empty registry both skip the morphology rule entirely.
+        let none = lint_document(Some("md"), "hi", &reg, &pcfg, &rules, None).unwrap();
+        let empty = lint_document(
+            Some("md"),
+            "hi",
+            &reg,
+            &pcfg,
+            &rules,
+            Some(&MorphologyRegistry::new()),
+        )
+        .unwrap();
+        assert!(none.is_empty(), "no registry → morphology rule skipped");
+        assert!(empty.is_empty(), "empty registry → morphology rule skipped");
+    }
+
+    /// Surfaces are absolute `Span`s into the document. A second paragraph's tokens are shifted by
+    /// that node's base offset, so resolving them against `ast.text` yields the original words —
+    /// catching a broken base offset that token counts alone would not (a 0-based offset would make
+    /// paragraph-2's first token resolve to "one t", not "three").
+    #[test]
+    fn lint_document_morphology_surfaces_are_absolute() {
+        use crate::{DictId, MorphologyRegistry};
+        use tzlint_ast::Span;
+        use tzlint_ast::morphology::Lang;
+        use tzlint_pdk::WhitespaceProvider;
+
+        struct MorphSurfaces(RuleMeta);
+        impl Rule for MorphSurfaces {
+            fn meta(&self) -> &RuleMeta {
+                &self.0
+            }
+            fn check<'a>(&self, node: NodeRef<'a>, cx: &mut Context<'a>) {
+                let resolved: Vec<(Span, String)> = {
+                    let text = cx.ast().text();
+                    cx.tokens_of(node.id())
+                        .map(|token| {
+                            let span = token.surface();
+                            let word = text
+                                .get(span.start as usize..span.end as usize)
+                                .unwrap_or("")
+                                .to_string();
+                            (span, word)
+                        })
+                        .collect()
+                };
+                for (span, word) in resolved {
+                    cx.report(span, word);
+                }
+            }
+        }
+        let rules = RegionRules::base_only(vec![Box::new(MorphSurfaces(
+            RuleMeta::new("surfaces", Severity::Warning, vec![NodeKind::TEXT])
+                .with_morphology(Lang::JA),
+        ))]);
+        let mut reg = MorphologyRegistry::new();
+        reg.insert(
+            Box::new(WhitespaceProvider::new(Lang::JA)),
+            DictId::from_pin([1; 32]),
+        );
+
+        let diags = lint_document(
+            Some("md"),
+            "one two\n\nthree",
+            &Registry::with_builtins(),
+            &ProcessorConfig::default(),
+            &rules,
+            Some(&reg),
+        )
+        .unwrap();
+        assert_eq!(
+            diags.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["one", "two", "three"]
+        );
+    }
+
+    /// A provider failure propagates as a `ParseError` (the region's lint fails loudly), never a
+    /// panic and never a silently dropped node.
+    #[test]
+    fn lint_document_propagates_provider_errors() {
+        use crate::{DictId, MorphologyRegistry};
+        use tzlint_ast::NodeId;
+        use tzlint_ast::morphology::{Lang, MorphologyV1};
+        use tzlint_pdk::{MorphologyError, MorphologyProvider};
+
+        struct FailingProvider;
+        impl MorphologyProvider for FailingProvider {
+            fn lang(&self) -> Lang {
+                Lang::JA
+            }
+            fn analyze(
+                &self,
+                _text: &str,
+                _base: u32,
+                _node: NodeId,
+            ) -> Result<MorphologyV1, MorphologyError> {
+                Err(MorphologyError::Backend("boom".into()))
+            }
+        }
+        struct NeedsJa(RuleMeta);
+        impl Rule for NeedsJa {
+            fn meta(&self) -> &RuleMeta {
+                &self.0
+            }
+            fn check<'a>(&self, _node: NodeRef<'a>, _cx: &mut Context<'a>) {}
+        }
+        let rules = RegionRules::base_only(vec![Box::new(NeedsJa(
+            RuleMeta::new("needs-ja", Severity::Warning, vec![NodeKind::TEXT])
+                .with_morphology(Lang::JA),
+        ))]);
+        let mut reg = MorphologyRegistry::new();
+        reg.insert(Box::new(FailingProvider), DictId::from_pin([2; 32]));
+
+        let err = lint_document(
+            Some("md"),
+            "hi",
+            &Registry::with_builtins(),
+            &ProcessorConfig::default(),
+            &rules,
+            Some(&reg),
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("morphology failed"),
+            "provider error must surface as a ParseError: {}",
+            err.message
+        );
+    }
+
+    /// The merge re-interns each token's reading, base form, and features into the shared pool —
+    /// not just its surface. A provider that emits a rich token must have those fields survive
+    /// `build_table` and be readable by a rule (`WhitespaceProvider` emits none, so it cannot
+    /// exercise this path).
+    #[test]
+    fn lint_document_morphology_merge_preserves_reading_and_features() {
+        use crate::{DictId, MorphologyRegistry};
+        use tzlint_ast::Span;
+        use tzlint_ast::morphology::{
+            FeatureKey, Lang, MorphologyBuilder, MorphologyV1, Tagset, TokenAttrs,
+        };
+        use tzlint_pdk::{MorphologyError, MorphologyProvider};
+
+        struct RichProvider;
+        impl MorphologyProvider for RichProvider {
+            fn lang(&self) -> Lang {
+                Lang::JA
+            }
+            fn analyze(
+                &self,
+                text: &str,
+                base: u32,
+                node: tzlint_ast::NodeId,
+            ) -> Result<MorphologyV1, MorphologyError> {
+                let mut builder = MorphologyBuilder::new();
+                builder.push_token(
+                    TokenAttrs {
+                        node,
+                        surface: Span::new(base, base + text.len() as u32),
+                        lang: Lang::JA,
+                        tagset: Tagset::IPADIC,
+                        flags: 0,
+                    },
+                    Some("ヨミ"),
+                    Some("辞書形"),
+                    &[(FeatureKey::POS, "助詞")],
+                );
+                Ok(builder.finish())
+            }
+        }
+
+        // A rule that reads back each token's reading and POS feature through the merged table.
+        struct ReadFields(RuleMeta);
+        impl Rule for ReadFields {
+            fn meta(&self) -> &RuleMeta {
+                &self.0
+            }
+            fn check<'a>(&self, node: NodeRef<'a>, cx: &mut Context<'a>) {
+                let Some(table) = cx.morphology() else {
+                    return;
+                };
+                let lines: Vec<String> = cx
+                    .tokens_of(node.id())
+                    .map(|token| {
+                        let reading = token.reading(table).unwrap_or("");
+                        let pos = token
+                            .features(table)
+                            .find(|(key, _)| *key == FeatureKey::POS)
+                            .and_then(|(_, value)| value)
+                            .unwrap_or("");
+                        format!("{reading}|{pos}")
+                    })
+                    .collect();
+                for line in lines {
+                    cx.report(node.span(), line);
+                }
+            }
+        }
+        let rules = RegionRules::base_only(vec![Box::new(ReadFields(
+            RuleMeta::new("read-fields", Severity::Warning, vec![NodeKind::TEXT])
+                .with_morphology(Lang::JA),
+        ))]);
+        let mut reg = MorphologyRegistry::new();
+        reg.insert(Box::new(RichProvider), DictId::from_pin([3; 32]));
+
+        let diags = lint_document(
+            Some("md"),
+            "あ",
+            &Registry::with_builtins(),
+            &ProcessorConfig::default(),
+            &rules,
+            Some(&reg),
+        )
+        .unwrap();
+        // The reading and POS feature survived the re-intern in `append_table`.
+        assert_eq!(
+            diags.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["ヨミ|助詞"]
+        );
     }
 }
