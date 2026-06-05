@@ -131,6 +131,22 @@ mod tests {
     }
 
     #[test]
+    fn builtin_morphology_rules_pin_a_language() {
+        // Tripwire: a rule that needs morphology must pin a language, or
+        // `RegionRules::required_langs` would silently drop it from the cache fingerprint. Vacuous
+        // until a morphology built-in lands (M2l's `no-doubled-joshi`), then a real guard.
+        for rule in builtin_rules() {
+            let meta = rule.meta();
+            assert_eq!(
+                meta.needs_morphology(),
+                meta.required_lang().is_some(),
+                "rule {} violates the morphology ⇒ pinned-language invariant",
+                meta.id.as_str(),
+            );
+        }
+    }
+
+    #[test]
     fn rules_construct_via_default() {
         // `Default` delegates to `new()`; exercise each so the delegation is covered.
         assert_eq!(

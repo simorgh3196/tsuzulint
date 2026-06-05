@@ -33,8 +33,9 @@ use rkyv::{Archive, Serialize};
 use crate::{NodeId, Span};
 
 /// The `MorphologyV1` interface version (the `requires_interfaces` lock from `abi-spec.md`).
-/// A future *additive* change that consumers must opt into bumps this; it is also folded into
-/// the document cache key so an interface change invalidates stale entries.
+/// A future *additive* change that consumers must opt into bumps this; it is also folded into the
+/// morphology fingerprint (when morphology is active) so an interface change invalidates stale
+/// cache entries for morphology-analyzed documents.
 pub const MORPHOLOGY_INTERFACE_VERSION: u32 = 1;
 
 /// An open-enum language tag, a bare `u32` like [`NodeKind`](crate::NodeKind).
