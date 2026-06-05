@@ -218,8 +218,48 @@ impl MorphologyRegistry {
         for node in nodes {
             let text = node.text();
             let base = node.span().start;
+
+            // Keep the analyzed tables alive for the duration of node's temp_tokens collection.
+            let mut tables = Vec::new();
             for (_lang, provider) in &providers {
-                append_table(&mut builder, &provider.analyze(text, base, node.id())?);
+                tables.push(provider.analyze(text, base, node.id())?);
+            }
+
+            let mut temp_tokens = Vec::new();
+            for table in &tables {
+                let pool = table.strings.as_str();
+                for token in &table.tokens {
+                    let start = (token.features_start as usize).min(table.features.len());
+                    let end = start
+                        .saturating_add(token.features_len as usize)
+                        .min(table.features.len());
+                    let features: Vec<(FeatureKey, &str)> = table.features[start..end]
+                        .iter()
+                        .filter_map(|feature| {
+                            feature.value.get(pool).map(|value| (feature.key, value))
+                        })
+                        .collect();
+                    temp_tokens.push((
+                        TokenAttrs {
+                            node: token.node,
+                            surface: token.surface,
+                            lang: token.lang,
+                            tagset: token.tagset,
+                            flags: token.flags,
+                        },
+                        token.reading.get(pool),
+                        token.base_form.get(pool),
+                        features,
+                    ));
+                }
+            }
+
+            // Sort by surface.start to preserve documented (node, surface.start) order
+            // when multiple providers are active for the same node.
+            temp_tokens.sort_by_key(|(attrs, _, _, _)| attrs.surface.start);
+
+            for (attrs, reading, base_form, features) in temp_tokens {
+                builder.push_token(attrs, reading, base_form, &features);
             }
         }
         Ok(Some(builder.finish()))
@@ -248,36 +288,6 @@ impl fmt::Debug for MorphologyRegistry {
 fn put(hasher: &mut Hasher, field: &[u8]) {
     hasher.update(&(field.len() as u64).to_le_bytes());
     hasher.update(field);
-}
-
-/// Re-push every token of `table` into `builder`, re-interning its strings and feature ranges into
-/// the shared pool. This is the only sound merge: concatenating finished tables would corrupt the
-/// pool-local `StrRef`/feature offsets. Out-of-range feature ranges are clamped (never panic),
-/// mirroring the defensive archived accessors.
-fn append_table(builder: &mut MorphologyBuilder, table: &MorphologyV1) {
-    let pool = table.strings.as_str();
-    for token in &table.tokens {
-        let start = (token.features_start as usize).min(table.features.len());
-        let end = start
-            .saturating_add(token.features_len as usize)
-            .min(table.features.len());
-        let features: Vec<(FeatureKey, &str)> = table.features[start..end]
-            .iter()
-            .filter_map(|feature| feature.value.get(pool).map(|value| (feature.key, value)))
-            .collect();
-        builder.push_token(
-            TokenAttrs {
-                node: token.node,
-                surface: token.surface,
-                lang: token.lang,
-                tagset: token.tagset,
-                flags: token.flags,
-            },
-            token.reading.get(pool),
-            token.base_form.get(pool),
-            &features,
-        );
-    }
 }
 
 #[cfg(test)]
@@ -482,5 +492,98 @@ mod tests {
                 .active_providers(&as_refs(&ja))
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn build_table_sorts_tokens_by_surface_start_when_multiple_providers_active() {
+        use tzlint_ast::morphology::{MorphologyBuilder, Tagset, TokenAttrs};
+        use tzlint_ast::{NodeId, Span};
+        use tzlint_pdk::MorphologyError;
+
+        // A mock provider that returns a token starting at `start`
+        struct StartMockProvider {
+            lang: Lang,
+            start: u32,
+        }
+        impl MorphologyProvider for StartMockProvider {
+            fn lang(&self) -> Lang {
+                self.lang
+            }
+            fn analyze(
+                &self,
+                _text: &str,
+                base: u32,
+                node: NodeId,
+            ) -> Result<MorphologyV1, MorphologyError> {
+                let mut builder = MorphologyBuilder::new();
+                builder.push_token(
+                    TokenAttrs {
+                        node,
+                        surface: Span::new(base + self.start, base + self.start + 1),
+                        lang: self.lang,
+                        tagset: Tagset::IPADIC,
+                        flags: 0,
+                    },
+                    None,
+                    None,
+                    &[],
+                );
+                Ok(builder.finish())
+            }
+        }
+
+        let mut reg = MorphologyRegistry::new();
+        // JA provider returns a token starting at base + 5
+        reg.insert(
+            Box::new(StartMockProvider {
+                lang: Lang::JA,
+                start: 5,
+            }),
+            DictId::from_pin([1; 32]),
+        );
+        // KO provider returns a token starting at base + 2
+        reg.insert(
+            Box::new(StartMockProvider {
+                lang: Lang::KO,
+                start: 2,
+            }),
+            DictId::from_pin([2; 32]),
+        );
+
+        let rule_boxes = [morph_rule("ja", Lang::JA), morph_rule("ko", Lang::KO)];
+        let rules = as_refs(&rule_boxes);
+
+        let source = "0123456789";
+        use tzlint_ast::{Node, OptionNodeId};
+        let ast = tzlint_ast::Ast {
+            nodes: vec![
+                Node {
+                    kind: NodeKind::ROOT,
+                    span: Span::new(0, 10),
+                    parent: NodeId(0),
+                    first_child: OptionNodeId::some(NodeId(1)),
+                    next_sibling: OptionNodeId::NONE,
+                },
+                Node {
+                    kind: NodeKind::TEXT,
+                    span: Span::new(0, 10),
+                    parent: NodeId(0),
+                    first_child: OptionNodeId::NONE,
+                    next_sibling: OptionNodeId::NONE,
+                },
+            ],
+            text: source.to_string(),
+            root: NodeId(0),
+        };
+        let bytes = tzlint_ast::to_archive(&ast).unwrap();
+        let archived = tzlint_ast::access(&bytes).unwrap();
+
+        let table = reg.build_table(archived, &rules).unwrap().unwrap();
+        assert_eq!(table.tokens.len(), 2);
+        // KO token (start: 2) must come before JA token (start: 5)
+        assert_eq!(table.tokens[0].lang, Lang::KO);
+        assert_eq!(table.tokens[0].surface.start, 2);
+        assert_eq!(table.tokens[1].lang, Lang::JA);
+        assert_eq!(table.tokens[1].surface.start, 5);
     }
 }

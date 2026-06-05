@@ -294,7 +294,7 @@ fn fix(
             Ok(source) => {
                 let pcfg = processor_config_for(&config, None);
                 let rr = region_rules_for(&config, None);
-                let fixed = tzlint_core::fix(None, &source, &registry, &pcfg, &rr);
+                let fixed = tzlint_core::fix(None, &source, &registry, &pcfg, &rr, None);
                 let did_change = fixed != source;
                 if dry_run {
                     if did_change {
@@ -340,7 +340,7 @@ fn fix(
         let ext = extension_of(path);
         let pcfg = processor_config_for(&config, ext);
         let rr = region_rules_for(&config, ext);
-        let fixed = tzlint_core::fix(ext, &source, &registry, &pcfg, &rr);
+        let fixed = tzlint_core::fix(ext, &source, &registry, &pcfg, &rr, None);
         if fixed == source {
             continue;
         }
