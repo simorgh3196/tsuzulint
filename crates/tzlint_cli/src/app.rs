@@ -253,7 +253,8 @@ fn lint_source(
 ) -> Result<Vec<Diagnostic>, String> {
     let pcfg = processor_config_for(config, ext);
     let rr = region_rules_for(config, ext);
-    lint_document(ext, source, registry, &pcfg, &rr).map_err(|e| e.to_string())
+    // No morphology providers are wired into the CLI yet (native backend is M2j); pass `None`.
+    lint_document(ext, source, registry, &pcfg, &rr, None).map_err(|e| e.to_string())
 }
 
 /// `fix`: lint-and-fix each file to a fixpoint; write changed files in place (or just report
@@ -293,7 +294,7 @@ fn fix(
             Ok(source) => {
                 let pcfg = processor_config_for(&config, None);
                 let rr = region_rules_for(&config, None);
-                let fixed = tzlint_core::fix(None, &source, &registry, &pcfg, &rr);
+                let fixed = tzlint_core::fix(None, &source, &registry, &pcfg, &rr, None);
                 let did_change = fixed != source;
                 if dry_run {
                     if did_change {
@@ -339,7 +340,7 @@ fn fix(
         let ext = extension_of(path);
         let pcfg = processor_config_for(&config, ext);
         let rr = region_rules_for(&config, ext);
-        let fixed = tzlint_core::fix(ext, &source, &registry, &pcfg, &rr);
+        let fixed = tzlint_core::fix(ext, &source, &registry, &pcfg, &rr, None);
         if fixed == source {
             continue;
         }

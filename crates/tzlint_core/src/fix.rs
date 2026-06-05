@@ -85,10 +85,12 @@ pub fn fix(
     registry: &crate::Registry,
     processor_cfg: &crate::ProcessorConfig,
     rules: &crate::RegionRules,
+    morphology: Option<&crate::MorphologyRegistry>,
 ) -> String {
     let mut text = source.to_string();
     for _ in 0..MAX_FIX_PASSES {
-        let Ok(diagnostics) = crate::lint_document(ext, &text, registry, processor_cfg, rules)
+        let Ok(diagnostics) =
+            crate::lint_document(ext, &text, registry, processor_cfg, rules, morphology)
         else {
             break;
         };
@@ -210,7 +212,8 @@ mod tests {
                 "BAD\n",
                 &registry,
                 &crate::ProcessorConfig::default(),
-                &rules
+                &rules,
+                None
             ),
             "ok\n"
         );
@@ -258,7 +261,7 @@ mod tests {
             }),
         };
         let rules = RegionRules::base_only(vec![Box::new(ReplaceXWithY::new())]);
-        let out = fix(Some("csv"), source, &registry, &pcfg, &rules);
+        let out = fix(Some("csv"), source, &registry, &pcfg, &rules, None);
         assert_eq!(out, "id,body\n1,y\n2,y\n");
     }
 
@@ -289,7 +292,76 @@ mod tests {
             &registry,
             &crate::ProcessorConfig::default(),
             &rules,
+            None,
         );
         assert_eq!(out, format!("a{}", "!".repeat(MAX_FIX_PASSES)));
+    }
+
+    struct ReplaceMorphToken {
+        meta: RuleMeta,
+    }
+    impl ReplaceMorphToken {
+        fn new() -> Self {
+            ReplaceMorphToken {
+                meta: RuleMeta::new("replace-morph", Severity::Warning, vec![NodeKind::TEXT])
+                    .with_morphology(tzlint_ast::morphology::Lang::JA),
+            }
+        }
+    }
+    impl Rule for ReplaceMorphToken {
+        fn meta(&self) -> &RuleMeta {
+            &self.meta
+        }
+        fn check<'ast>(&self, node: NodeRef<'ast>, cx: &mut Context<'ast>) {
+            if cx.morphology().is_some() {
+                let spans: Vec<Span> = cx
+                    .tokens_of(node.id())
+                    .filter_map(|token| {
+                        let text = cx.ast().text();
+                        let span = token.surface();
+                        let word = &text[span.start as usize..span.end as usize];
+                        if word == "one" { Some(span) } else { None }
+                    })
+                    .collect();
+                for span in spans {
+                    cx.report_with_fixes(span, "replace-one", [Fix::replace(span, "1")]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fix_runs_morphology_when_provided() {
+        use crate::{DictId, MorphologyRegistry};
+        use tzlint_ast::morphology::Lang;
+        use tzlint_pdk::WhitespaceProvider;
+
+        let registry = crate::Registry::with_builtins();
+        let rules = crate::RegionRules::base_only(vec![Box::new(ReplaceMorphToken::new())]);
+        let mut morph = MorphologyRegistry::new();
+        morph.insert(
+            Box::new(WhitespaceProvider::new(Lang::JA)),
+            DictId::from_pin([1; 32]),
+        );
+
+        let out_none = fix(
+            Some("md"),
+            "one two",
+            &registry,
+            &crate::ProcessorConfig::default(),
+            &rules,
+            None,
+        );
+        assert_eq!(out_none, "one two");
+
+        let out_some = fix(
+            Some("md"),
+            "one two",
+            &registry,
+            &crate::ProcessorConfig::default(),
+            &rules,
+            Some(&morph),
+        );
+        assert_eq!(out_some, "1 two");
     }
 }
