@@ -219,14 +219,10 @@ impl MorphologyRegistry {
             let text = node.text();
             let base = node.span().start;
 
-            // Keep the analyzed tables alive for the duration of node's temp_tokens collection.
-            let mut tables = Vec::new();
-            for (_lang, provider) in &providers {
-                tables.push(provider.analyze(text, base, node.id())?);
-            }
-
-            let mut temp_tokens = Vec::new();
-            for table in &tables {
+            if providers.len() == 1 {
+                // Fast path: only one provider active (the common case). No temp sorting buffer.
+                let (_lang, provider) = &providers[0];
+                let table = provider.analyze(text, base, node.id())?;
                 let pool = table.strings.as_str();
                 for token in &table.tokens {
                     let start = (token.features_start as usize).min(table.features.len());
@@ -239,7 +235,7 @@ impl MorphologyRegistry {
                             feature.value.get(pool).map(|value| (feature.key, value))
                         })
                         .collect();
-                    temp_tokens.push((
+                    builder.push_token(
                         TokenAttrs {
                             node: token.node,
                             surface: token.surface,
@@ -249,17 +245,53 @@ impl MorphologyRegistry {
                         },
                         token.reading.get(pool),
                         token.base_form.get(pool),
-                        features,
-                    ));
+                        &features,
+                    );
                 }
-            }
+            } else {
+                // Slow path: multiple providers are active (e.g. multi-lingual region).
+                // Collect all tokens, sort them by surface.start to preserve the documented
+                // (node, surface.start) order, and then merge.
+                let mut tables = Vec::new();
+                for (_lang, provider) in &providers {
+                    tables.push(provider.analyze(text, base, node.id())?);
+                }
 
-            // Sort by surface.start to preserve documented (node, surface.start) order
-            // when multiple providers are active for the same node.
-            temp_tokens.sort_by_key(|(attrs, _, _, _)| attrs.surface.start);
+                let mut temp_tokens = Vec::new();
+                for table in &tables {
+                    let pool = table.strings.as_str();
+                    for token in &table.tokens {
+                        let start = (token.features_start as usize).min(table.features.len());
+                        let end = start
+                            .saturating_add(token.features_len as usize)
+                            .min(table.features.len());
+                        let features: Vec<(FeatureKey, &str)> = table.features[start..end]
+                            .iter()
+                            .filter_map(|feature| {
+                                feature.value.get(pool).map(|value| (feature.key, value))
+                            })
+                            .collect();
+                        temp_tokens.push((
+                            TokenAttrs {
+                                node: token.node,
+                                surface: token.surface,
+                                lang: token.lang,
+                                tagset: token.tagset,
+                                flags: token.flags,
+                            },
+                            token.reading.get(pool),
+                            token.base_form.get(pool),
+                            features,
+                        ));
+                    }
+                }
 
-            for (attrs, reading, base_form, features) in temp_tokens {
-                builder.push_token(attrs, reading, base_form, &features);
+                // Sort by surface.start to preserve documented (node, surface.start) order.
+                temp_tokens.sort_by_key(|(attrs, _, _, _)| attrs.surface.start);
+
+                for (attrs, reading, base_form, features) in temp_tokens {
+                    builder.push_token(attrs, reading, base_form, &features);
+                }
             }
         }
         Ok(Some(builder.finish()))
