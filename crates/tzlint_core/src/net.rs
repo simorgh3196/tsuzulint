@@ -123,8 +123,8 @@ fn ipv4_is_blocked(addr: Ipv4Addr) -> bool {
 /// (`::ffff:a.b.c.d`) is re-checked through the IPv4 rules so a mapped private address cannot slip
 /// through as "just an IPv6 host".
 fn ipv6_is_blocked(addr: Ipv6Addr) -> bool {
-    if let Some(mapped) = addr.to_ipv4_mapped() {
-        return ipv4_is_blocked(mapped);
+    if addr.to_ipv4().is_some_and(ipv4_is_blocked) {
+        return true;
     }
     let segments = addr.segments();
     addr.is_loopback()        // ::1
@@ -251,6 +251,7 @@ mod tests {
             "[ff02::1]",          // multicast
             "[::ffff:127.0.0.1]", // IPv4-mapped loopback
             "[::ffff:10.0.0.1]",  // IPv4-mapped private
+            "[::127.0.0.1]",      // IPv4-compatible loopback
         ] {
             let url = format!("https://{host}/d.zst");
             assert!(
