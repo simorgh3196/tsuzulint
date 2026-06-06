@@ -19,19 +19,25 @@ pub(crate) fn diagnose(rule: &dyn Rule, source: &str) -> Vec<Diagnostic> {
 
 /// The id of the first `PARAGRAPH` node in document order — discovered at runtime (never
 /// hardcoded), so a parser renumber surfaces as a wrong/empty token set rather than silently.
+///
+/// "First" is decided by absolute byte offset ([`NodeRef::span`]`.start`), *not* by `NodeId`
+/// value: the parser numbers nodes pre-order today, so the two coincide, but selecting on the
+/// byte position keeps this helper honest to its "document order" contract even if a future
+/// renumber breaks that coincidence.
 pub(crate) fn first_paragraph_id(ast: &ArchivedAst) -> NodeId {
-    let mut best: Option<NodeId> = None;
+    let mut best: Option<(u32, NodeId)> = None;
     let mut stack: Vec<NodeRef> = NodeRef::root(ast).into_iter().collect();
     while let Some(node) = stack.pop() {
         if node.kind() == NodeKind::PARAGRAPH {
+            let start = node.span().start;
             best = Some(match best {
-                Some(id) if id.0 <= node.id().0 => id,
-                _ => node.id(),
+                Some((best_start, best_id)) if best_start <= start => (best_start, best_id),
+                _ => (start, node.id()),
             });
         }
         stack.extend(node.children());
     }
-    best.expect("test source has a paragraph")
+    best.map(|(_, id)| id).expect("test source has a paragraph")
 }
 
 /// Run a morphology-reading `rule` over `source` with a **synthetic** [`MorphologyV1`] table: the
@@ -63,4 +69,26 @@ pub(crate) fn diagnose_with_morphology(
     let mbytes = to_archive_morphology(&table).expect("archive morphology");
     let morph = access_morphology(&mbytes).expect("access morphology");
     tzlint_core::Engine::lint(archived, Some(morph), &[rule])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins [`first_paragraph_id`]'s "document order" contract: with two paragraphs it returns
+    /// the byte-first one. Under today's pre-order `NodeId` numbering a min-`NodeId` selection
+    /// would agree, so this can't *fail* against the current parser — it's a regression guard
+    /// that keeps the byte-offset selection honest if a future renumber breaks that coincidence.
+    #[test]
+    fn first_paragraph_id_picks_the_byte_first_paragraph() {
+        let ast = tzlint_core::parse("first para\n\nsecond para\n").expect("parses");
+        let bytes = tzlint_ast::to_archive(&ast).expect("archive");
+        let archived = tzlint_ast::access(&bytes).expect("access");
+
+        let pid = first_paragraph_id(archived);
+        let node = NodeRef::at(archived, pid).expect("the id resolves to a node");
+        assert_eq!(node.kind(), NodeKind::PARAGRAPH);
+        assert_eq!(node.span().start, 0, "must select the byte-first paragraph");
+        assert_eq!(node.text(), "first para");
+    }
 }
