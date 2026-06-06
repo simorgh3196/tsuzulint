@@ -11,12 +11,12 @@ use tzlint_ast::Span;
 /// namespaced as `<namespace>/<rule>` (`acme/no-weasel-words`). Ids are a public contract —
 /// greppable, stable, and used verbatim in config keys and the cache key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RuleId(String);
+pub struct RuleId(alloc::sync::Arc<str>);
 
 impl RuleId {
     /// Wrap an id string.
     pub fn new(id: impl Into<String>) -> Self {
-        RuleId(id.into())
+        RuleId(id.into().into())
     }
     /// The id as a string slice.
     pub fn as_str(&self) -> &str {
@@ -38,7 +38,7 @@ impl From<&str> for RuleId {
 
 impl From<String> for RuleId {
     fn from(s: String) -> Self {
-        RuleId(s)
+        RuleId(s.into())
     }
 }
 
