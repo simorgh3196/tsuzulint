@@ -9,8 +9,8 @@
 //! [`RULE_IDS`] is the id list (single source of truth). [`build_rule`] constructs one rule by
 //! id, applying config `options` (via the rule's `from_options`, where it has one) and an
 //! optional severity override; [`builtin_rules`] is the default-constructed full set (every id,
-//! default options, no override). Morphology-dependent rules (e.g. `no-doubled-joshi`) are
-//! deferred to M2 and are not in this crate yet.
+//! default options, no override). The morphology-dependent [`NoDoubledJoshi`] declares
+//! `with_morphology` and runs only when a Japanese morphology table is available.
 
 pub mod rules;
 mod util;
@@ -22,14 +22,14 @@ use serde_json::Value;
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
-    ja_no_mixed_period, max_kanji_continuous_len, max_ten, no_exclamation_question_mark,
-    no_hankaku_kana, no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_zero_width_spaces,
-    sentence_length,
+    ja_no_mixed_period, max_kanji_continuous_len, max_ten, no_doubled_joshi,
+    no_exclamation_question_mark, no_hankaku_kana, no_mixed_zenkaku_hankaku_alphabet, no_nfd,
+    no_todo, no_zero_width_spaces, sentence_length,
 };
 pub use rules::{
     ja_no_mixed_period::JaNoMixedPeriod, max_kanji_continuous_len::MaxKanjiContinuousLen,
-    max_ten::MaxTen, no_exclamation_question_mark::NoExclamationQuestionMark,
-    no_hankaku_kana::NoHankakuKana,
+    max_ten::MaxTen, no_doubled_joshi::NoDoubledJoshi,
+    no_exclamation_question_mark::NoExclamationQuestionMark, no_hankaku_kana::NoHankakuKana,
     no_mixed_zenkaku_hankaku_alphabet::NoMixedZenkakuHankakuAlphabet, no_nfd::NoNfd,
     no_todo::NoTodo, no_zero_width_spaces::NoZeroWidthSpaces, sentence_length::SentenceLength,
 };
@@ -47,6 +47,7 @@ pub const RULE_IDS: &[&str] = &[
     no_exclamation_question_mark::ID,
     ja_no_mixed_period::ID,
     no_todo::ID,
+    no_doubled_joshi::ID,
 ];
 
 /// Construct a single built-in rule by `id`, applying config `options` (through the rule's
@@ -69,6 +70,7 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         }
         ja_no_mixed_period::ID => Box::new(JaNoMixedPeriod::new()),
         no_todo::ID => Box::new(NoTodo::from_options(options)),
+        no_doubled_joshi::ID => Box::new(NoDoubledJoshi::from_options(options)),
         _ => return None,
     };
     Some(match severity {
@@ -180,6 +182,10 @@ mod tests {
             "ja-no-mixed-period"
         );
         assert_eq!(NoTodo::default().meta().id.as_str(), "no-todo");
+        assert_eq!(
+            NoDoubledJoshi::default().meta().id.as_str(),
+            "no-doubled-joshi"
+        );
     }
 
     #[test]
