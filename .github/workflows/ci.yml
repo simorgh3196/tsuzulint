@@ -53,7 +53,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
 
   wasm:
-    name: wasm32 build
+    name: wasm32 build + test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -88,6 +88,15 @@ jobs:
       # lean build above is what the seam-purity check guarantees stays lindera-free.
       - run: cargo build -p tzlint_wasm --target wasm32-unknown-unknown
       - run: cargo build -p tzlint_wasm --target wasm32-unknown-unknown --features morphology
+      # Building only proves the `#[wasm_bindgen]` layer type-checks; it is never executed by the
+      # native unit tests (the `bindings` module is `cfg(target_arch = "wasm32")`). Actually RUN it in
+      # a real wasm runtime (node) with wasm-bindgen-test, exercising the string/byte marshaling and
+      # the `JsError` mapping across the JS boundary. Both artifacts: lean (no tokenizer) and full
+      # (`--features morphology`, the dictionary-registration boundary). wasm-pack fetches the
+      # wasm-bindgen version matching the dependency, sidestepping runner/dep version skew.
+      - uses: taiki-e/install-action@wasm-pack
+      - run: wasm-pack test --node crates/tzlint_wasm
+      - run: wasm-pack test --node crates/tzlint_wasm --features morphology
 
   morphology-native:
     name: morphology-native

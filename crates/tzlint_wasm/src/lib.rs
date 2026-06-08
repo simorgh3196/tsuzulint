@@ -238,9 +238,61 @@ mod bindings {
                 .map_err(|e| JsError::new(&e))
         }
     }
+
+    // Run in a real wasm runtime (node) via `wasm-bindgen-test-runner` — the only place the JS-facing
+    // `TsuzuLint` is executed rather than just type-checked, so the `#[wasm_bindgen]` string/byte
+    // marshaling and the `JsError` mapping are exercised (the native `Linter` tests below never enter
+    // this `cfg(target_arch = "wasm32")` module).
+    #[cfg(test)]
+    mod tests {
+        use wasm_bindgen_test::wasm_bindgen_test;
+
+        use super::TsuzuLint;
+
+        #[wasm_bindgen_test]
+        fn new_then_lint_returns_diagnostics_json() {
+            let linter = TsuzuLint::new("").ok().unwrap();
+            // Half-width kana trips `no-hankaku-kana` under the default (all-on) rule set.
+            let json = linter.lint("ﾊﾛｰ\n").ok().unwrap();
+            assert!(json.contains("no-hankaku-kana"), "{json}");
+            assert!(json.contains("\"start\""), "{json}");
+        }
+
+        #[wasm_bindgen_test]
+        fn a_disabled_rule_does_not_fire() {
+            let linter = TsuzuLint::new(r#"{ "rules": { "no-hankaku-kana": false } }"#)
+                .ok()
+                .unwrap();
+            assert_eq!(linter.lint("ﾊﾛｰ\n").ok().unwrap(), "[]");
+        }
+
+        #[wasm_bindgen_test]
+        fn an_invalid_config_surfaces_an_error() {
+            assert!(TsuzuLint::new("{ not json").is_err());
+        }
+
+        // With the morphology backend bundled in, the dictionary-registration boundary must surface
+        // bad input as a JS error through the wasm marshaling, never panic.
+        #[cfg(feature = "morphology")]
+        #[wasm_bindgen_test]
+        fn register_dictionary_surfaces_errors_without_panicking() {
+            let mut linter = TsuzuLint::new("").ok().unwrap();
+            assert!(
+                linter
+                    .register_dictionary("ko", b"x", &"0".repeat(64))
+                    .is_err()
+            );
+            assert!(linter.register_dictionary("ja", b"x", "abc").is_err());
+            assert!(
+                linter
+                    .register_dictionary("ja", b"not a real dictionary", &"0".repeat(64))
+                    .is_err()
+            );
+        }
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

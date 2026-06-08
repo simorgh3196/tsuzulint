@@ -35,6 +35,12 @@ tzlint_morphology_native = { path = "../tzlint_morphology_native", version = "0.
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 
+# Drives the `#[wasm_bindgen]` bindings under a real wasm runtime (node) — the only place the JS-facing
+# `TsuzuLint` is actually executed rather than just type-checked. wasm-target + dev only, so neither
+# native builds nor the shipped artifact pull it. The official test companion to `wasm-bindgen`.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 [features]
 # Bundle the morphology backend so morphology-dependent rules (e.g. no-doubled-joshi) fire with the
 # same analysis as the CLI. Off by default: the lean artifact is for embedders that need no
