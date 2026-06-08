@@ -1,0 +1,4 @@
+## 2024-05-24 - Predictable Temporary File Generation
+**Vulnerability:** Predictable temporary file generation (CWE-377). The `tmp_sibling` function in `crates/tzlint_core/src/io.rs` generated temporary file names using a predictable pattern (process ID, a sequential counter, and system time), which could allow an attacker to predict the filename and create a malicious symlink or file in its place before the application uses it.
+**Learning:** We can securely generate random bytes without adding new dependencies (like `rand`) by using `std::collections::hash_map::RandomState`, which uses the OS's secure random number generator to seed the hashing algorithm.
+**Prevention:** Always use a secure, unpredictable random value when generating temporary filenames or secrets. `RandomState` is an excellent standard library tool for achieving this without adding external crate dependencies.

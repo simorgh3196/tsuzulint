@@ -179,6 +179,7 @@ pub trait Host {
 mod native {
     use super::{DirEntry, EntryKind, Host, IoError, Path};
     use std::fs::{File, OpenOptions};
+    use std::hash::{BuildHasher, Hasher};
     use std::io::{Read, Write};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -366,7 +367,11 @@ mod native {
             .file_name()
             .map(|s| s.to_os_string())
             .unwrap_or_default();
-        name.push(format!(".tzlint-tmp.{pid}.{n}.{nanos}"));
+        let random_state = std::collections::hash_map::RandomState::new();
+        let mut hasher = random_state.build_hasher();
+        hasher.write_u64(n);
+        let random_val = hasher.finish();
+        name.push(format!(".tzlint-tmp.{pid}.{n}.{nanos}.{random_val}"));
         path.with_file_name(name)
     }
 
