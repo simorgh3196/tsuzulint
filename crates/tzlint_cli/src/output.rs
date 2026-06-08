@@ -391,6 +391,47 @@ mod tests {
     }
 
     #[test]
+    fn json_contract_is_stable() {
+        // The full JSON contract the `editors/vscode/` extension parses (see docs/json-output.md).
+        // Pin every key and nesting level so an accidental shape change fails loudly. Source
+        // "あ x\n": あ = bytes 0..3, space 3, 'x' 4..5 — so the span over 'x' is at column 3.
+        let diag = Diagnostic::new("no-todo", Severity::Warning, Span::new(4, 5), "found x")
+            .with_fix(Fix::replace(Span::new(4, 5), "y"));
+        let value = render_json_value(&[report("doc.md", "あ x\n", vec![diag])]);
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "path": "doc.md",
+                    "diagnostics": [
+                        {
+                            "rule_id": "no-todo",
+                            "severity": "warning",
+                            "message": "found x",
+                            "span": { "start": 4, "end": 5 },
+                            "position": {
+                                "start": { "line": 1, "column": 3, "utf16Column": 3 },
+                                "end": { "line": 1, "column": 4, "utf16Column": 4 },
+                            },
+                            "fixes": [
+                                {
+                                    "span": { "start": 4, "end": 5 },
+                                    "position": {
+                                        "start": { "line": 1, "column": 3, "utf16Column": 3 },
+                                        "end": { "line": 1, "column": 4, "utf16Column": 4 },
+                                    },
+                                    "replacement": "y",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]),
+            "{value:#}"
+        );
+    }
+
+    #[test]
     fn json_carries_a_utf16_column_alongside_the_scalar_column() {
         // "😀" is an astral-plane char: one scalar value but two UTF-16 code units. The diagnostic
         // covers the 'x' that follows it, so the UTF-16 column runs ahead of the scalar column —
