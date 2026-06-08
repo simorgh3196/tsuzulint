@@ -20,18 +20,21 @@ Three deliberate, semver'd surfaces:
 
 ## Dictionary distribution (web)
 
-> Status: design intent (M2/M4). The code-only wasm is light (~157 KiB brotli, measured);
-> the morphology dictionary (tens of MB for Japanese) is the only real bandwidth term and is
-> delivered separately. See [`morphology.md`](morphology.md) for the dictionary model.
+> Status: the runtime-fetch model below is **shipped** for Japanese (the wasm `morphology` build
+> plus `registerDictionary`); the opt-in bundled sidecar is still design intent. The code-only
+> wasm is light (~157 KiB brotli, measured); the morphology dictionary (tens of MB for Japanese)
+> is the only real bandwidth term and is delivered separately. See [`morphology.md`](morphology.md)
+> for the dictionary model.
 
 - **Default: dictionary fetched at runtime, never embedded.** Hash-pinned, compressed,
   IndexedDB-cached, per-enabled-language. The npm/wasm artifact ships code only, so a code
   update never re-downloads the dictionary and a dictionary update never re-downloads the
   code. Rule sets that need no morphology fetch no dictionary at all.
-- **`preloadDictionary(lang) -> Promise<void>` is part of the JS surface.** A first-class
-  warm-up hook so apps can fetch the dictionary during idle/splash time rather than on the
-  first lint. Pairs with `<link rel="prefetch">` and a Service Worker precache (recommended
-  patterns, not requirements).
+- **The JS host owns the fetch, via `registerDictionary(lang, compressedBytes, pinHex)`.** wasm
+  verifies the pin and decompresses the bytes it is handed; the host fetches and caches them.
+  Because the host owns the fetch, warming up is just loading + registering during idle/splash
+  time rather than on the first lint. Pairs with `<link rel="prefetch">` and a Service Worker
+  precache (recommended patterns, not requirements).
 - **Opt-in bundled variant** (e.g. a `@tsuzulint/dict-ja-*` sidecar package, or an
   all-in-one build) for offline / air-gapped / Electron / zero-config embedders. It is an
   explicit opt-in, never the default: bundling into the main artifact would force the
