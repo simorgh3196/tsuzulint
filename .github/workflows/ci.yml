@@ -70,6 +70,22 @@ jobs:
       - run: cargo build -p tzlint_ast -p tzlint_pdk -p tzlint_core --target wasm32-unknown-unknown
       - run: cargo build -p tzlint_ast -p tzlint_pdk -p tzlint_core --target wasm32-wasip1
 
+  morphology-native:
+    name: morphology-native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+      # The native lindera backend's mapping tests need a real dictionary; they run against
+      # lindera's embedded IPADIC behind the default-off `embed-ipadic` feature (the dictionary is
+      # compiled into the test binary — no network at test time, no committed fixture). Linux-only
+      # and separate from the OS-matrix `test` job: embedding IPADIC is a heavy, host-independent
+      # build, while the host-sensitive path handling is covered by the default-feature tests in
+      # `test`. The provider crate never enters the wasm graph (see the io-guard lindera tripwire).
+      - run: cargo nextest run -p tzlint_morphology_native --features embed-ipadic
+
   io-guard:
     name: io-guard
     runs-on: ubuntu-latest
@@ -88,6 +104,14 @@ jobs:
         run: |
           ! git grep -nE '\bureq\b' -- 'crates/*/src/**.rs' \
             ':!crates/tzlint_cli/src/host.rs' || (echo "network egress (ureq) must go through CliHost::fetch in host.rs"; exit 1)
+      # The native morphology backend (lindera) must stay native-only: it lives ONLY in
+      # `tzlint_morphology_native` (cfg(not(wasm32)), depended on only by the native CLI/LSP), so it
+      # can never enter the wasm build graph. Reject `lindera` in any other crate manifest — a
+      # fast, explicit tripwire next to the (slow) wasm build that would also catch the regression.
+      - name: reject lindera outside the native morphology crate
+        run: |
+          ! git grep -nE '\blindera\b' -- 'crates/*/Cargo.toml' \
+            ':!crates/tzlint_morphology_native/Cargo.toml' || (echo "lindera must stay in tzlint_morphology_native (native-only; never in the wasm graph)"; exit 1)
       # blake3 must stay pure-Rust: without `features = ["pure"]` it builds a SIMD backend via a
       # C compiler, breaking the uniform/reproducible build and wasm32. Guard the manifest.
       - name: blake3 must keep features = ["pure"]
@@ -133,8 +157,14 @@ jobs:
       # Coverage is measured over the nextest-run tests (stable toolchain). Doctests are
       # exercised for pass/fail in the `test` job; doctest *line* coverage requires nightly
       # (`cargo llvm-cov --doctests`) and is intentionally omitted here.
+      # Accumulate two runs into one report: the default workspace tests, then the native backend's
+      # mapping tests behind `embed-ipadic` (otherwise `LinderaProvider::analyze` would read as
+      # uncovered, since the default run only exercises its error paths).
       - name: Generate coverage (lcov)
-        run: cargo llvm-cov nextest --workspace --no-tests=warn --lcov --output-path lcov.info
+        run: |
+          cargo llvm-cov nextest --workspace --no-tests=warn --no-report
+          cargo llvm-cov nextest -p tzlint_morphology_native --features embed-ipadic --no-report
+          cargo llvm-cov report --lcov --output-path lcov.info
       - name: Upload to Codecov
         uses: codecov/codecov-action@v6
         with:

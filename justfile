@@ -16,6 +16,12 @@ test:
 test-doc:
     cargo test --workspace --doc
 
+# The native lindera backend's mapping tests against embedded IPADIC (the dictionary is compiled
+# into the test binary by `embed-ipadic`; no network at test time). Default-off, so the normal
+# `test` run skips the heavy embedded-dictionary build; CI runs this in a dedicated linux job.
+test-native:
+    cargo nextest run -p tzlint_morphology_native --features embed-ipadic
+
 fmt:
     cargo fmt --all
 
