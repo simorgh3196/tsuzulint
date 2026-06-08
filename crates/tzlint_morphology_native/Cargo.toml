@@ -21,10 +21,45 @@ tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
 # the wasm-facing crates (ast/pdk/core), so cargo never resolves lindera for the `wasm32` build,
 # and the crate's `lib.rs` is `#![cfg(not(target_arch = "wasm32"))]` as a second guard. MIT.
 lindera = "3.0.7"
+# The dictionary component types + their byte-`load()`s (PrefixDictionary, ConnectionCostMatrix,
+# CharacterDefinition, UnknownDictionary, Metadata, and the `Dictionary` struct), which the
+# `lindera` meta-crate does not re-export. Needed to assemble a `Dictionary` in memory from the
+# container's component byte ranges (`from_dictionary_bytes`). Already in the graph as a transitive
+# dependency of `lindera` at this exact version; MIT.
+lindera-dictionary = "3.0.7"
+# The wasm-clean, lindera-free dictionary-container codec (`tzlint_core::dict::container`) used to
+# split the decompressed blob into component byte ranges. A native-only edge (core never depends on
+# this crate, so there is no cycle and the wasm graph is untouched).
+tzlint_core = { path = "../tzlint_core", version = "0.0.0" }
+# Packaging-only (behind the `package` feature): re-serialize a loaded dictionary's components back
+# to their on-disk byte forms when BUILDING a distributable container. `serde_json` re-emits
+# `metadata.json`; `rkyv` re-emits the `char_def.bin`/`unk.bin` archives. Both are already in the
+# graph via lindera at these versions; optional so the production provider never pulls them.
+serde_json = { version = "1", optional = true }
+rkyv = { version = "0.8", optional = true }
 
 [features]
 # Compile a dictionary INTO the binary so the provider can be exercised OFFLINE (no downloaded
 # dictionary directory, no committed fixture). Default-off and intended for tests only — the
 # production path loads a pre-built dictionary directory from a filesystem path. Enabling it pulls
-# the full IPADIC into the (test) binary, so it is never on by default.
-embed-ipadic = ["lindera/embed-ipadic"]
+# the full IPADIC into the (test) binary, so it is never on by default. It also enables `package`
+# so the round-trip tests can build a container from the embedded dictionary.
+embed-ipadic = ["lindera/embed-ipadic", "package"]
+# The dictionary-container PACKAGING side: `extract_components` (split a loaded `Dictionary` back
+# into the 8 component byte arrays) + the `pack_ipadic` example. Dev/maintainer-only; pulls the
+# re-serialization deps above. Never needed by the runtime provider (which only ever LOADS a
+# container via `from_dictionary_bytes`).
+package = ["dep:serde_json", "dep:rkyv"]
+
+# The maintainer packaging tool (build a `.dict` container from embedded IPADIC). Needs the
+# dictionary (`embed-ipadic`) and the extractor (`package`); never built by the default workspace,
+# so it stays out of default `cargo build`/clippy and the wasm graph.
+[[example]]
+name = "pack_ipadic"
+required-features = ["embed-ipadic"]
+
+[dev-dependencies]
+# The morphology rule under test (`NoDoubledJoshi`) for the end-to-end firing test: a real lindera
+# provider, wired through `tzlint_core::lint_document`, must make the rule fire. Test-only — there is
+# no production edge from this backend crate to the rules crate.
+tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }

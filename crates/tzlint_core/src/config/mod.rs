@@ -53,6 +53,36 @@ pub struct Config {
     pub rules: BTreeMap<RuleId, RuleSetting>,
     /// Per-format settings (e.g. `formats.csv`), keyed by format id. Empty by default.
     pub formats: BTreeMap<String, FormatConfig>,
+    /// Optional morphology-dictionary source. `None` (the default) means no tokenizer is wired and
+    /// morphology-dependent rules stay inert — and the document cache key is byte-identical to a
+    /// pre-morphology run. `Some` makes the CLI provision a hash-pinned dictionary and register a
+    /// provider (see [`MorphologyConfig`]).
+    pub morphology: Option<MorphologyConfig>,
+}
+
+/// A resolved morphology-dictionary source (the validated form of the config `morphology` block).
+///
+/// The CLI provisions the compressed container from [`source`](MorphologyConfig::source), verifies
+/// it against [`pin`](MorphologyConfig::pin), decompresses it in memory, and registers a provider
+/// for [`lang`](MorphologyConfig::lang).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MorphologyConfig {
+    /// Where the compressed dictionary container is obtained from.
+    pub source: DictSource,
+    /// The BLAKE3 pin over the **compressed** container — the value `provision_dictionary` verifies
+    /// and the dictionary's cache identity ([`DictId`](crate::DictId)).
+    pub pin: [u8; 32],
+    /// The language the dictionary serves (currently only `"ja"`).
+    pub lang: String,
+}
+
+/// Where a dictionary container is obtained: a local file or an https URL. Exactly one is set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DictSource {
+    /// A local path to the compressed `.dict.zst` container (resolved relative to the working dir).
+    Path(String),
+    /// An https URL to fetch the container from on a cache miss (SSRF-guarded, then pinned).
+    Url(String),
 }
 
 impl Config {
@@ -96,6 +126,12 @@ pub enum ConfigError {
         /// The offending delimiter character.
         delimiter: char,
     },
+    /// The `morphology` section did not set exactly one of `path` / `url`.
+    MorphologySource,
+    /// The `morphology.pin` is not 64 hexadecimal characters.
+    InvalidDictPin(String),
+    /// The `morphology.lang` names a language with no supported backend (only `ja` today).
+    UnsupportedMorphologyLang(String),
 }
 
 impl fmt::Display for ConfigError {
@@ -124,6 +160,21 @@ impl fmt::Display for ConfigError {
                 write!(
                     f,
                     "delimiter '{delimiter}' in format '{format}' is not ASCII (only single-byte delimiters are supported)"
+                )
+            }
+            ConfigError::MorphologySource => {
+                write!(f, "`morphology` requires exactly one of `path` or `url`")
+            }
+            ConfigError::InvalidDictPin(pin) => {
+                write!(
+                    f,
+                    "`morphology.pin` must be 64 hexadecimal characters: `{pin}`"
+                )
+            }
+            ConfigError::UnsupportedMorphologyLang(lang) => {
+                write!(
+                    f,
+                    "unsupported `morphology.lang` `{lang}` (only `ja` is supported)"
                 )
             }
         }

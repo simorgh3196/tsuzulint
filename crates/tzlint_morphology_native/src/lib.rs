@@ -14,10 +14,17 @@ use lindera::dictionary::load_dictionary;
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::tokenizer::Tokenizer;
+use lindera_dictionary::dictionary::Dictionary;
+use lindera_dictionary::dictionary::character_definition::CharacterDefinition;
+use lindera_dictionary::dictionary::connection_cost_matrix::ConnectionCostMatrix;
+use lindera_dictionary::dictionary::metadata::Metadata;
+use lindera_dictionary::dictionary::prefix_dictionary::PrefixDictionary;
+use lindera_dictionary::dictionary::unknown_dictionary::UnknownDictionary;
 use tzlint_ast::morphology::{
     FeatureKey, Lang, MorphologyBuilder, MorphologyV1, Tagset, Token, TokenAttrs,
 };
 use tzlint_ast::{NodeId, Span};
+use tzlint_core::dict::container;
 use tzlint_pdk::{MorphologyError, MorphologyProvider};
 
 /// A Japanese [`MorphologyProvider`] backed by lindera + an IPADIC dictionary.
@@ -61,16 +68,161 @@ impl LinderaProvider {
         Self::build("embedded://ipadic")
     }
 
-    /// Shared constructor tail: load the dictionary `uri`, wrap it in a normal-mode segmenter, and
-    /// build the immutable tokenizer. Every lindera error becomes a [`MorphologyError::Backend`].
+    /// Build a provider from a single in-memory dictionary **container** blob — the decompressed
+    /// content of the `.dict.zst` that
+    /// [`provision_dictionary`](tzlint_core::provision_dictionary) returns.
+    ///
+    /// The blob carries the dictionary's component files bundled by
+    /// [`tzlint_core::dict::container`]; this splits them back apart **in memory** (no filesystem,
+    /// no temp directory) and assembles a lindera [`Dictionary`] from the component byte ranges —
+    /// the same shape lindera's own embedded loader uses. It is the representation a host without a
+    /// filesystem (a browser/wasm embedder) can also produce, which `new` (a directory path) can
+    /// not.
+    ///
+    /// The container is treated as untrusted: a malformed blob — bad framing, or a connection-cost
+    /// matrix whose byte length would make lindera's loader panic — is a [`MorphologyError::Backend`],
+    /// never a panic.
+    pub fn from_dictionary_bytes(container: &[u8]) -> Result<Self, MorphologyError> {
+        let c = container::parse(container)
+            .map_err(|e| MorphologyError::Backend(format!("dictionary container: {e}")))?;
+
+        // Guard the connection-cost matrix BEFORE handing it to lindera. `ConnectionCostMatrix::load`
+        // computes `len/2 - 3` `i16`s and feeds `&data[6..]` to `byteorder::read_i16_into`, which
+        // PANICS unless `src.len() == 2 * dst.len()` — i.e. it panics on an odd-length matrix — and
+        // its old-format branch indexes by attacker-declared sizes. Our packaging always emits the
+        // "new" transposed format (leading `i16 == -1`, so bytes `FF FF`) with an even length, which
+        // takes the panic-free new-format path; require exactly that shape and reject anything else
+        // as a corrupt container rather than risk an abort.
+        let matrix = c.connection_matrix();
+        let new_format_matrix = matrix.len() >= 6
+            && matrix.len() % 2 == 0
+            && matrix.first() == Some(&0xFF)
+            && matrix.get(1) == Some(&0xFF);
+        if !new_format_matrix {
+            return Err(MorphologyError::Backend(
+                "dictionary container: connection matrix is not a valid new-format matrix.mtx"
+                    .to_string(),
+            ));
+        }
+
+        // Assemble the Dictionary exactly as lindera's embedded loader does (component load order,
+        // `is_system = true` for a system dictionary). The four prefix-dictionary blobs need owned
+        // `Vec<u8>` (lindera's `Data` has no `From<&[u8]>` for a borrowed slice); the rkyv/JSON
+        // members take a borrowed `&[u8]` and copy internally.
+        let metadata = Metadata::load(c.metadata())
+            .map_err(|e| MorphologyError::Backend(format!("dictionary metadata: {e}")))?;
+        let prefix_dictionary = PrefixDictionary::load(
+            c.prefix_da().to_vec(),
+            c.prefix_vals().to_vec(),
+            c.prefix_words_idx().to_vec(),
+            c.prefix_words().to_vec(),
+            // `is_system = true`: a system dictionary. `false` is for user dictionaries and would
+            // silently corrupt the value (offset, count) bit-packing.
+            true,
+        )
+        .map_err(|e| MorphologyError::Backend(format!("prefix dictionary: {e}")))?;
+        let connection_cost_matrix = ConnectionCostMatrix::load(matrix.to_vec())
+            .map_err(|e| MorphologyError::Backend(format!("connection matrix: {e}")))?;
+        let character_definition = CharacterDefinition::load(c.char_def())
+            .map_err(|e| MorphologyError::Backend(format!("character definition: {e}")))?;
+        let unknown_dictionary = UnknownDictionary::load(c.unknown())
+            .map_err(|e| MorphologyError::Backend(format!("unknown dictionary: {e}")))?;
+
+        let dictionary = Dictionary {
+            prefix_dictionary,
+            connection_cost_matrix,
+            character_definition,
+            unknown_dictionary,
+            metadata,
+        };
+        Ok(Self::from_dictionary(dictionary))
+    }
+
+    /// Shared constructor tail: load the dictionary `uri`, then hand off to
+    /// [`from_dictionary`](Self::from_dictionary). Every lindera error becomes a
+    /// [`MorphologyError::Backend`].
     fn build(uri: &str) -> Result<Self, MorphologyError> {
         let dictionary =
             load_dictionary(uri).map_err(|e| MorphologyError::Backend(e.to_string()))?;
-        let segmenter = Segmenter::new(Mode::Normal, dictionary, None);
-        Ok(LinderaProvider {
-            tokenizer: Tokenizer::new(segmenter),
-        })
+        Ok(Self::from_dictionary(dictionary))
     }
+
+    /// Wrap an already-loaded lindera [`Dictionary`] in a normal-mode segmenter and the immutable
+    /// tokenizer. The single convergence point for every constructor — a directory
+    /// ([`new`](Self::new)), the embedded IPADIC
+    /// ([`with_embedded_ipadic`](Self::with_embedded_ipadic)), and an in-memory container
+    /// ([`from_dictionary_bytes`](Self::from_dictionary_bytes)) — so [`analyze`](Self::analyze)
+    /// behaves identically no matter how the dictionary was obtained.
+    fn from_dictionary(dictionary: Dictionary) -> Self {
+        let segmenter = Segmenter::new(Mode::Normal, dictionary, None);
+        LinderaProvider {
+            tokenizer: Tokenizer::new(segmenter),
+        }
+    }
+}
+
+/// Split a loaded lindera [`Dictionary`] back into the 8 component byte arrays, in
+/// [`container::Member`] order — the inverse of the assembly in
+/// [`from_dictionary_bytes`](LinderaProvider::from_dictionary_bytes).
+///
+/// This is the **packaging** side: feed the result to [`container::encode`] to build a
+/// distributable container blob (then zstd-compress + hash-pin it). Dev/maintainer-only (behind the
+/// `package` feature); the runtime provider never re-serializes a dictionary.
+///
+/// `dict.vals`/`dict.wordsidx`/`dict.words` round-trip verbatim and `dict.da` is re-`serialize()`d
+/// byte-faithfully by daachorse. The two rkyv archives (`char_def.bin`/`unk.bin`) and
+/// `metadata.json` are re-serialized to value-equal bytes, and the connection matrix — which lindera
+/// keeps only as a parsed `i16` grid — is re-encoded into the "new" `matrix.mtx` format. A
+/// load → extract → load round-trip is therefore **value-exact** (proven by the `embed-ipadic`
+/// round-trip test), even where the bytes are not identical to the original files.
+///
+/// # Errors
+///
+/// [`MorphologyError::Backend`] if re-serializing `metadata.json` or an rkyv archive fails.
+#[cfg(feature = "package")]
+pub fn extract_components(
+    dict: &Dictionary,
+) -> Result<[Vec<u8>; container::MEMBER_COUNT], MorphologyError> {
+    let metadata = serde_json::to_vec(&dict.metadata)
+        .map_err(|e| MorphologyError::Backend(format!("packaging metadata.json: {e}")))?;
+    let da = dict.prefix_dictionary.da.serialize();
+    let vals = (*dict.prefix_dictionary.vals_data).to_vec();
+    let words_idx = (*dict.prefix_dictionary.words_idx_data).to_vec();
+    let words = (*dict.prefix_dictionary.words_data).to_vec();
+    let matrix = encode_connection_matrix(&dict.connection_cost_matrix);
+    let char_def = rkyv::to_bytes::<rkyv::rancor::Error>(&dict.character_definition)
+        .map_err(|e| MorphologyError::Backend(format!("packaging char_def.bin: {e}")))?
+        .to_vec();
+    let unk = rkyv::to_bytes::<rkyv::rancor::Error>(&dict.unknown_dictionary)
+        .map_err(|e| MorphologyError::Backend(format!("packaging unk.bin: {e}")))?
+        .to_vec();
+
+    let mut out: [Vec<u8>; container::MEMBER_COUNT] = std::array::from_fn(|_| Vec::new());
+    out[container::Member::Metadata as usize] = metadata;
+    out[container::Member::PrefixDa as usize] = da;
+    out[container::Member::PrefixVals as usize] = vals;
+    out[container::Member::PrefixWordsIdx as usize] = words_idx;
+    out[container::Member::PrefixWords as usize] = words;
+    out[container::Member::ConnectionMatrix as usize] = matrix;
+    out[container::Member::CharDef as usize] = char_def;
+    out[container::Member::Unknown as usize] = unk;
+    Ok(out)
+}
+
+/// Re-encode lindera's parsed connection-cost grid into a "new"-format `matrix.mtx` byte blob:
+/// little-endian `i16` `[-1, forward_size, backward_size]` followed by the cost grid. Always an even
+/// length beginning `FF FF` — the shape
+/// [`from_dictionary_bytes`](LinderaProvider::from_dictionary_bytes) requires.
+#[cfg(feature = "package")]
+fn encode_connection_matrix(matrix: &ConnectionCostMatrix) -> Vec<u8> {
+    let mut out = Vec::with_capacity(6 + matrix.costs_data.len() * 2);
+    out.extend_from_slice(&(-1i16).to_le_bytes());
+    out.extend_from_slice(&(matrix.forward_size as i16).to_le_bytes());
+    out.extend_from_slice(&(matrix.backward_size as i16).to_le_bytes());
+    for &cost in &matrix.costs_data {
+        out.extend_from_slice(&cost.to_le_bytes());
+    }
+    out
 }
 
 /// The lindera/IPADIC `details()` column index of each canonical [`FeatureKey`]. `base_form`
@@ -207,11 +359,139 @@ mod tests {
         assert!(matches!(err, MorphologyError::Backend(_)), "{err}");
     }
 
+    /// Arbitrary bytes are not a dictionary container: a clean `Backend` error, never a panic. (No
+    /// real dictionary needed — this fails at the container parse, before any lindera load.)
+    #[test]
+    fn from_dictionary_bytes_rejects_non_container_bytes() {
+        let err = LinderaProvider::from_dictionary_bytes(b"definitely not a dictionary container")
+            .unwrap_err();
+        assert!(matches!(err, MorphologyError::Backend(_)), "{err}");
+    }
+
+    /// A structurally valid container whose connection-matrix member has an odd length — the exact
+    /// shape that makes lindera's `ConnectionCostMatrix::load` panic via `read_i16_into`. The
+    /// bridge's matrix guard must turn it into a clean `Backend` error, never an abort. The guard
+    /// runs before any lindera load, so the other members can be empty placeholders.
+    #[test]
+    fn from_dictionary_bytes_rejects_a_bad_matrix_without_panicking() {
+        let members: [Vec<u8>; container::MEMBER_COUNT] = std::array::from_fn(|i| {
+            if i == container::Member::ConnectionMatrix as usize {
+                vec![0xFF, 0xFF, 0x00] // odd length: would panic read_i16_into without the guard
+            } else {
+                Vec::new()
+            }
+        });
+        let refs: [&[u8]; container::MEMBER_COUNT] = std::array::from_fn(|i| members[i].as_slice());
+        let blob = container::encode(&refs).expect("encodes");
+        let err = LinderaProvider::from_dictionary_bytes(&blob).unwrap_err();
+        assert!(matches!(err, MorphologyError::Backend(_)), "{err}");
+        assert!(err.to_string().contains("connection matrix"), "{err}");
+    }
+
     // The mapping tests need a real tokenizer; they run against lindera's embedded IPADIC, compiled
     // into the test binary by the `embed-ipadic` feature (no network, no committed fixture).
     #[cfg(feature = "embed-ipadic")]
     fn ja() -> LinderaProvider {
         LinderaProvider::with_embedded_ipadic().expect("embedded IPADIC loads")
+    }
+
+    /// The headline proof that the in-memory container bridge WORKS on a real dictionary: pack the
+    /// embedded IPADIC into a container, rehydrate a provider from it via `from_dictionary_bytes`,
+    /// and assert it tokenizes real Japanese **byte-for-byte identically** to the embedded reference.
+    /// Equal token streams (surfaces, features, readings) prove the round-trip is value-exact —
+    /// including the re-encoded connection-cost matrix and the `is_system = true` bit-packing, the
+    /// two places a packaging bug would silently corrupt segmentation.
+    #[cfg(feature = "embed-ipadic")]
+    #[test]
+    fn from_dictionary_bytes_round_trips_embedded_ipadic_and_tokenizes_identically() {
+        let dict = load_dictionary("embedded://ipadic").expect("embedded IPADIC loads");
+        let components = extract_components(&dict).expect("extract components");
+        let refs: [&[u8]; container::MEMBER_COUNT] =
+            std::array::from_fn(|i| components[i].as_slice());
+        let blob = container::encode(&refs).expect("encode container");
+
+        let rehydrated =
+            LinderaProvider::from_dictionary_bytes(&blob).expect("rehydrate from container");
+        let reference = ja();
+
+        for text in [
+            "関西国際空港限定トートバッグ",
+            "すもももももももものうち",
+            "本を読む",
+            "私は彼は来た",
+        ] {
+            let from_container = rehydrated
+                .analyze(text, 0, NodeId(0))
+                .expect("rehydrated analyze");
+            let from_embedded = reference
+                .analyze(text, 0, NodeId(0))
+                .expect("reference analyze");
+            assert!(!from_container.tokens.is_empty(), "no tokens for {text:?}");
+            // Byte-for-byte equality of the whole MorphologyV1 (tokens + features + interned
+            // strings) — the strongest equivalence, and it localizes any matrix/packing regression.
+            let a = to_archive_morphology(&from_container).expect("archive rehydrated");
+            let b = to_archive_morphology(&from_embedded).expect("archive reference");
+            // `AlignedVec` has no `PartialEq`; compare the archived bytes directly (Deref to [u8]).
+            assert_eq!(&a[..], &b[..], "token streams differ for {text:?}");
+        }
+    }
+
+    /// The matrix guard's panic-prevention, on a REAL dictionary: valid metadata/prefix members but
+    /// a connection-matrix member truncated to an odd length — the exact shape that makes lindera's
+    /// `ConnectionCostMatrix::load` panic in `read_i16_into`. The guard must turn it into a clean
+    /// `Backend` error. (Removing the guard makes this test abort instead of asserting, so it pins
+    /// the guard's necessity against the real loader.)
+    #[cfg(feature = "embed-ipadic")]
+    #[test]
+    fn from_dictionary_bytes_rejects_a_corrupt_real_matrix_without_panicking() {
+        let dict = load_dictionary("embedded://ipadic").expect("embedded IPADIC loads");
+        let mut components = extract_components(&dict).expect("extract components");
+        components[container::Member::ConnectionMatrix as usize].pop(); // → odd length
+        let refs: [&[u8]; container::MEMBER_COUNT] =
+            std::array::from_fn(|i| components[i].as_slice());
+        let blob = container::encode(&refs).expect("encode container");
+        let err = LinderaProvider::from_dictionary_bytes(&blob).unwrap_err();
+        assert!(matches!(err, MorphologyError::Backend(_)), "{err}");
+        assert!(err.to_string().contains("connection matrix"), "{err}");
+    }
+
+    /// The end-to-end firing proof through the engine: a REAL lindera provider, wired into a
+    /// [`MorphologyRegistry`] and run through `tzlint_core::lint_document`, makes the
+    /// `no-doubled-joshi` morphology rule FIRE on real Japanese — and a run with no provider leaves
+    /// it inert. This closes the loop the rest of the suite proves piecewise (the bridge tokenizes;
+    /// the analysis pass builds the table; the rule reads it).
+    #[cfg(feature = "embed-ipadic")]
+    #[test]
+    fn no_doubled_joshi_fires_through_lint_document_with_a_real_provider() {
+        use tzlint_core::{
+            DictId, MorphologyRegistry, ProcessorConfig, RegionRules, Registry, lint_document,
+        };
+        use tzlint_rules::NoDoubledJoshi;
+
+        // A paragraph repeating the particle は in one sentence — the canonical doubled-joshi case.
+        let source = "私は彼は本を読む。\n";
+        let rules = RegionRules::base_only(vec![Box::new(NoDoubledJoshi::default())]);
+        let fires = |morphology: Option<&MorphologyRegistry>| {
+            lint_document(
+                Some("md"),
+                source,
+                &Registry::with_builtins(),
+                &ProcessorConfig::default(),
+                &rules,
+                morphology,
+            )
+            .expect("lint_document")
+            .iter()
+            .any(|d| d.rule_id.as_str() == "no-doubled-joshi")
+        };
+
+        let mut reg = MorphologyRegistry::new();
+        reg.insert(Box::new(ja()), DictId::from_pin([7; 32]));
+        assert!(fires(Some(&reg)), "rule must fire with a real JA provider");
+        assert!(
+            !fires(None),
+            "rule must stay inert without a morphology provider"
+        );
     }
 
     #[cfg(feature = "embed-ipadic")]

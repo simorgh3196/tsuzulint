@@ -266,6 +266,55 @@ const CORPUS: &[(&str, &str, Mode)] = &[
         r#"{"formats":{"csv":{"header":true,"columns":{"body":{"rules":{"r":{"severity":"fatal"}}}}}}}"#,
         Mode::Reject,
     ),
+    // `morphology`: a hash-pinned dictionary source. All validations here are schema-expressible
+    // (the pin pattern, the exactly-one-of-path/url `oneOf`, the lang enum, required pin,
+    // additionalProperties:false), so every fixture is strict schema⇔loader parity. A 64-zero pin
+    // is valid hex.
+    (
+        "morphology path source",
+        r#"{"morphology":{"path":"dict/ja.dict.zst","pin":"0000000000000000000000000000000000000000000000000000000000000000"}}"#,
+        Mode::Accept,
+    ),
+    (
+        "morphology url source with explicit ja",
+        r#"{"morphology":{"url":"https://example.com/ja.dict.zst","pin":"0000000000000000000000000000000000000000000000000000000000000000","lang":"ja"}}"#,
+        Mode::Accept,
+    ),
+    (
+        "morphology pin too short",
+        r#"{"morphology":{"path":"d.zst","pin":"abc"}}"#,
+        Mode::Reject,
+    ),
+    (
+        "morphology pin non-hex",
+        r#"{"morphology":{"path":"d.zst","pin":"g000000000000000000000000000000000000000000000000000000000000000"}}"#,
+        Mode::Reject,
+    ),
+    (
+        "morphology both path and url",
+        r#"{"morphology":{"path":"d.zst","url":"https://x/d.zst","pin":"0000000000000000000000000000000000000000000000000000000000000000"}}"#,
+        Mode::Reject,
+    ),
+    (
+        "morphology neither path nor url",
+        r#"{"morphology":{"pin":"0000000000000000000000000000000000000000000000000000000000000000"}}"#,
+        Mode::Reject,
+    ),
+    (
+        "morphology missing pin",
+        r#"{"morphology":{"path":"d.zst"}}"#,
+        Mode::Reject,
+    ),
+    (
+        "morphology unsupported lang",
+        r#"{"morphology":{"path":"d.zst","pin":"0000000000000000000000000000000000000000000000000000000000000000","lang":"ko"}}"#,
+        Mode::Reject,
+    ),
+    (
+        "morphology unknown key",
+        r#"{"morphology":{"path":"d.zst","pin":"0000000000000000000000000000000000000000000000000000000000000000","zstd":true}}"#,
+        Mode::Reject,
+    ),
 ];
 
 fn validator() -> Validator {

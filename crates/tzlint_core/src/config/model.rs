@@ -14,7 +14,7 @@ use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde_json::Value;
 use tzlint_pdk::{RuleId, Severity};
 
-use super::{Config, ConfigError};
+use super::{Config, ConfigError, DictSource, MorphologyConfig};
 
 /// The on-disk config shape. Kebab-case keys, no unknown keys.
 #[derive(Debug, Deserialize)]
@@ -38,6 +38,77 @@ pub(super) struct RawConfig {
     /// under `header: false` is rejected in [`into_config`](RawConfig::into_config).
     #[serde(default)]
     formats: std::collections::BTreeMap<String, RawFormat>,
+    /// Optional morphology-dictionary source for morphology-dependent rules (e.g.
+    /// `no-doubled-joshi`). Absent (the default) means no tokenizer is wired and those rules stay
+    /// inert. Resolved + validated into [`Config::morphology`](super::Config::morphology).
+    #[serde(default)]
+    morphology: Option<RawMorphology>,
+}
+
+/// The on-disk shape of the `morphology` section. Exactly one of `path`/`url` must be set, and
+/// `pin` is the 64-hex BLAKE3 over the COMPRESSED container; both are validated in
+/// [`resolve`](RawMorphology::resolve).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct RawMorphology {
+    /// A local path to the compressed `.dict.zst` container.
+    #[serde(default)]
+    path: Option<String>,
+    /// An https URL to fetch the compressed container from (SSRF-guarded).
+    #[serde(default)]
+    url: Option<String>,
+    /// 64 hex characters: the BLAKE3 pin over the compressed container.
+    pin: String,
+    /// The language this dictionary serves; defaults to `"ja"` (the only one supported today).
+    #[serde(default)]
+    lang: Option<String>,
+}
+
+impl RawMorphology {
+    /// Validate the raw section into a resolved [`MorphologyConfig`](super::MorphologyConfig):
+    /// exactly one source, a 64-hex pin decoded to 32 bytes, and a supported language.
+    fn resolve(self) -> Result<MorphologyConfig, ConfigError> {
+        let source = match (self.path, self.url) {
+            (Some(path), None) => DictSource::Path(path),
+            (None, Some(url)) => DictSource::Url(url),
+            _ => return Err(ConfigError::MorphologySource),
+        };
+        let pin = decode_pin(&self.pin)?;
+        let lang = self.lang.unwrap_or_else(|| "ja".to_string());
+        if lang != "ja" {
+            return Err(ConfigError::UnsupportedMorphologyLang(lang));
+        }
+        Ok(MorphologyConfig { source, pin, lang })
+    }
+}
+
+/// Decode a 64-character hex string into a 32-byte pin, panic-free. A wrong length or a non-hex
+/// character is a [`ConfigError::InvalidDictPin`].
+fn decode_pin(hex: &str) -> Result<[u8; 32], ConfigError> {
+    let bytes = hex.as_bytes();
+    if bytes.len() != 64 {
+        return Err(ConfigError::InvalidDictPin(hex.to_string()));
+    }
+    let mut out = [0u8; 32];
+    for (i, slot) in out.iter_mut().enumerate() {
+        // `bytes.len() == 64` and `i < 32`, so `i*2 + 1 <= 63` — both indexes are in bounds.
+        let hi =
+            hex_nibble(bytes[i * 2]).ok_or_else(|| ConfigError::InvalidDictPin(hex.to_string()))?;
+        let lo = hex_nibble(bytes[i * 2 + 1])
+            .ok_or_else(|| ConfigError::InvalidDictPin(hex.to_string()))?;
+        *slot = (hi << 4) | lo;
+    }
+    Ok(out)
+}
+
+/// The numeric value of one hex digit (`0-9`, `a-f`, `A-F`), or `None`.
+fn hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// The on-disk shape of one `formats.<id>` section.
@@ -183,6 +254,9 @@ impl RawConfig {
             .fold(user, |acc, preset| super::resolve(Some(preset), acc));
         // Attach the resolved formats to the FINAL folded config (formats are not preset-layered).
         result.formats = formats;
+        // Likewise the morphology source: it is this file's own setting (presets never supply one),
+        // validated here (exactly one source, a well-formed pin, a supported language).
+        result.morphology = self.morphology.map(RawMorphology::resolve).transpose()?;
         Ok(result)
     }
 }
@@ -458,6 +532,124 @@ mod tests {
             config.rules.get(&RuleId::from("sentence-length")),
             Some(&RuleSetting::Off)
         );
+    }
+
+    /// A 64-character hex pin used across the morphology tests; decodes to bytes `01 23 45 … ef`.
+    const PIN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn morphology(json: &str) -> Result<Config, ConfigError> {
+        serde_json::from_str::<RawConfig>(json)
+            .expect("valid JSON shape")
+            .into_config()
+    }
+
+    #[test]
+    fn morphology_parses_a_local_path_and_decodes_the_pin() {
+        let m = morphology(&format!(
+            r#"{{ "morphology": {{ "path": "dict/ja.dict.zst", "pin": "{PIN}" }} }}"#
+        ))
+        .unwrap()
+        .morphology
+        .expect("morphology present");
+        assert_eq!(m.source, DictSource::Path("dict/ja.dict.zst".to_string()));
+        assert_eq!(m.lang, "ja"); // defaults to ja
+        assert_eq!(m.pin[0], 0x01);
+        assert_eq!(m.pin[31], 0xef);
+    }
+
+    #[test]
+    fn morphology_parses_a_url_source() {
+        let m = morphology(&format!(
+            r#"{{ "morphology": {{ "url": "https://example.com/ja.dict.zst", "pin": "{PIN}", "lang": "ja" }} }}"#
+        ))
+        .unwrap()
+        .morphology
+        .expect("morphology present");
+        assert_eq!(
+            m.source,
+            DictSource::Url("https://example.com/ja.dict.zst".to_string())
+        );
+    }
+
+    #[test]
+    fn morphology_rejects_an_ill_formed_pin() {
+        // Too short.
+        let err = morphology(r#"{ "morphology": { "path": "d.zst", "pin": "abc" } }"#).unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidDictPin(_)), "{err}");
+        // Right length, non-hex character ('g').
+        let bad = format!("g{}", &PIN[1..]);
+        let err = morphology(&format!(
+            r#"{{ "morphology": {{ "path": "d.zst", "pin": "{bad}" }} }}"#
+        ))
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidDictPin(_)), "{err}");
+    }
+
+    #[test]
+    fn morphology_rejects_both_or_neither_source() {
+        let both = morphology(&format!(
+            r#"{{ "morphology": {{ "path": "d.zst", "url": "https://x/d.zst", "pin": "{PIN}" }} }}"#
+        ))
+        .unwrap_err();
+        assert!(matches!(both, ConfigError::MorphologySource), "{both}");
+        let neither =
+            morphology(&format!(r#"{{ "morphology": {{ "pin": "{PIN}" }} }}"#)).unwrap_err();
+        assert!(
+            matches!(neither, ConfigError::MorphologySource),
+            "{neither}"
+        );
+    }
+
+    #[test]
+    fn morphology_rejects_an_unsupported_language() {
+        let err = morphology(&format!(
+            r#"{{ "morphology": {{ "path": "d.zst", "pin": "{PIN}", "lang": "ko" }} }}"#
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, ConfigError::UnsupportedMorphologyLang(ref l) if l == "ko"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn config_without_morphology_resolves_to_none() {
+        // The load-bearing invariant: no `morphology` key ⇒ `None` ⇒ an empty registry ⇒ a
+        // byte-identical pre-morphology cache key.
+        assert!(
+            morphology(r#"{ "rules": {} }"#)
+                .unwrap()
+                .morphology
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn morphology_config_errors_render_their_messages() {
+        assert!(
+            ConfigError::MorphologySource
+                .to_string()
+                .contains("exactly one")
+        );
+        assert!(
+            ConfigError::InvalidDictPin("abc".to_string())
+                .to_string()
+                .contains("64 hexadecimal")
+        );
+        assert!(
+            ConfigError::UnsupportedMorphologyLang("ko".to_string())
+                .to_string()
+                .contains("ko")
+        );
+    }
+
+    #[test]
+    fn morphology_rejects_unknown_keys() {
+        // `deny_unknown_fields` guards the section against typos.
+        let err = serde_json::from_str::<RawConfig>(&format!(
+            r#"{{ "morphology": {{ "path": "d.zst", "pin": "{PIN}", "compress": true }} }}"#
+        ));
+        assert!(err.is_err(), "unknown morphology key must be rejected");
     }
 
     #[test]

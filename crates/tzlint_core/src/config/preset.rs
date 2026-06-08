@@ -107,6 +107,8 @@ pub fn resolve(preset: Option<Preset>, user: Config) -> Config {
         rules: merge(base, user.rules),
         // Formats are not preset-layered; layering preserves the user's resolved formats.
         formats: user.formats,
+        // Morphology is likewise the user's own setting; presets never supply one.
+        morphology: user.morphology,
     }
 }
 

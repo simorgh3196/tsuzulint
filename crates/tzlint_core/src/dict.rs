@@ -16,6 +16,10 @@
 //! property the dictionary-version tests rely on); an old pre-M2m cache that stored *decompressed*
 //! bytes simply fails the pin re-check and is transparently re-provisioned once.
 
+/// The in-memory dictionary container codec: split a decompressed dictionary blob into its
+/// component byte ranges (backend-agnostic, `wasm32`-clean, panic-free on untrusted bytes).
+pub mod container;
+
 use std::io::Read;
 use std::path::Path;
 

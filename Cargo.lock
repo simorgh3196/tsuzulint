@@ -2279,6 +2279,7 @@ dependencies = [
  "serde_json",
  "tzlint_ast",
  "tzlint_core",
+ "tzlint_morphology_native",
  "tzlint_pdk",
  "tzlint_rules",
  "ureq",
@@ -2312,8 +2313,13 @@ name = "tzlint_morphology_native"
 version = "0.0.0"
 dependencies = [
  "lindera",
+ "lindera-dictionary",
+ "rkyv",
+ "serde_json",
  "tzlint_ast",
+ "tzlint_core",
  "tzlint_pdk",
+ "tzlint_rules",
 ]
 
 [[package]]
