@@ -1,0 +1,44 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+While the project is in `0.x`, the public API and rule behavior may change between
+minor releases.
+
+## [0.1.0] - Unreleased
+
+The first public release: a fast, embeddable Japanese prose linter — the Rust
+counterpart to `textlint`. The release date is set when 0.1.0 is cut; entries below
+accumulate as the release is built.
+
+### Added
+
+- **Lean core (`tzlint_core`).** A `markdown-rs` parser with an mdast → index-AST
+  transform over the frozen `AstCoreV1` (rkyv) layout, a single-traversal lint engine
+  with a stable `(span.start, span.end, rule_id, message)` diagnostic order, a
+  document-level in-memory cache keyed by every input that can change a result, a
+  multi-format configuration loader (TOML / JSON / YAML) with presets, a byte-offset →
+  line/column position mapper, and an `io` / `Host` boundary that routes all filesystem
+  and network access through a single abstraction.
+- **Diagnostic and fix model.** A `Diagnostic` / `Fix` model with a convergent
+  autofix engine.
+- **Starter rules (`tzlint_rules`).** Eleven rules: `no-hankaku-kana`,
+  `no-mixed-zenkaku-hankaku-alphabet`, `no-nfd`, `no-zero-width-spaces`,
+  `ja-no-mixed-period`, `no-exclamation-question-mark`, `no-todo`, `sentence-length`,
+  `max-ten`, `max-kanji-continuous-len`, and the morphology-backed `no-doubled-joshi`.
+- **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
+  subcommands with `text`, `json`, and `sarif` output formats.
+- **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the
+  frozen `MorphologyV1` token table, a Japanese backend (native, feature-gated), and a
+  dynamic, non-embedded dictionary pipeline — hash-pinned provisioning, verification,
+  decompression, and caching — folded into the cache key as a morphology fingerprint.
+- **WebAssembly bindings (`tzlint_wasm`).** A `TsuzuLint` binding exposing `lint`, plus
+  `registerDictionary` for host-supplied morphology dictionaries, shipped as lean
+  (no tokenizer) and full (`morphology` feature) artifacts.
+- **Frozen ABIs.** `AstCoreV1` and `MorphologyV1` are frozen and extended only via
+  additive tables.
+
+[0.1.0]: https://github.com/simorgh3196/tsuzulint/releases/tag/v0.1.0
