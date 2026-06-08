@@ -19,10 +19,13 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use tzlint_ast::morphology::Lang;
 use tzlint_core::io::{MAX_CONFIG, MAX_FILE};
 use tzlint_core::{
-    Config, ConfigFormat, DocumentCache, Host, Registry, discover, lint_cached, lint_document,
+    Config, ConfigFormat, DictId, DictSource, DocumentCache, Host, MorphologyRegistry, Registry,
+    discover, lint_cached, lint_document, provision_dictionary, provision_dictionary_from_url,
 };
+use tzlint_morphology_native::LinderaProvider;
 use tzlint_pdk::Diagnostic;
 
 use crate::cli::{Cli, Command, OutputFormat, RuleListFormat, RulesCommand};
@@ -98,6 +101,81 @@ pub fn run(cli: &Cli, host: &dyn Host, cwd: &Path, streams: &mut Streams) -> Exi
     }
 }
 
+/// Build the per-run morphology registry from `config.morphology`, or `None` when no dictionary is
+/// configured or no rule active in *this run* needs one.
+///
+/// Returns `None` — doing no network or disk work — unless BOTH hold: the config names a
+/// `morphology` source, AND some rule applying to an input actually being processed requires a
+/// Japanese morphology table. The second gate is keyed to the run's effective `inputs`, NOT to
+/// every configured format: a JA rule enabled only under `formats.csv…` must not provision — let
+/// alone fatally fail to provision — the dictionary on a run that lints no CSV. A configured-but-
+/// unused dictionary is never provisioned, and a run with no active morphology rule keeps a cache
+/// key byte-identical to a pre-morphology run (an empty registry folds to an empty fingerprint).
+/// When both hold, the compressed container is provisioned through the [`Host`] (and cached),
+/// verified against the pin, decompressed in memory, and bridged into a [`LinderaProvider`].
+///
+/// A provisioning or load failure is surfaced as the run's error rather than silently skipping the
+/// rule: a misconfigured or unreachable dictionary is an operator problem that should fail loudly.
+/// The `DictId` is the same pin the cache file is addressed by, so a dictionary upgrade changes both
+/// the cache file and the morphology fingerprint.
+fn build_morphology_registry(
+    host: &dyn Host,
+    cwd: &Path,
+    config: &Config,
+    inputs: &expand::Inputs,
+) -> Result<Option<MorphologyRegistry>, String> {
+    let Some(morphology) = &config.morphology else {
+        return Ok(None);
+    };
+    // The dictionary serves exactly one language — `morphology.lang`, which the config layer has
+    // already constrained to the supported set ("ja" today; `RawMorphology::resolve` rejects the
+    // rest with `UnsupportedMorphologyLang`). Resolve it to a `Lang` rather than assuming Japanese,
+    // so when ko/zh dictionaries become configurable this gate already targets the right language
+    // (ko/zh additionally need the bridge's `Tagset`/`Lang` and the rules — a separate milestone).
+    let dict_lang = match morphology.lang.as_str() {
+        "ja" => Lang::JA,
+        // Unreachable: config validation rejects any other language before we reach here. Skip
+        // provisioning rather than panic if that invariant ever changes upstream.
+        _ => return Ok(None),
+    };
+    // Provision only when a rule active for an input *in this run* needs that language. Each input
+    // is checked under the same region it is linted with: stdin (and any markdown file) under the
+    // base rules, every other file under its extension's rules — which fold in that format's column
+    // overlays (a column may re-enable a base-disabled rule). Keying on the run's inputs rather than
+    // `config.formats` avoids provisioning — and a fatal provision failure — for a morphology rule
+    // scoped to a format not present in the run.
+    let needs_dict = inputs
+        .stdin
+        .then_some(None)
+        .into_iter()
+        .chain(inputs.files.iter().map(|p| extension_of(p)))
+        .any(|ext| {
+            region_rules_for(config, ext)
+                .required_langs()
+                .contains(&dict_lang)
+        });
+    if !needs_dict {
+        return Ok(None);
+    }
+
+    let cache_dir = cwd.join(".tzlint").join("dict");
+    let bytes = match &morphology.source {
+        DictSource::Path(path) => {
+            provision_dictionary(host, &cache_dir, &cwd.join(path), &morphology.pin)
+        }
+        DictSource::Url(url) => {
+            provision_dictionary_from_url(host, &cache_dir, url, &morphology.pin)
+        }
+    }
+    .map_err(|e| format!("morphology dictionary: {e}"))?;
+
+    let provider = LinderaProvider::from_dictionary_bytes(&bytes)
+        .map_err(|e| format!("morphology dictionary: {e}"))?;
+    let mut registry = MorphologyRegistry::new();
+    registry.insert(Box::new(provider), DictId::from_pin(morphology.pin));
+    Ok(Some(registry))
+}
+
 /// `lint`: read, lint, and render each file; exit `Findings` if any diagnostics, `Error` if any
 /// file could not be read or linted.
 fn lint(
@@ -125,6 +203,11 @@ fn lint(
     let inputs = expand::expand(host, cwd, paths, &dir_exts);
     note_expansion(&inputs.notes, stderr);
 
+    // One morphology registry for the whole run, provisioned once — but only when configured AND a
+    // JA rule is active for the run's actual inputs (above). A provisioning failure aborts the run
+    // before any file is linted.
+    let morphology = build_morphology_registry(host, cwd, &config, &inputs)?;
+
     // Persistent cache: load the on-disk file (best-effort) so a repeat run on unchanged content
     // skips parse+lint, and write it back afterwards. `--no-cache` skips both ends. (stdin is
     // never cached — it has no stable path key — so it always takes the direct path below.)
@@ -135,7 +218,7 @@ fn lint(
     // stdin is reported first so the work order is fixed and the summary count is stable.
     if inputs.stdin {
         match read_stdin(stdin).and_then(|source| {
-            let diagnostics = lint_source(&registry, &config, None, &source)?;
+            let diagnostics = lint_source(&registry, &config, morphology.as_ref(), None, &source)?;
             Ok(FileReport {
                 path: PathBuf::from(STDIN_LABEL),
                 source,
@@ -151,7 +234,14 @@ fn lint(
     }
     for path in &inputs.files {
         note_unconfigured_format(&config, path, stderr);
-        match read_and_lint(&registry, host, cache.as_mut(), path, &config) {
+        match read_and_lint(
+            &registry,
+            host,
+            cache.as_mut(),
+            morphology.as_ref(),
+            path,
+            &config,
+        ) {
             Ok(report) => reports.push(report),
             Err(message) => {
                 let _ = writeln!(stderr, "error: {}: {message}", path.display());
@@ -203,6 +293,7 @@ fn read_and_lint(
     registry: &Registry,
     host: &dyn Host,
     cache: Option<&mut DocumentCache>,
+    morphology: Option<&MorphologyRegistry>,
     path: &Path,
     config: &Config,
 ) -> Result<FileReport, String> {
@@ -214,12 +305,15 @@ fn read_and_lint(
         Some(cache) => {
             let pcfg = processor_config_for(config, ext);
             let rr = region_rules_for(config, ext);
-            // No morphology providers are wired into the CLI yet (the native backend is M2j), so
-            // pass `None`: the cache key stays byte-identical to the pre-morphology key.
-            lint_cached(cache, ext, &source, config, registry, &pcfg, &rr, None)
-                .map_err(|e| e.to_string())?
+            // The morphology registry is `Some` only when a dictionary is configured AND an enabled
+            // rule needs it; otherwise it is `None` and the cache key stays byte-identical to the
+            // pre-morphology key (the registry folds an empty fingerprint).
+            lint_cached(
+                cache, ext, &source, config, registry, &pcfg, &rr, morphology,
+            )
+            .map_err(|e| e.to_string())?
         }
-        None => lint_source(registry, config, ext, &source)?,
+        None => lint_source(registry, config, morphology, ext, &source)?,
     };
     Ok(FileReport {
         path: path.to_path_buf(),
@@ -248,13 +342,13 @@ fn discovery_extensions(config: &Config) -> Vec<String> {
 fn lint_source(
     registry: &Registry,
     config: &Config,
+    morphology: Option<&MorphologyRegistry>,
     ext: Option<&str>,
     source: &str,
 ) -> Result<Vec<Diagnostic>, String> {
     let pcfg = processor_config_for(config, ext);
     let rr = region_rules_for(config, ext);
-    // No morphology providers are wired into the CLI yet (native backend is M2j); pass `None`.
-    lint_document(ext, source, registry, &pcfg, &rr, None).map_err(|e| e.to_string())
+    lint_document(ext, source, registry, &pcfg, &rr, morphology).map_err(|e| e.to_string())
 }
 
 /// `fix`: lint-and-fix each file to a fixpoint; write changed files in place (or just report
@@ -280,6 +374,11 @@ fn fix(
     let inputs = expand::expand(host, cwd, paths, &dir_exts);
     note_expansion(&inputs.notes, stderr);
 
+    // One morphology registry for the whole fix run, provisioned once — but only when configured AND
+    // a JA rule is active for the run's actual inputs (above); a provisioning failure aborts before
+    // any file is touched.
+    let morphology = build_morphology_registry(host, cwd, &config, &inputs)?;
+
     // When stdin is a target, stdout carries the fixed stdin document (a pass-through filter), so
     // ALL progress/summary moves to stderr to keep stdout pure data. Without stdin, progress and
     // the summary stay on stdout exactly as before.
@@ -294,7 +393,8 @@ fn fix(
             Ok(source) => {
                 let pcfg = processor_config_for(&config, None);
                 let rr = region_rules_for(&config, None);
-                let fixed = tzlint_core::fix(None, &source, &registry, &pcfg, &rr, None);
+                let fixed =
+                    tzlint_core::fix(None, &source, &registry, &pcfg, &rr, morphology.as_ref());
                 let did_change = fixed != source;
                 if dry_run {
                     if did_change {
@@ -340,7 +440,7 @@ fn fix(
         let ext = extension_of(path);
         let pcfg = processor_config_for(&config, ext);
         let rr = region_rules_for(&config, ext);
-        let fixed = tzlint_core::fix(ext, &source, &registry, &pcfg, &rr, None);
+        let fixed = tzlint_core::fix(ext, &source, &registry, &pcfg, &rr, morphology.as_ref());
         if fixed == source {
             continue;
         }
@@ -1575,5 +1675,110 @@ mod tests {
         assert_eq!(status, ExitStatus::Error);
         assert!(err.contains("error: <stdin>"), "{err}");
         assert!(out.is_empty(), "no document should be emitted: {out:?}");
+    }
+
+    // --- morphology wiring (M2j) ---
+
+    /// A 64-hex pin (all zeros) for the morphology gate tests; the dictionary is never actually
+    /// provisioned here (the in-memory host cannot read it), so the bytes behind the pin don't
+    /// matter — these tests exercise the gate and its error surfacing, not a real dictionary.
+    const PIN64: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    #[test]
+    fn morphology_provision_failure_aborts_the_run() {
+        // A configured dictionary that cannot be provisioned (the in-memory host has no such file)
+        // fails the whole run loudly — a misconfigured dictionary must not be silently skipped. The
+        // default rule set leaves no-doubled-joshi enabled, so the JA gate is active and provisions.
+        let host = MockHost::new();
+        host.put("a.md", "私は彼は来た。\n");
+        host.put(
+            "c.json",
+            &format!(r#"{{ "morphology": {{ "path": "ja.dict.zst", "pin": "{PIN64}" }} }}"#),
+        );
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, _out, err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Error);
+        assert!(err.contains("morphology dictionary"), "{err}");
+    }
+
+    #[test]
+    fn morphology_is_not_provisioned_when_no_ja_rule_is_active() {
+        // The same unprovisionable dictionary, but no-doubled-joshi (the only JA-requiring rule) is
+        // disabled — so the gate never provisions, the run succeeds, and the dictionary is never
+        // touched (proving the gate avoids work, and keeps the pre-morphology cache key).
+        let host = MockHost::new();
+        host.put("a.md", "ふつうの文。\n");
+        host.put(
+            "c.json",
+            &format!(
+                r#"{{ "morphology": {{ "path": "ja.dict.zst", "pin": "{PIN64}" }}, "rules": {{ "no-doubled-joshi": false }} }}"#
+            ),
+        );
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, _out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Clean);
+    }
+
+    #[test]
+    fn morphology_is_provisioned_for_a_column_overlay_ja_rule() {
+        // The gate must consider per-format column overlays, not just the base rule set:
+        // no-doubled-joshi is disabled in the base but RE-ENABLED under a csv column, so a dictionary
+        // IS needed and the gate provisions it (failing loudly here since it is unprovisionable).
+        // Without the overlay check this run would be a silent false-clean over the csv column.
+        let host = MockHost::new();
+        host.put("a.csv", "私は彼は来た。\n");
+        host.put(
+            "c.json",
+            &format!(
+                r#"{{ "morphology": {{ "path": "ja.dict.zst", "pin": "{PIN64}" }}, "rules": {{ "no-doubled-joshi": false }}, "formats": {{ "csv": {{ "columns": {{ "1": {{ "rules": {{ "no-doubled-joshi": true }} }} }} }} }} }}"#
+            ),
+        );
+        let mut c = lint_cli("a.csv", OutputFormat::Text);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, _out, err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Error);
+        assert!(err.contains("morphology dictionary"), "{err}");
+    }
+
+    #[test]
+    fn morphology_is_not_provisioned_when_the_ja_format_is_absent_from_the_run() {
+        // The mirror of the overlay test: no-doubled-joshi is enabled ONLY under a csv column, but
+        // this run lints just markdown — no csv input — so no JA rule can fire. The gate keys on the
+        // run's actual inputs, NOT `config.formats`, so it must neither provision nor fatally fail on
+        // the unprovisionable dictionary. (Under the old `config.formats`-based gate this aborted.)
+        let host = MockHost::new();
+        host.put("a.md", "ふつうの文。\n");
+        host.put(
+            "c.json",
+            &format!(
+                r#"{{ "morphology": {{ "path": "ja.dict.zst", "pin": "{PIN64}" }}, "rules": {{ "no-doubled-joshi": false }}, "formats": {{ "csv": {{ "columns": {{ "1": {{ "rules": {{ "no-doubled-joshi": true }} }} }} }} }} }}"#
+            ),
+        );
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, _out, _err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Clean);
+    }
+
+    #[test]
+    fn morphology_url_source_provision_failure_aborts_the_run() {
+        // The `url` source takes the fetch path (the URL passes the SSRF guard, then the in-memory
+        // host has no network), so provisioning fails and the run aborts — the same loud-failure
+        // contract as the local-path source, exercising the `DictSource::Url` branch.
+        let host = MockHost::new();
+        host.put("a.md", "私は彼は来た。\n");
+        host.put(
+            "c.json",
+            &format!(
+                r#"{{ "morphology": {{ "url": "https://dict.example.com/ja.dict.zst", "pin": "{PIN64}" }} }}"#
+            ),
+        );
+        let mut c = lint_cli("a.md", OutputFormat::Text);
+        c.config = Some(PathBuf::from("c.json"));
+        let (status, _out, err) = run_capture(&c, &host);
+        assert_eq!(status, ExitStatus::Error);
+        assert!(err.contains("morphology dictionary"), "{err}");
     }
 }

@@ -26,6 +26,12 @@ tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
 tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
 # `to_archive`/`access` (the parse → archive → lint bridge for the no-cache path) and `Span`.
 tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
+# The native morphology backend: `LinderaProvider`, wired into a `MorphologyRegistry` when the
+# config names a dictionary. This edge finally links a real tokenizer into the binary. It is
+# depended on by its capability name (`tzlint_morphology_native`), so the underlying backend
+# library stays an internal detail and the io-guard tripwire — which rejects the bare token in any
+# non-backend manifest — is satisfied here.
+tzlint_morphology_native = { path = "../tzlint_morphology_native", version = "0.0.0" }
 # Argument parsing (derive API).
 clap = { workspace = true }
 # Blocking HTTPS client for `CliHost::fetch` — the CLI's network-egress boundary for dictionary

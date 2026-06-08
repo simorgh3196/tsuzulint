@@ -27,6 +27,9 @@
     },
     "formats": {
       "$ref": "#/$defs/formats"
+    },
+    "morphology": {
+      "$ref": "#/$defs/morphology"
     }
   },
   "$defs": {
@@ -34,6 +37,33 @@
       "description": "A built-in preset id.",
       "type": "string",
       "enum": ["ja-basic", "ja-technical-writing"]
+    },
+    "morphology": {
+      "description": "Optional morphology-dictionary source for morphology-dependent rules (e.g. no-doubled-joshi). The compressed container is provisioned at runtime, verified against `pin`, and decompressed in memory. Exactly one of `path`/`url` must be set.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pin"],
+      "oneOf": [{ "required": ["path"] }, { "required": ["url"] }],
+      "properties": {
+        "path": {
+          "description": "Local path to the compressed `.dict.zst` container (resolved relative to the working directory).",
+          "type": "string"
+        },
+        "url": {
+          "description": "https URL to fetch the compressed container from on a cache miss (SSRF-guarded).",
+          "type": "string"
+        },
+        "pin": {
+          "description": "BLAKE3 pin over the COMPRESSED container, 64 hexadecimal characters.",
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "lang": {
+          "description": "The language the dictionary serves. Only \"ja\" is supported today.",
+          "type": "string",
+          "enum": ["ja"]
+        }
+      }
     },
     "rules": {
       "description": "Map of rule id to its setting. Rule ids are arbitrary strings; they are not validated against a known-rule set yet (that arrives with the rules crate).",
