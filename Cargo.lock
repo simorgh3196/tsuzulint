@@ -329,6 +329,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2337,6 +2347,19 @@ dependencies = [
  "tzlint_ast",
  "tzlint_core",
  "tzlint_pdk",
+]
+
+[[package]]
+name = "tzlint_wasm"
+version = "0.0.0"
+dependencies = [
+ "console_error_panic_hook",
+ "serde_json",
+ "tzlint_core",
+ "tzlint_morphology_native",
+ "tzlint_pdk",
+ "tzlint_rules",
+ "wasm-bindgen",
 ]
 
 [[package]]

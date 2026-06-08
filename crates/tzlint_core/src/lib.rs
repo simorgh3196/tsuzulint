@@ -39,7 +39,9 @@ pub use config::{
     FormatConfig, MorphologyConfig, Preset, RuleSetting, ShadowedCandidate, discover, resolve,
 };
 pub use dict::container::{ContainerError, DictContainer, Member};
-pub use dict::{DictError, provision_dictionary, provision_dictionary_from_url};
+pub use dict::{
+    DictError, decompress_dictionary, provision_dictionary, provision_dictionary_from_url,
+};
 pub use engine::Engine;
 pub use fix::{FixPass, MAX_FIX_PASSES, apply_fixes, fix};
 pub use io::{DirEntry, EntryKind, Host, IoError};
