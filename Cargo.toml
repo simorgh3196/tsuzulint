@@ -9,6 +9,7 @@ members = [
     "crates/tzlint_abi",
     "crates/tzlint_cli",
     "crates/tzlint_lsp",
+    "crates/tzlint_morphology_native",
 ]
 
 [workspace.package]

@@ -1,0 +1,30 @@
+[package]
+name = "tzlint_morphology_native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Native (lindera) morphology backend for TsuzuLint. Native-only: never part of the wasm build."
+
+[lints]
+workspace = true
+
+[dependencies]
+# The frozen MorphologyV1 data model the provider fills (MorphologyBuilder, Token, FeatureKey,
+# Tagset, Lang) and Span/NodeId. `no_std`, ABI-frozen — shared with the wasm-facing crates.
+tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
+# The `MorphologyProvider` trait this crate implements (and `MorphologyError`).
+tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
+# The morphological analyzer. NATIVE-ONLY by construction: this crate has no dependency edge from
+# the wasm-facing crates (ast/pdk/core), so cargo never resolves lindera for the `wasm32` build,
+# and the crate's `lib.rs` is `#![cfg(not(target_arch = "wasm32"))]` as a second guard. MIT.
+lindera = "3.0.7"
+
+[features]
+# Compile a dictionary INTO the binary so the provider can be exercised OFFLINE (no downloaded
+# dictionary directory, no committed fixture). Default-off and intended for tests only — the
+# production path loads a pre-built dictionary directory from a filesystem path. Enabling it pulls
+# the full IPADIC into the (test) binary, so it is never on by default.
+embed-ipadic = ["lindera/embed-ipadic"]
