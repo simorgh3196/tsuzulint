@@ -17,8 +17,8 @@
   configuration and enable alias-expansion ("billion laughs") memory-exhaustion that the
   config size cap cannot bound.
 - **Validation:** serde `deny_unknown_fields` — an unknown top-level key is an error. Accepted
-  top-level keys are: `language`, `message-language`, `rules`, `extends`, and `formats` (see
-  below). Keys in the dynamic `rules` map that are not built-in rule ids are not an error but
+  top-level keys are: `language`, `message-language`, `rules`, `extends`, `formats`, and
+  `morphology` (see below). Keys in the dynamic `rules` map that are not built-in rule ids are not an error but
   are **warned** by the CLI (`note: config references unknown rule '…'`), so a typo is surfaced
   rather than silently ignored.
 - **Activation model (opt-out):** every built-in rule is **on by default**. A bare
@@ -41,7 +41,9 @@
   Because activation is opt-out, a preset does **not** restrict *which* rules run — every
   built-in rule is already on, so a preset effectively supplies **options and severities** for
   the rules it names. To run a narrower set, disable the unwanted rules explicitly. Morphology
-  rules (e.g. `no-doubled-joshi`) are intentionally absent from the presets until M2.
+  rules (e.g. `no-doubled-joshi`) are intentionally absent from the presets: they are no-ops
+  until a [`morphology`](#morphology--dictionary-for-morphology-dependent-rules) dictionary is
+  configured, so a preset never silently requires one.
 - **Language:** `language` (e.g. `ja`) and `message-language` (the diagnostic locale,
   independent of the document language). Config keys are kebab-case (`message-language`).
 - **JSON Schema:** a Draft 2020-12 schema is published as `tzlint_core::CONFIG_SCHEMA`
@@ -54,8 +56,9 @@
   a persistent on-disk cache written to `.tzlintcache` in the working directory, so a repeat run
   over unchanged files skips parse+lint. `--no-cache` disables both. The cache key is
   `blake3(content)` + the full config + rule versions + parser/engine version + a morphology
-  dictionary fingerprint (a placeholder until M2), so any change that could alter diagnostics
-  invalidates the entry. A cache read/write failure only warns; results are unaffected.
+  dictionary fingerprint (the pins of the dictionaries active for the run), so any change that
+  could alter diagnostics — including a dictionary upgrade — invalidates the entry. A cache
+  read/write failure only warns; results are unaffected.
 
 ## `formats` — per-format options
 
@@ -127,6 +130,39 @@ formats:
       "2": { rules: { no-todo: true } }
       "5": { parse-mode: plain, rules: { max-ten: { options: { max: 0 } } } }
 ```
+
+## `morphology` — dictionary for morphology-dependent rules
+
+Some rules (e.g. `no-doubled-joshi`) need a tokenized, part-of-speech-tagged view of the text,
+which comes from a **dynamic, hash-pinned dictionary** — never embedded in the binary. The
+`morphology` key points at one. It is provisioned at runtime **only when a rule active for the
+run needs its language**, so configuring it is free for runs that don't exercise such a rule. See
+[`docs/morphology.md`](morphology.md) for the full model and per-dictionary licenses.
+
+- **`path`** / **`url`** (exactly one, required): the compressed container (`.dict.zst`). `path`
+  is resolved relative to the working directory; `url` must be `https` (SSRF-guarded, fetched on
+  a cache miss).
+- **`pin`** (required): a BLAKE3 hash over the **compressed** container, 64 hexadecimal
+  characters. The bytes are verified against it before decompression, and it is the cache key —
+  so a dictionary upgrade is simply a new pin.
+- **`lang`** (optional; default `"ja"`): the language the dictionary serves. **Only `"ja"` is
+  supported today**; any other value is a config error.
+
+```jsonc
+{
+  // `no-doubled-joshi` is on by default (opt-out); it stays inert until this is set.
+  "morphology": {
+    "url": "https://example.com/ipadic.dict.zst",
+    "pin": "0000000000000000000000000000000000000000000000000000000000000000",
+    "lang": "ja"
+  }
+}
+```
+
+The verified, decompressed dictionary is cached under `.tzlint/dict/` (native CLI). In the
+browser the wasm build receives the bytes via `registerDictionary(...)` and the JS host owns the
+cache. Absent a `morphology` key, morphology rules are inert and the cache key is byte-identical
+to a pre-morphology run.
 
 ## Planned
 
