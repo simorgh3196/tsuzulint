@@ -3,9 +3,9 @@
 > Status: template (M0/M2).
 
 - **Provider abstraction:** `MorphologyProvider { lang(), analyze(text) -> TokenTable }`.
-  A backend may cover several languages (lindera: ja/ko/zh); other engines allowed.
+  A backend may cover several languages (e.g. ja/ko/zh from one engine); engines are pluggable.
 - **Language-neutral `MorphologyV1`:** `Token { surface, lang, features: Vec<(k,v)>,
-  reading: Option, base_form: Option }` — open features (à la lindera `token.details()`),
+  reading: Option, base_form: Option }` — open features (the tokenizer's per-token detail list),
   optional fields present only where meaningful. Avoids a forced `V1→V2` bump across tagsets.
 - **Dynamic dictionaries (not embedded):** fetched on demand from a hash-pinned,
   configurable source (local path / mirror allowed), cached (native FS / browser

@@ -1,0 +1,53 @@
+[package]
+name = "tzlint_wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "WebAssembly bindings for TsuzuLint. Lean by default (the wasm-clean seam, no tokenizer); the optional `morphology` feature bundles the morphology backend (the language is chosen at runtime by the registered dictionary) for a full, CLI-consistent build."
+
+[lib]
+# `cdylib` for the wasm artifact; `rlib` so the pure-Rust `Linter` core is unit-testable on native.
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# The lint pipeline (parser/engine/config/`lint_document`), the morphology registry seam, and the
+# `Host`-free `decompress_dictionary` the full build uses to verify a JS-supplied dictionary blob.
+tzlint_core = { path = "../tzlint_core", version = "0.0.0" }
+# Diagnostics, the `Rule` trait, severities.
+tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
+# The built-in rules (`RULE_IDS`/`build_rule`) the linter resolves the active set from.
+tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
+# Serialize the diagnostics to JSON for the JS boundary (the diagnostic model is serde-free).
+serde_json = { workspace = true }
+# The native morphology backend — pulled ONLY by the `morphology` feature, so the default (lean)
+# wasm artifact is tokenizer-free and tiny. The backend and its deps are pure Rust and build for wasm32.
+tzlint_morphology_native = { path = "../tzlint_morphology_native", version = "0.0.0", optional = true }
+
+# wasm-only glue: the `#[wasm_bindgen]` JS bindings + a panic→console.error hook. Native builds (the
+# unit tests of the `Linter` core) never pull these.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+
+# Drives the `#[wasm_bindgen]` bindings under a real wasm runtime (node) — the only place the JS-facing
+# `TsuzuLint` is actually executed rather than just type-checked. wasm-target + dev only, so neither
+# native builds nor the shipped artifact pull it. The official test companion to `wasm-bindgen`.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[features]
+# Bundle the morphology backend so morphology-dependent rules (e.g. no-doubled-joshi) fire with the
+# same analysis as the CLI. Off by default: the lean artifact is for embedders that need no
+# morphological analysis. A single capability feature, NOT one per language: the backend is one
+# language-neutral engine (the same native tokenizer serves ja/ko/zh) and the dictionary — and thus
+# the language — is loaded at runtime from JS via `registerDictionary(lang, compressedBytes, pinHex)`,
+# so there is no compile-time language axis to split on. Japanese is the language wired today; ko/zh
+# reuse this same build once their dictionaries and rules land. Named for the capability, so a
+# consumer opts in by whether it needs morphology, not by a backend or a language.
+morphology = ["dep:tzlint_morphology_native"]

@@ -72,7 +72,11 @@ const MAX_SOURCE_LEN: usize = u32::MAX as usize;
 /// Reject a source whose length would overflow the `u32` span offsets. The message is
 /// derived from [`MAX_SOURCE_LEN`] so it can't drift from the actual bound.
 fn check_source_len(len: usize) -> Result<(), ParseError> {
-    if len > MAX_SOURCE_LEN {
+    // Expressed as a fallible `u32` conversion rather than `len > MAX_SOURCE_LEN`: on a 32-bit
+    // target (e.g. wasm32) `usize == u32`, so that comparison is `len > usize::MAX` — always false
+    // (`clippy::absurd_extreme_comparisons`) — whereas `u32::try_from` states the same bound (does
+    // the length fit a u32 span offset?) and lints clean on every target. Behaviour is identical.
+    if u32::try_from(len).is_err() {
         return Err(ParseError {
             message: format!(
                 "source is {len} bytes, over the {MAX_SOURCE_LEN}-byte limit (span offsets must fit in u32)"

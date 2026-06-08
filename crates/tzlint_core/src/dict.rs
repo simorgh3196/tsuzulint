@@ -193,10 +193,14 @@ fn try_cache_hit(
         Err(IoError::NotFound) => return Ok(None), // vanished/cold → miss
         Err(other) => return Err(DictError::Io(other)), // genuine fault → surface
     };
-    if blake3::hash(&compressed).as_bytes() != pinned_hash {
-        return Ok(None); // benign corruption → self-heal as a miss
+    match decompress_dictionary(&compressed, pinned_hash) {
+        Ok(decompressed) => Ok(Some(decompressed)),
+        // Benign corruption (the bytes no longer hash to the pin) → self-heal as a miss.
+        Err(DictError::HashMismatch) => Ok(None),
+        // A genuine post-verify decompression fault is surfaced (a logical impossibility for a blob
+        // that hashed to the pin, but never silently downgraded to a miss).
+        Err(other) => Err(other),
     }
-    Ok(Some(zstd_decompress(&compressed, MAX_DICT)?))
 }
 
 /// Verify `compressed` against `pinned_hash`, decompress it (bounded by [`MAX_DICT`]), cache the
@@ -215,16 +219,33 @@ fn verify_decompress_and_cache(
     compressed: &[u8],
     pinned_hash: &[u8; 32],
 ) -> Result<Vec<u8>, DictError> {
-    // Verify before decompressing: never process the contents of an unverified blob.
-    if blake3::hash(compressed).as_bytes() != pinned_hash {
-        return Err(DictError::HashMismatch);
-    }
-    let decompressed = zstd_decompress(compressed, MAX_DICT)?;
+    // Verify-before-decompress, then cache the verified compressed blob (so a hit re-verifies).
+    let decompressed = decompress_dictionary(compressed, pinned_hash)?;
 
     host.create_dir_all(cache_dir)?;
     // Cache the verified COMPRESSED blob, not the decompressed bytes, so the pin re-verifies a hit.
     host.write_atomic(cache_path, compressed)?;
     Ok(decompressed)
+}
+
+/// Verify a hash-pinned **compressed** dictionary blob and decompress it in memory — the
+/// `Host`-free core of provisioning, for callers that already hold the compressed bytes and manage
+/// their own caching (a browser/wasm embedder hands the bytes in from JS and caches on the JS side,
+/// e.g. IndexedDB). `blake3(compressed) == pinned_hash` is checked **before** decompressing (zstd,
+/// bounded by [`MAX_DICT`]), so an unverified blob is never processed.
+///
+/// # Errors
+///
+/// [`DictError::HashMismatch`] if the blob does not match the pin; [`DictError::Decompress`] or
+/// [`DictError::TooLarge`] if the verified blob is not valid zstd or its output exceeds [`MAX_DICT`].
+pub fn decompress_dictionary(
+    compressed: &[u8],
+    pinned_hash: &[u8; 32],
+) -> Result<Vec<u8>, DictError> {
+    if blake3::hash(compressed).as_bytes() != pinned_hash {
+        return Err(DictError::HashMismatch);
+    }
+    zstd_decompress(compressed, MAX_DICT)
 }
 
 /// Decompress the zstd `compressed` blob, rejecting output larger than `limit` bytes.
@@ -428,6 +449,27 @@ mod tests {
             zstd_decompress(FIXTURE, MAX_DICT).unwrap(),
             PAYLOAD.as_bytes()
         );
+    }
+
+    #[test]
+    fn decompress_dictionary_verifies_the_pin_before_decompressing() {
+        let pinned = pin_of(FIXTURE);
+        // Correct pin → verified + decompressed.
+        assert_eq!(
+            decompress_dictionary(FIXTURE, &pinned).unwrap(),
+            PAYLOAD.as_bytes()
+        );
+        // Wrong pin → rejected before any decompression.
+        assert!(matches!(
+            decompress_dictionary(FIXTURE, &[0u8; 32]).unwrap_err(),
+            DictError::HashMismatch
+        ));
+        // Verified (its own pin) but not zstd → a decompression error, not a panic.
+        let garbage: &[u8] = b"verified but not a zstd frame";
+        assert!(matches!(
+            decompress_dictionary(garbage, &pin_of(garbage)).unwrap_err(),
+            DictError::Decompress(_)
+        ));
     }
 
     #[test]
