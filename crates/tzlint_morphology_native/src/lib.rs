@@ -1,12 +1,12 @@
 //! Native morphology backend: a [`MorphologyProvider`](tzlint_pdk::MorphologyProvider) backed by
 //! the [`lindera`] analyzer.
 //!
-//! **Native-only.** The whole crate is `#![cfg(not(target_arch = "wasm32"))]`, and — more
-//! importantly — no wasm-facing crate (`tzlint_ast`/`tzlint_pdk`/`tzlint_core`) depends on it, so
-//! `lindera` is structurally unreachable from the `wasm32` build graph. The engine reaches a real
-//! backend only through the `Box<dyn MorphologyProvider>` trait object in
+//! The lindera-backed backend works on both native and `wasm32` (lindera and its dependencies are
+//! pure Rust). The wasm-clean morphology *seam* — `tzlint_ast`/`tzlint_pdk`/`tzlint_core` — never
+//! depends on this crate, so `lindera` stays out of that build graph (the M2i tripwire); the
+//! browser provider (M2k) is a separate crate that opts into lindera-on-wasm explicitly. The engine
+//! reaches a backend only through the `Box<dyn MorphologyProvider>` trait object in
 //! `tzlint_core::MorphologyRegistry`, which names no `lindera` type.
-#![cfg(not(target_arch = "wasm32"))]
 
 use std::path::Path;
 

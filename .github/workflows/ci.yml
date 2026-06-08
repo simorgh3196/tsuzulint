@@ -61,14 +61,25 @@ jobs:
         with:
           targets: wasm32-unknown-unknown, wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
-      # The morphology seam must stay wasm-clean with NO native backend (M2i): the frozen model
+      # The morphology seam must stay wasm-clean with NO tokenizer backend: the frozen model
       # (`tzlint_ast`), the injected-provider trait (`tzlint_pdk`), and the engine + provider
       # registry + cache fingerprint (`tzlint_core`) are dictionary-free by default — embedders
-      # inject providers Host-style. Build all three wasm-facing crates for both wasm targets. When
-      # the native morphology backend lands (M2j, lindera) it MUST be cfg/feature-gated so it can
-      # never enter this build; a regression here is the tripwire.
+      # inject providers Host-style. Build all three wasm-facing crates for both wasm targets.
       - run: cargo build -p tzlint_ast -p tzlint_pdk -p tzlint_core --target wasm32-unknown-unknown
       - run: cargo build -p tzlint_ast -p tzlint_pdk -p tzlint_core --target wasm32-wasip1
+      # Seam-purity tripwire (replaces the backend crate's former `#![cfg(not(wasm32))]` gate). The
+      # lindera backend is now target-agnostic — it compiles for wasm so the M2k browser provider
+      # can reuse it — so a successful seam build no longer proves lindera is absent. Assert it via
+      # the dependency tree instead: lindera must NOT be reachable from any seam crate on wasm. If a
+      # seam crate ever gains a path to lindera (a stray dependency edge), this fails loudly.
+      - name: morphology seam stays lindera-free on wasm
+        run: |
+          for c in tzlint_ast tzlint_pdk tzlint_core; do
+            if cargo tree -p "$c" --target wasm32-unknown-unknown -e normal -f '{p}' | grep -qi lindera; then
+              echo "lindera is reachable from $c on wasm32 — the morphology seam must stay lindera-free"
+              exit 1
+            fi
+          done
 
   morphology-native:
     name: morphology-native
@@ -104,14 +115,15 @@ jobs:
         run: |
           ! git grep -nE '\bureq\b' -- 'crates/*/src/**.rs' \
             ':!crates/tzlint_cli/src/host.rs' || (echo "network egress (ureq) must go through CliHost::fetch in host.rs"; exit 1)
-      # The native morphology backend (lindera) must stay native-only: it lives ONLY in
-      # `tzlint_morphology_native` (cfg(not(wasm32)), depended on only by the native CLI/LSP), so it
-      # can never enter the wasm build graph. Reject `lindera` in any other crate manifest — a
-      # fast, explicit tripwire next to the (slow) wasm build that would also catch the regression.
-      - name: reject lindera outside the native morphology crate
+      # The lindera tokenizer backend must stay confined to the dedicated backend crate(s) and out
+      # of the morphology SEAM (`tzlint_ast`/`tzlint_pdk`/`tzlint_core`). It lives in
+      # `tzlint_morphology_native` (the CLI/LSP backend); the wasm `seam stays lindera-free` check in
+      # the `wasm` job enforces seam-purity at the dependency-tree level. Reject `lindera` in any
+      # other crate manifest — a fast, explicit tripwire that catches a stray dependency edge.
+      - name: reject lindera outside the dedicated backend crate
         run: |
           ! git grep -nE '\blindera\b' -- 'crates/*/Cargo.toml' \
-            ':!crates/tzlint_morphology_native/Cargo.toml' || (echo "lindera must stay in tzlint_morphology_native (native-only; never in the wasm graph)"; exit 1)
+            ':!crates/tzlint_morphology_native/Cargo.toml' || (echo "lindera must stay in the dedicated backend crate(s); the seam must stay lindera-free"; exit 1)
       # blake3 must stay pure-Rust: without `features = ["pure"]` it builds a SIMD backend via a
       # C compiler, breaking the uniform/reproducible build and wasm32. Guard the manifest.
       - name: blake3 must keep features = ["pure"]

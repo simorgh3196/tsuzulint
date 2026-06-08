@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Native (lindera) morphology backend for TsuzuLint. Native-only: never part of the wasm build."
+description = "lindera-backed morphology backend for TsuzuLint (native CLI/LSP; the bridge also compiles for wasm so the browser provider can reuse it). Kept out of the wasm-clean morphology seam."
 
 [lints]
 workspace = true
