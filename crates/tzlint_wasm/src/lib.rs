@@ -5,7 +5,7 @@
 //! - **Lean** (default): the wasm-clean lint pipeline with no tokenizer backend. Tiny. Morphology-
 //!   dependent rules simply stay inert. For embedders whose languages need no morphological
 //!   analysis.
-//! - **Full** (`--features lindera`): bundles the lindera Japanese backend, so morphology rules
+//! - **Full** (`--features morphology`): bundles the Japanese morphology backend, so morphology rules
 //!   (e.g. `no-doubled-joshi`) fire with the same analysis as the native CLI. The embedder loads a
 //!   hash-pinned, compressed dictionary from JS via `registerDictionary`.
 //!
@@ -23,12 +23,12 @@ use tzlint_pdk::{Diagnostic, Rule, RuleId, Severity};
 use tzlint_rules::{RULE_IDS, build_rule};
 
 /// The linter core: a resolved [`Config`] plus the built-in rule/processor registries (and, in the
-/// `lindera` build, an injected morphology registry). Pure Rust — no `wasm-bindgen` — so it is
+/// `morphology` build, an injected morphology registry). Pure Rust — no `wasm-bindgen` — so it is
 /// unit-tested on native; the `#[wasm_bindgen]` bindings below are a thin wrapper over it.
 pub struct Linter {
     config: Config,
     registry: Registry,
-    #[cfg(feature = "lindera")]
+    #[cfg(feature = "morphology")]
     morphology: MorphologyRegistry,
 }
 
@@ -48,7 +48,7 @@ impl Linter {
         Ok(Linter {
             config,
             registry: Registry::with_builtins(),
-            #[cfg(feature = "lindera")]
+            #[cfg(feature = "morphology")]
             morphology: MorphologyRegistry::new(),
         })
     }
@@ -77,14 +77,14 @@ impl Linter {
         .map_err(|e| e.to_string())
     }
 
-    #[cfg(feature = "lindera")]
+    #[cfg(feature = "morphology")]
     fn morphology_ref(&self) -> Option<&MorphologyRegistry> {
         // An empty registry behaves as `None` (no active provider → no morphology table), so this
         // is safe to pass unconditionally before any dictionary is registered.
         Some(&self.morphology)
     }
 
-    #[cfg(not(feature = "lindera"))]
+    #[cfg(not(feature = "morphology"))]
     #[allow(clippy::unused_self)]
     fn morphology_ref(&self) -> Option<&MorphologyRegistry> {
         None
@@ -92,7 +92,7 @@ impl Linter {
 
     /// Register a Japanese dictionary from its hash-pinned, **compressed** container bytes (handed
     /// in by the JS host, which owns fetching and caching), so morphology-dependent rules fire.
-    /// Available in the `lindera` build only.
+    /// Available in the `morphology` build only.
     ///
     /// The bytes are verified against `pin_hex` and decompressed in wasm (the same pipeline as the
     /// CLI) before being bridged into a provider — a wrong pin, malformed pin, or undecodable
@@ -101,7 +101,7 @@ impl Linter {
     /// # Errors
     ///
     /// An unsupported language, a malformed/mismatched pin, or an undecodable dictionary.
-    #[cfg(feature = "lindera")]
+    #[cfg(feature = "morphology")]
     pub fn register_dictionary(
         &mut self,
         lang: &str,
@@ -167,7 +167,7 @@ fn severity_str(severity: Severity) -> &'static str {
 }
 
 /// Decode 64 hex characters into a 32-byte pin, panic-free.
-#[cfg(feature = "lindera")]
+#[cfg(feature = "morphology")]
 fn decode_pin(hex: &str) -> Result<[u8; 32], String> {
     let bytes = hex.as_bytes();
     if bytes.len() != 64 {
@@ -183,7 +183,7 @@ fn decode_pin(hex: &str) -> Result<[u8; 32], String> {
 }
 
 /// The value of one hex digit (`0-9`, `a-f`, `A-F`), or `None`.
-#[cfg(feature = "lindera")]
+#[cfg(feature = "morphology")]
 fn hex_nibble(b: u8) -> Option<u8> {
     match b {
         b'0'..=b'9' => Some(b - b'0'),
@@ -223,9 +223,9 @@ mod bindings {
         }
 
         /// Register a hash-pinned, compressed Japanese dictionary so morphology rules fire (the
-        /// `lindera` build only). `compressed` is the `.dict.zst` bytes; `pin_hex` is the 64-char
+        /// `morphology` build only). `compressed` is the `.dict.zst` bytes; `pin_hex` is the 64-char
         /// BLAKE3 pin over them.
-        #[cfg(feature = "lindera")]
+        #[cfg(feature = "morphology")]
         #[wasm_bindgen(js_name = registerDictionary)]
         pub fn register_dictionary(
             &mut self,
@@ -299,7 +299,7 @@ mod tests {
         assert_eq!(severity_str(Severity::Hint), "hint");
     }
 
-    #[cfg(feature = "lindera")]
+    #[cfg(feature = "morphology")]
     #[test]
     fn register_dictionary_rejects_bad_lang_and_pin() {
         let mut linter = Linter::from_config_json("").unwrap();

@@ -2,13 +2,13 @@
 //! one byte blob — the *content* of the decompressed `.dict.zst` that
 //! [`provision_dictionary`](crate::provision_dictionary) returns.
 //!
-//! A native tokenizer backend (lindera, in `tzlint_morphology_native`) needs several separate
+//! A native tokenizer backend (in `tzlint_morphology_native`) needs several separate
 //! component files (a prefix-dictionary trie, a connection-cost matrix, character/unknown-word
 //! tables, metadata). Rather than ship a directory or a tar — neither of which a browser/wasm
 //! embedder can use — those components are concatenated here into a single blob with a fixed
 //! header, so the whole dictionary travels as one hash-pinned, compressed artifact and is split
 //! back apart **in memory** at load time. This module is therefore deliberately backend-agnostic:
-//! it knows *byte ranges*, not lindera; it names no tokenizer type and touches neither
+//! it knows *byte ranges*, not any tokenizer; it names no tokenizer type and touches neither
 //! [`Host`](crate::Host) nor the network, so it compiles for `wasm32` and a future browser backend
 //! reuses the exact same split.
 //!
@@ -24,7 +24,7 @@
 //! ```
 //!
 //! Members are **positional** (identified by table index, not by an embedded name string), which
-//! removes all name-decoding surface. The canonical order matches a lindera dictionary's component
+//! removes all name-decoding surface. The canonical order matches the backend dictionary's component
 //! load order; see [`Member`].
 //!
 //! # Untrusted bytes
@@ -52,7 +52,7 @@ pub const MEMBER_COUNT: usize = 8;
 const HEADER_LEN: usize = 8 + 2 + 2 + MEMBER_COUNT * 8;
 
 /// The canonical members, in table order. The discriminant is the table index, and the order
-/// matches the component load order of a lindera IPADIC dictionary (`metadata` first, then the
+/// matches the component load order of the backend's IPADIC dictionary (`metadata` first, then the
 /// prefix-dictionary quartet, the connection matrix, and the two character tables).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]

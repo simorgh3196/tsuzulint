@@ -12,7 +12,7 @@
 //! [`MorphologyRegistry::build_table`] runs the active providers over a document's archived AST and
 //! merges their tokens into one [`MorphologyV1`](tzlint_ast::morphology::MorphologyV1) for
 //! `Engine::lint` (wired in at `lint_document`), keyed to the nodes the morphology rules visit. A
-//! real tokenizing backend (lindera, M2j) and the rule that reads the tokens (`no-doubled-joshi`,
+//! real tokenizing backend (M2j) and the rule that reads the tokens (`no-doubled-joshi`,
 //! M2l) are still to come; the dictionary-free [`WhitespaceProvider`] exercises the seam
 //! end-to-end today. The registry never touches [`Host`](crate::Host), `dict`, or the network, so
 //! it stays `wasm32`-clean and dictionary-free by default.

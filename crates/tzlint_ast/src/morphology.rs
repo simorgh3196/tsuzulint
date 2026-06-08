@@ -126,8 +126,8 @@ impl Tagset {
 
 /// An open-enum feature key, a bare `u32` like [`NodeKind`](crate::NodeKind).
 ///
-/// Morphological features are stored as open `(key, value)` pairs (à la lindera's
-/// `token.details()`), sidestepping a closed, per-tagset enum so adding a feature never forces a
+/// Morphological features are stored as open `(key, value)` pairs (the per-token named columns a
+/// dictionary tokenizer emits), sidestepping a closed, per-tagset enum so adding a feature never forces a
 /// `V1 → V2` bump. The known keys cover the common positional fields of dictionaries like IPADIC;
 /// `reading` and `base_form` are promoted to dedicated [`Token`] fields and are **not** repeated
 /// here. A backend may emit any additional key as an opaque value `>= COUNT`.
@@ -254,7 +254,7 @@ pub struct Token {
 
 impl Token {
     /// `flags` bit: the token is **unknown** to the dictionary — an out-of-vocabulary run the
-    /// analyzer guessed rather than looked up (lindera's `is_unknown`). Rules that should not
+    /// analyzer guessed rather than looked up (the analyzer's unknown-word flag). Rules that should not
     /// trust the features of guessed tokens test this bit.
     pub const FLAG_UNKNOWN: u32 = 1 << 0;
 }

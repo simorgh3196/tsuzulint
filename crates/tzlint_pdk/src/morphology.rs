@@ -3,8 +3,8 @@
 //!
 //! A [`MorphologyProvider`] turns the text of a node into a frozen
 //! [`MorphologyV1`](tzlint_ast::morphology::MorphologyV1) table that rules read in place. The
-//! trait is `no_std`/alloc and backend-agnostic; heavy native backends (lindera, …) and
-//! dictionary provisioning live in `tzlint_core` behind this seam and are injected Host-style,
+//! trait is `no_std`/alloc and backend-agnostic; heavy native backends and dictionary provisioning
+//! live in `tzlint_core` behind this seam and are injected Host-style,
 //! so the core stays wasm-clean and dictionary-free by default. The deterministic
 //! [`WhitespaceProvider`] lets the model and the (later) engine wiring be tested without any
 //! dictionary.

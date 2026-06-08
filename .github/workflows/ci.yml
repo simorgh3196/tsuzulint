@@ -81,11 +81,13 @@ jobs:
             fi
           done
       # The wasm bindings crate (M2k): build BOTH artifacts the embedder chooses between — lean
-      # (default, tokenizer-free, tiny) and full (`--features lindera`, the Japanese backend bundled
-      # in). lindera-in-wasm is strictly opt-in: the lean build above is what the seam-purity check
-      # guarantees stays lindera-free.
+      # (default, tokenizer-free, tiny) and full (`--features morphology`, the morphology backend
+      # bundled in). ONE capability feature, not one per language: the backend is a single
+      # language-neutral engine and the dictionary (hence the language: ja today, ko/zh later) loads
+      # at runtime, so there is no compile-time language axis. Bundling it is strictly opt-in: the
+      # lean build above is what the seam-purity check guarantees stays lindera-free.
       - run: cargo build -p tzlint_wasm --target wasm32-unknown-unknown
-      - run: cargo build -p tzlint_wasm --target wasm32-unknown-unknown --features lindera
+      - run: cargo build -p tzlint_wasm --target wasm32-unknown-unknown --features morphology
 
   morphology-native:
     name: morphology-native
@@ -123,13 +125,17 @@ jobs:
             ':!crates/tzlint_cli/src/host.rs' || (echo "network egress (ureq) must go through CliHost::fetch in host.rs"; exit 1)
       # The lindera tokenizer backend must stay confined to the dedicated backend crate(s) and out
       # of the morphology SEAM (`tzlint_ast`/`tzlint_pdk`/`tzlint_core`). It lives in
-      # `tzlint_morphology_native` (the CLI/LSP backend); the wasm `seam stays lindera-free` check in
-      # the `wasm` job enforces seam-purity at the dependency-tree level. Reject `lindera` in any
-      # other crate manifest — a fast, explicit tripwire that catches a stray dependency edge.
+      # `tzlint_morphology_native`; every consumer (the CLI, the wasm `morphology` build) depends on THAT
+      # crate by its capability name, never on `lindera` directly — so the bare token `lindera` must
+      # appear in no other crate manifest. The wasm `seam stays lindera-free` check enforces the same
+      # at the dependency-tree level. NOTE: the pattern is a plain (un-anchored) `lindera`, NOT
+      # `\blindera\b` — git's default grep is POSIX ERE, which does not support `\b`, so the anchored
+      # form silently matched nothing (a dead tripwire). It is case-sensitive, so the CamelCase
+      # `LinderaProvider` type the CLI tool body legitimately names is not a manifest concern.
       - name: reject lindera outside the dedicated backend crate
         run: |
-          ! git grep -nE '\blindera\b' -- 'crates/*/Cargo.toml' \
-            ':!crates/tzlint_morphology_native/Cargo.toml' || (echo "lindera must stay in the dedicated backend crate(s); the seam must stay lindera-free"; exit 1)
+          ! git grep -nE 'lindera' -- 'crates/*/Cargo.toml' \
+            ':!crates/tzlint_morphology_native/Cargo.toml' || (echo "lindera must stay in the dedicated backend crate(s); depend on tzlint_morphology_native by name instead"; exit 1)
       # blake3 must stay pure-Rust: without `features = ["pure"]` it builds a SIMD backend via a
       # C compiler, breaking the uniform/reproducible build and wasm32. Guard the manifest.
       - name: blake3 must keep features = ["pure"]
@@ -177,13 +183,13 @@ jobs:
       # (`cargo llvm-cov --doctests`) and is intentionally omitted here.
       # Accumulate runs into one report: the default workspace tests, then the native backend's
       # mapping tests behind `embed-ipadic` (otherwise `LinderaProvider::analyze` reads as uncovered,
-      # since the default run only exercises its error paths), then the wasm bindings' `lindera`
+      # since the default run only exercises its error paths), then the wasm bindings' `morphology`
       # feature (so `register_dictionary` / pin decoding are measured, not just the lean path).
       - name: Generate coverage (lcov)
         run: |
           cargo llvm-cov nextest --workspace --no-tests=warn --no-report
           cargo llvm-cov nextest -p tzlint_morphology_native --features embed-ipadic --no-report
-          cargo llvm-cov nextest -p tzlint_wasm --features lindera --no-report
+          cargo llvm-cov nextest -p tzlint_wasm --features morphology --no-report
           cargo llvm-cov report --lcov --output-path lcov.info
       - name: Upload to Codecov
         uses: codecov/codecov-action@v6

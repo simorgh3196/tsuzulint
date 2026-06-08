@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "WebAssembly bindings for TsuzuLint. Lean by default (the wasm-clean seam, no tokenizer); the optional `lindera` feature bundles the Japanese morphology backend for a full, CLI-consistent build."
+description = "WebAssembly bindings for TsuzuLint. Lean by default (the wasm-clean seam, no tokenizer); the optional `morphology` feature bundles the morphology backend (the language is chosen at runtime by the registered dictionary) for a full, CLI-consistent build."
 
 [lib]
 # `cdylib` for the wasm artifact; `rlib` so the pure-Rust `Linter` core is unit-testable on native.
@@ -25,8 +25,8 @@ tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
 tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
 # Serialize the diagnostics to JSON for the JS boundary (the diagnostic model is serde-free).
 serde_json = { workspace = true }
-# The lindera backend — pulled ONLY by the `lindera` feature, so the default (lean) wasm artifact is
-# tokenizer-free and tiny. lindera and its deps are pure Rust and build for wasm32.
+# The native morphology backend — pulled ONLY by the `morphology` feature, so the default (lean)
+# wasm artifact is tokenizer-free and tiny. The backend and its deps are pure Rust and build for wasm32.
 tzlint_morphology_native = { path = "../tzlint_morphology_native", version = "0.0.0", optional = true }
 
 # wasm-only glue: the `#[wasm_bindgen]` JS bindings + a panic→console.error hook. Native builds (the
@@ -36,8 +36,12 @@ wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 
 [features]
-# Bundle the lindera Japanese morphology backend so morphology-dependent rules (e.g.
-# no-doubled-joshi) fire with the same analysis as the CLI. Off by default: the lean artifact is for
-# embedders whose languages need no tokenizer. Loading a dictionary is then done from JS via
-# `registerDictionary(lang, compressedBytes, pinHex)`.
-lindera = ["dep:tzlint_morphology_native"]
+# Bundle the morphology backend so morphology-dependent rules (e.g. no-doubled-joshi) fire with the
+# same analysis as the CLI. Off by default: the lean artifact is for embedders that need no
+# morphological analysis. A single capability feature, NOT one per language: the backend is one
+# language-neutral engine (the same native tokenizer serves ja/ko/zh) and the dictionary — and thus
+# the language — is loaded at runtime from JS via `registerDictionary(lang, compressedBytes, pinHex)`,
+# so there is no compile-time language axis to split on. Japanese is the language wired today; ko/zh
+# reuse this same build once their dictionaries and rules land. Named for the capability, so a
+# consumer opts in by whether it needs morphology, not by a backend or a language.
+morphology = ["dep:tzlint_morphology_native"]
