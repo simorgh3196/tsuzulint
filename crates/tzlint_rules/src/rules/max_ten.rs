@@ -1,6 +1,7 @@
 //! `max-ten` — flag sentences with too many 読点 (Japanese commas).
 
 use serde_json::Value;
+use tzlint_ast::morphology::Lang;
 use tzlint_ast::{NodeKind, Span};
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
@@ -27,7 +28,8 @@ impl MaxTen {
                 ID,
                 Severity::Warning,
                 vec![NodeKind::PARAGRAPH, NodeKind::HEADING, NodeKind::TABLE_CELL],
-            ),
+            )
+            .for_language(Lang::JA),
             max: DEFAULT_MAX,
             touten: DEFAULT_TOUTEN,
             kuten: DEFAULT_KUTEN,

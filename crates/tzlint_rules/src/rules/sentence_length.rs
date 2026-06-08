@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 use tzlint_ast::NodeKind;
+use tzlint_ast::morphology::Lang;
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use crate::util::{split_sentences, strip_urls};
@@ -26,7 +27,8 @@ impl SentenceLength {
                 ID,
                 Severity::Warning,
                 vec![NodeKind::PARAGRAPH, NodeKind::HEADING, NodeKind::TABLE_CELL],
-            ),
+            )
+            .for_language(Lang::JA),
             max: DEFAULT_MAX,
             skip_urls: true,
         }

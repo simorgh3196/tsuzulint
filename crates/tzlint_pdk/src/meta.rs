@@ -45,6 +45,28 @@ impl Requirements {
     }
 }
 
+/// Which document languages a rule applies to — independent of whether it needs morphology.
+///
+/// Defaults to [`Applicability::Neutral`]: a rule with no language tag runs on every document,
+/// including one whose language is unset. A rule scoped to a [`Languages`](Applicability::Languages)
+/// set runs only when the document's language is in that set, and **never** when the language is
+/// unset — so a language-specific rule never fires on untagged text.
+///
+/// This descriptor is consumed by the engine's language scoping; it changes no scheduling on its
+/// own and is purely additive to the PDK metadata — it touches neither the AST nor the wire format.
+/// A morphology rule pinned via [`RuleMeta::with_morphology`] is implicitly scoped to its
+/// dictionary language (the builder records it here too), so it is the single source of truth
+/// [`applies_to`](RuleMeta::applies_to) reads.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Applicability {
+    /// Runs on any document language, including when the language is unset. The default.
+    #[default]
+    Neutral,
+    /// Runs only when the document language is one of these. Non-empty by construction — built one
+    /// language at a time via [`RuleMeta::for_language`] (or pinned by `with_morphology`).
+    Languages(Vec<Lang>),
+}
+
 /// Static metadata describing a rule: its id, the [`NodeKind`]s it wants to visit, its default
 /// severity, and what it [`requires`](RuleMeta::requires) to run.
 ///
@@ -63,6 +85,10 @@ pub struct RuleMeta {
     /// (nothing) — see [`with_morphology`](RuleMeta::with_morphology) to opt in. Private so the
     /// pair stays consistent; read it via [`requires`](RuleMeta::requires).
     requires: Requirements,
+    /// Which document languages this rule applies to. Defaults to [`Applicability::Neutral`]
+    /// (every document). Private so the engine reads it only through
+    /// [`applies_to`](RuleMeta::applies_to); set it with [`for_language`](RuleMeta::for_language).
+    applicability: Applicability,
 }
 
 impl RuleMeta {
@@ -78,18 +104,44 @@ impl RuleMeta {
             default_severity,
             node_kinds: node_kinds.into(),
             requires: Requirements::default(),
+            applicability: Applicability::Neutral,
         }
     }
 
     /// Declare that this rule reads the morphology table, pinned to dictionary language `lang`.
     ///
     /// The engine uses this to provision `lang`'s dictionary and to skip the rule when
-    /// morphology is unavailable, instead of running it against an empty table.
+    /// morphology is unavailable, instead of running it against an empty table. A morphology rule
+    /// can only run where its dictionary is provisioned, so it is inherently scoped to `lang`:
+    /// this also records that [`Applicability`], making it the single source of truth
+    /// [`applies_to`](Self::applies_to) reads — no separate [`for_language`](Self::for_language)
+    /// call is needed.
     #[must_use]
     pub fn with_morphology(mut self, lang: Lang) -> Self {
         self.requires = Requirements {
             morphology: true,
             lang: Some(lang),
+        };
+        self.applicability = Applicability::Languages(Vec::from([lang]));
+        self
+    }
+
+    /// Scope this rule to documents written in `lang` (e.g. a JA-only typography rule).
+    ///
+    /// Additive: a rule with no such tag stays [`Applicability::Neutral`] and runs on every
+    /// document. Call more than once to widen the set (idempotent per language). A morphology
+    /// rule pinned via [`with_morphology`](Self::with_morphology) is already scoped to its
+    /// dictionary language, so it needs no separate `for_language` tag.
+    #[must_use]
+    pub fn for_language(mut self, lang: Lang) -> Self {
+        self.applicability = match self.applicability {
+            Applicability::Neutral => Applicability::Languages(Vec::from([lang])),
+            Applicability::Languages(mut langs) => {
+                if !langs.contains(&lang) {
+                    langs.push(lang);
+                }
+                Applicability::Languages(langs)
+            }
         };
         self
     }
@@ -115,6 +167,26 @@ impl RuleMeta {
     #[must_use]
     pub fn required_lang(&self) -> Option<Lang> {
         self.requires.lang()
+    }
+
+    /// This rule's language [`Applicability`] (see [`for_language`](Self::for_language)).
+    #[must_use]
+    pub fn applicability(&self) -> &Applicability {
+        &self.applicability
+    }
+
+    /// Whether this rule applies to a document whose language is `doc_lang` (`None` = unset).
+    ///
+    /// [`Neutral`](Applicability::Neutral) always applies — on any language and when the language
+    /// is unset. A [`Languages`](Applicability::Languages) set applies only when `doc_lang` is one
+    /// of its languages, and never when the language is unset. The engine consumes this for
+    /// language scoping; on its own it changes no scheduling.
+    #[must_use]
+    pub fn applies_to(&self, doc_lang: Option<Lang>) -> bool {
+        match &self.applicability {
+            Applicability::Neutral => true,
+            Applicability::Languages(langs) => doc_lang.is_some_and(|l| langs.contains(&l)),
+        }
     }
 }
 
@@ -175,5 +247,68 @@ mod tests {
         assert_eq!(meta.id.as_str(), "no-doubled-joshi");
         assert_eq!(meta.default_severity, Severity::Error);
         assert!(meta.visits(NodeKind::TEXT));
+    }
+
+    #[test]
+    fn applicability_defaults_to_neutral_and_runs_everywhere() {
+        let meta = RuleMeta::new("no-nfd", Severity::Warning, vec![NodeKind::TEXT]);
+        assert_eq!(meta.applicability(), &Applicability::Neutral);
+        // Neutral runs on any language *and* when the language is unset.
+        assert!(meta.applies_to(None));
+        assert!(meta.applies_to(Some(Lang::JA)));
+        assert!(meta.applies_to(Some(Lang::KO)));
+    }
+
+    #[test]
+    fn for_language_scopes_to_that_language_and_never_to_unset() {
+        let meta = RuleMeta::new(
+            "sentence-length",
+            Severity::Warning,
+            vec![NodeKind::PARAGRAPH],
+        )
+        .for_language(Lang::JA);
+        assert_eq!(
+            meta.applicability(),
+            &Applicability::Languages(vec![Lang::JA])
+        );
+        assert!(meta.applies_to(Some(Lang::JA)));
+        assert!(!meta.applies_to(Some(Lang::KO)));
+        // A language-scoped rule never fires on untagged (unset-language) text.
+        assert!(!meta.applies_to(None));
+    }
+
+    #[test]
+    fn for_language_chains_into_a_set_without_duplicates() {
+        let meta = RuleMeta::new("hypothetical", Severity::Warning, vec![NodeKind::TEXT])
+            .for_language(Lang::JA)
+            .for_language(Lang::KO)
+            .for_language(Lang::JA); // idempotent
+        assert_eq!(
+            meta.applicability(),
+            &Applicability::Languages(vec![Lang::JA, Lang::KO])
+        );
+        assert!(meta.applies_to(Some(Lang::JA)));
+        assert!(meta.applies_to(Some(Lang::KO)));
+        assert!(!meta.applies_to(Some(Lang::ZH)));
+        assert!(!meta.applies_to(None));
+    }
+
+    #[test]
+    fn with_morphology_implies_language_applicability() {
+        // A morphology rule pinned to a dictionary language is inherently scoped to it — the
+        // single source of truth `applies_to` reads, no separate `for_language` needed.
+        let meta = RuleMeta::new(
+            "no-doubled-joshi",
+            Severity::Warning,
+            vec![NodeKind::PARAGRAPH],
+        )
+        .with_morphology(Lang::JA);
+        assert_eq!(
+            meta.applicability(),
+            &Applicability::Languages(vec![Lang::JA])
+        );
+        assert!(meta.applies_to(Some(Lang::JA)));
+        assert!(!meta.applies_to(Some(Lang::KO)));
+        assert!(!meta.applies_to(None));
     }
 }
