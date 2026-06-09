@@ -31,6 +31,7 @@ use tzlint_pdk::Diagnostic;
 use crate::cli::{Cli, Command, OutputFormat, RuleListFormat, RulesCommand};
 use crate::expand;
 use crate::output::{self, FileReport};
+use crate::prh_dict;
 use crate::rules::{
     any_effective_rules, processor_config_for, region_rules_for, rule_info, rule_infos,
     unknown_rule_ids,
@@ -191,7 +192,8 @@ fn lint(
     let stdin: &mut dyn Read = &mut *streams.stdin;
     let stdout: &mut dyn Write = &mut *streams.stdout;
     let stderr: &mut dyn Write = &mut *streams.stderr;
-    let config = load_config(cli, host, cwd, stderr)?;
+    let (mut config, base_dir) = load_config(cli, host, cwd, stderr)?;
+    prh_dict::apply_prh_dictionaries(&mut config, host, &base_dir, stderr);
     note_if_no_rules(&config, stderr);
     note_unknown_rules(&config, stderr);
     // One processor registry for the whole run, shared by every file and the stdin source.
@@ -365,7 +367,8 @@ fn fix(
     let stdin: &mut dyn Read = &mut *streams.stdin;
     let stdout: &mut dyn Write = &mut *streams.stdout;
     let stderr: &mut dyn Write = &mut *streams.stderr;
-    let config = load_config(cli, host, cwd, stderr)?;
+    let (mut config, base_dir) = load_config(cli, host, cwd, stderr)?;
+    prh_dict::apply_prh_dictionaries(&mut config, host, &base_dir, stderr);
     note_if_no_rules(&config, stderr);
     note_unknown_rules(&config, stderr);
     let registry = Registry::with_builtins();
@@ -562,7 +565,9 @@ fn rules_cmd(
 ) -> Result<ExitStatus, String> {
     let stdout: &mut dyn Write = &mut *streams.stdout;
     let stderr: &mut dyn Write = &mut *streams.stderr;
-    let config = load_config(cli, host, cwd, stderr)?;
+    // `rules` reports the configured rule set; ja-prh dictionaries affect lint/fix output, not the
+    // listing, so they are not loaded here (avoids I/O for a query command).
+    let (config, _base_dir) = load_config(cli, host, cwd, stderr)?;
     note_unknown_rules(&config, stderr);
     match command {
         RulesCommand::List { format } => {
@@ -594,12 +599,15 @@ fn rules_cmd(
 
 /// Resolve the configuration: read `--config` if given (format inferred from its name, JSONC
 /// otherwise), else walk up from the working directory via [`discover`], else the default.
+/// Load the resolved [`Config`] and the **base directory** for resolving config-relative resources
+/// (currently `ja-prh`'s `dictionaries` paths): the directory of the config file when one is used,
+/// otherwise `cwd`.
 fn load_config(
     cli: &Cli,
     host: &dyn Host,
     cwd: &Path,
     stderr: &mut dyn Write,
-) -> Result<Config, String> {
+) -> Result<(Config, PathBuf), String> {
     if let Some(path) = &cli.config {
         // Infer the format from the name and fail loudly on an unrecognized one, rather than
         // silently assuming JSONC and surfacing a confusing parse error downstream.
@@ -617,7 +625,7 @@ fn load_config(
         if cli.verbose {
             let _ = writeln!(stderr, "note: using config {}", path.display());
         }
-        return Ok(config);
+        return Ok((config, config_base_dir(path, cwd)));
     }
 
     match discover(host, cwd) {
@@ -628,15 +636,25 @@ fn load_config(
                     let _ = writeln!(stderr, "note: {warning}");
                 }
             }
-            Ok(found.config)
+            let base = config_base_dir(&found.path, cwd);
+            Ok((found.config, base))
         }
         Ok(None) => {
             if cli.verbose {
                 let _ = writeln!(stderr, "note: no config file found; using defaults");
             }
-            Ok(Config::default())
+            Ok((Config::default(), cwd.to_path_buf()))
         }
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// The directory config-relative resource paths resolve against: the config file's parent, or
+/// `cwd` when the path has no parent (a bare `.tzlintrc` in the working directory).
+fn config_base_dir(config_path: &Path, cwd: &Path) -> PathBuf {
+    match config_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => cwd.to_path_buf(),
     }
 }
 
@@ -1068,6 +1086,28 @@ mod tests {
         let (status, _out, err) = run_capture(&bad, &host);
         assert_eq!(status, ExitStatus::Error);
         assert!(err.contains("unknown preset"), "{err}");
+    }
+
+    #[test]
+    fn ja_prh_loads_terms_from_a_configured_prh_dictionary() {
+        // End-to-end: a `.prh.yml` named in ja-prh's `dictionaries` option is read (relative to the
+        // config dir), its terms folded in, and a 表記ゆれ in the document is flagged at lint time.
+        let host = MockHost::with("a.md", "Javascript は楽しい。\n");
+        host.put(
+            "/work/.tzlintrc.json",
+            "{ \"language\": \"ja\", \
+               \"rules\": { \"ja-prh\": { \"options\": { \"dictionaries\": [\"web.prh.yml\"] } } } }",
+        );
+        host.put(
+            "/work/web.prh.yml",
+            "rules:\n  - expected: JavaScript\n    patterns: [Javascript]\n",
+        );
+
+        let (status, out, err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
+        assert_eq!(status, ExitStatus::Findings, "out=<{out}> err=<{err}>");
+        assert!(out.contains("ja-prh"), "{out}");
+        // The dictionary term was loaded and matched: the message names the expected spelling.
+        assert!(out.contains("JavaScript"), "{out}");
     }
 
     #[test]

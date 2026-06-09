@@ -22,6 +22,7 @@ mod cli;
 mod expand;
 mod host;
 mod output;
+mod prh_dict;
 mod rules;
 
 fn main() -> ExitCode {
