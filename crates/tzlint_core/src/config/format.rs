@@ -158,7 +158,7 @@ fn strip_jsonc(text: &str) -> String {
 /// `#` comment is ignored, and a `&`/`*` is only flagged when it begins a token (preceded by
 /// start-of-input, whitespace, or a flow indicator) and is followed by a name character — so
 /// arithmetic-like plain scalars such as `a & b` or `2 * 3` are not flagged.
-fn reject_yaml_anchors(text: &str) -> Result<(), String> {
+pub(crate) fn reject_yaml_anchors(text: &str) -> Result<(), String> {
     #[derive(PartialEq)]
     enum State {
         Plain,
