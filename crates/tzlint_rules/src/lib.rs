@@ -22,14 +22,14 @@ use serde_json::Value;
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
-    ja_no_mixed_period, ja_no_redundant_expression, max_kanji_continuous_len, max_ten,
+    ja_no_mixed_period, ja_no_redundant_expression, ja_prh, max_kanji_continuous_len, max_ten,
     no_double_negative_ja, no_doubled_conjunctive_particle_ga, no_doubled_joshi,
     no_dropping_the_ra, no_exclamation_question_mark, no_hankaku_kana, no_mix_dearu_desumasu,
     no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_zero_width_spaces, sentence_length,
 };
 pub use rules::{
     ja_no_mixed_period::JaNoMixedPeriod, ja_no_redundant_expression::JaNoRedundantExpression,
-    max_kanji_continuous_len::MaxKanjiContinuousLen, max_ten::MaxTen,
+    ja_prh::JaPrh, max_kanji_continuous_len::MaxKanjiContinuousLen, max_ten::MaxTen,
     no_double_negative_ja::NoDoubleNegativeJa,
     no_doubled_conjunctive_particle_ga::NoDoubledConjunctiveParticleGa,
     no_doubled_joshi::NoDoubledJoshi, no_dropping_the_ra::NoDroppingTheRa,
@@ -58,6 +58,7 @@ pub const RULE_IDS: &[&str] = &[
     ja_no_redundant_expression::ID,
     no_dropping_the_ra::ID,
     no_double_negative_ja::ID,
+    ja_prh::ID,
 ];
 
 /// Construct a single built-in rule by `id`, applying config `options` (through the rule's
@@ -86,6 +87,7 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         ja_no_redundant_expression::ID => Box::new(JaNoRedundantExpression::new()),
         no_dropping_the_ra::ID => Box::new(NoDroppingTheRa::new()),
         no_double_negative_ja::ID => Box::new(NoDoubleNegativeJa::new()),
+        ja_prh::ID => Box::new(JaPrh::from_options(options)),
         _ => return None,
     };
     Some(match severity {
@@ -181,6 +183,7 @@ mod tests {
             "ja-no-redundant-expression",         // JA via its morphology pin
             "no-dropping-the-ra",                 // JA via its morphology pin
             "no-double-negative-ja",              // JA via its morphology pin
+            "ja-prh",                             // JA-only (surface terminology rule)
         ];
 
         for id in RULE_IDS {
