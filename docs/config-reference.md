@@ -35,17 +35,22 @@
   collision). Built-in presets:
   - `ja-basic` — `no-hankaku-kana`, `no-mixed-zenkaku-hankaku-alphabet`, `no-nfd`,
     `no-zero-width-spaces`, `ja-no-mixed-period`.
-  - `ja-technical-writing` — the above plus `no-exclamation-question-mark`, and thresholds:
-    `sentence-length` `max: 100`, `max-ten` `max: 3`, `max-kanji-continuous-len` `max: 6`.
+  - `ja-technical-writing` — the above plus `no-exclamation-question-mark`, the
+    morphology-backed `no-doubled-joshi`, and thresholds: `sentence-length` `max: 100`,
+    `max-ten` `max: 3`, `max-kanji-continuous-len` `max: 6`.
 
-  Because activation is opt-out, a preset does **not** restrict *which* rules run — every
-  built-in rule is already on, so a preset effectively supplies **options and severities** for
-  the rules it names. To run a narrower set, disable the unwanted rules explicitly. Morphology
-  rules (e.g. `no-doubled-joshi`) are intentionally absent from the presets: they are no-ops
-  until a [`morphology`](#morphology--dictionary-for-morphology-dependent-rules) dictionary is
-  configured, so a preset never silently requires one.
+  The `ja-*` presets imply `language: ja` (your own `language` overrides it), so their Japanese
+  rules run out of the box. Because activation is opt-out, a preset does **not** restrict *which*
+  rules run — every built-in rule is already on, so a preset effectively supplies **options and
+  severities** for the rules it names. To run a narrower set, disable the unwanted rules
+  explicitly. `ja-technical-writing` enables the morphology-backed `no-doubled-joshi`, but it is a
+  no-op until a [`morphology`](#morphology--dictionary-for-morphology-dependent-rules) dictionary
+  is configured (the engine skips it), so a preset never *silently requires* one.
 - **Language:** `language` (e.g. `ja`) and `message-language` (the diagnostic locale,
   independent of the document language). Config keys are kebab-case (`message-language`).
+  `language` also **scopes** which rules run: a JA-only rule (e.g. `sentence-length`, `max-ten`,
+  `no-doubled-joshi`) runs only on Japanese documents, and when `language` is unset only the
+  language-neutral rules run — so set `language: ja` (or extend a `ja-*` preset) to lint Japanese.
 - **JSON Schema:** a Draft 2020-12 schema is published as `tzlint_core::CONFIG_SCHEMA`
   (`$id` `https://tsuzulint.dev/schema/config/v1.json`) for editor completion/validation and
   CLI emission. It describes the **JSON-level** contract and is intentionally stricter than the

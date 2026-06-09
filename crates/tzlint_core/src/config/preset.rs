@@ -49,10 +49,11 @@ impl Preset {
     /// The rule settings this preset contributes as a base layer.
     ///
     /// Rule ids are referenced as strings (no dependency on `tzlint_rules`); they MUST match the
-    /// ids in `tzlint_rules::RULE_IDS` verbatim. Rules whose detection needs morphology (M2),
-    /// such as `no-doubled-joshi`, are intentionally omitted until that lands — additively.
-    /// The options set here are routed into the constructed rule instances (via
-    /// `tzlint_rules::build_rule`) when a config selects this preset through `extends`.
+    /// ids in `tzlint_rules::RULE_IDS` verbatim. The morphology-backed `no-doubled-joshi` is part
+    /// of `ja-technical-writing`; it is a no-op until a dictionary is provisioned (the engine skips
+    /// it), so enabling it without a configured `morphology` source is harmless. The options set
+    /// here are routed into the constructed rule instances (via `tzlint_rules::build_rule`) when a
+    /// config selects this preset through `extends`.
     fn rules(self) -> BTreeMap<RuleId, RuleSetting> {
         match self {
             Preset::JaBasic => ja_basic(),
@@ -97,6 +98,9 @@ fn ja_technical_writing() -> BTreeMap<RuleId, RuleSetting> {
         ("no-zero-width-spaces", on(Value::Null)),
         ("no-exclamation-question-mark", on(Value::Null)),
         ("ja-no-mixed-period", on(Value::Null)),
+        // Morphology-backed: a no-op until a dictionary is provisioned (the engine skips it), so
+        // it is safe to enable here even when `morphology` is unconfigured.
+        ("no-doubled-joshi", on(Value::Null)),
     ]
     .into_iter()
     .map(|(id, setting)| (RuleId::from(id), setting))
@@ -249,6 +253,25 @@ mod tests {
             !Preset::JaBasic
                 .rules()
                 .contains_key(&RuleId::from("sentence-length"))
+        );
+    }
+
+    #[test]
+    fn ja_technical_writing_enables_the_morphology_flagship_rule() {
+        // `no-doubled-joshi` is the morphology-backed flagship of the technical-writing preset. It
+        // is a no-op until a dictionary is provisioned (engine skips it), so enabling it in the
+        // preset is safe even when morphology is unconfigured.
+        assert!(
+            Preset::JaTechnicalWriting
+                .rules()
+                .contains_key(&RuleId::from("no-doubled-joshi")),
+            "ja-technical-writing should enable no-doubled-joshi"
+        );
+        // It is intentionally NOT in the lighter ja-basic preset.
+        assert!(
+            !Preset::JaBasic
+                .rules()
+                .contains_key(&RuleId::from("no-doubled-joshi"))
         );
     }
 }
