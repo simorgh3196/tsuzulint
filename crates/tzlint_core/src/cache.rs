@@ -14,7 +14,8 @@
 //! diagnostics — its 256-bit collision resistance makes that infeasible.
 //!
 //! **Versioning:** the parser/transform/engine versions below are hand-bumped consts, *not*
-//! `CARGO_PKG_VERSION` (the workspace is pinned `0.0.0`, so it carries no signal). Bump the
+//! `CARGO_PKG_VERSION` — the key must turn over on *behavior* changes, not on every release, so
+//! a version bump that does not alter linting never needlessly invalidates the cache. Bump the
 //! relevant const whenever the corresponding behavior changes (see each const's doc).
 //!
 //! **Scope:** only the in-memory cache exists; persistence is deferred to the CLI (M1g),
