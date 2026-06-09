@@ -29,6 +29,9 @@ accumulate as the release is built.
   `no-mixed-zenkaku-hankaku-alphabet`, `no-nfd`, `no-zero-width-spaces`,
   `ja-no-mixed-period`, `no-exclamation-question-mark`, `no-todo`, `sentence-length`,
   `max-ten`, `max-kanji-continuous-len`, and the morphology-backed `no-doubled-joshi`.
+- **Japanese morphology style rules.** `no-mix-dearu-desumasu` flags mixing the である
+  (plain) and ですます (polite) sentence styles within a document — auto-detecting the
+  majority and flagging the minority, or enforcing a configured `prefer`red style.
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the

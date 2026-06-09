@@ -23,13 +23,14 @@ use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
     ja_no_mixed_period, max_kanji_continuous_len, max_ten, no_doubled_joshi,
-    no_exclamation_question_mark, no_hankaku_kana, no_mixed_zenkaku_hankaku_alphabet, no_nfd,
-    no_todo, no_zero_width_spaces, sentence_length,
+    no_exclamation_question_mark, no_hankaku_kana, no_mix_dearu_desumasu,
+    no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_zero_width_spaces, sentence_length,
 };
 pub use rules::{
     ja_no_mixed_period::JaNoMixedPeriod, max_kanji_continuous_len::MaxKanjiContinuousLen,
     max_ten::MaxTen, no_doubled_joshi::NoDoubledJoshi,
     no_exclamation_question_mark::NoExclamationQuestionMark, no_hankaku_kana::NoHankakuKana,
+    no_mix_dearu_desumasu::NoMixDearuDesumasu,
     no_mixed_zenkaku_hankaku_alphabet::NoMixedZenkakuHankakuAlphabet, no_nfd::NoNfd,
     no_todo::NoTodo, no_zero_width_spaces::NoZeroWidthSpaces, sentence_length::SentenceLength,
 };
@@ -41,6 +42,7 @@ pub const RULE_IDS: &[&str] = &[
     max_ten::ID,
     max_kanji_continuous_len::ID,
     no_hankaku_kana::ID,
+    no_mix_dearu_desumasu::ID,
     no_mixed_zenkaku_hankaku_alphabet::ID,
     no_nfd::ID,
     no_zero_width_spaces::ID,
@@ -62,6 +64,7 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         max_ten::ID => Box::new(MaxTen::from_options(options)),
         max_kanji_continuous_len::ID => Box::new(MaxKanjiContinuousLen::from_options(options)),
         no_hankaku_kana::ID => Box::new(NoHankakuKana::new()),
+        no_mix_dearu_desumasu::ID => Box::new(NoMixDearuDesumasu::from_options(options)),
         no_mixed_zenkaku_hankaku_alphabet::ID => Box::new(NoMixedZenkakuHankakuAlphabet::new()),
         no_nfd::ID => Box::new(NoNfd::new()),
         no_zero_width_spaces::ID => Box::new(NoZeroWidthSpaces::new()),
@@ -160,7 +163,8 @@ mod tests {
             "max-ten",
             "no-hankaku-kana",
             "ja-no-mixed-period",
-            "no-doubled-joshi", // JA via its morphology pin
+            "no-doubled-joshi",      // JA via its morphology pin
+            "no-mix-dearu-desumasu", // JA via its morphology pin
         ];
 
         for id in RULE_IDS {
@@ -230,6 +234,10 @@ mod tests {
         assert_eq!(
             NoDoubledJoshi::default().meta().id.as_str(),
             "no-doubled-joshi"
+        );
+        assert_eq!(
+            NoMixDearuDesumasu::default().meta().id.as_str(),
+            "no-mix-dearu-desumasu"
         );
     }
 
