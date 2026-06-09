@@ -181,8 +181,6 @@ mod native {
     use std::fs::{File, OpenOptions};
     use std::io::{Read, Write};
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// A [`Host`](super::Host) backed by the real filesystem (`std::fs`). The default for the
     /// native CLI and LSP.
@@ -352,21 +350,22 @@ mod native {
         }
     }
 
-    /// A unique sibling temp path `<name>.tzlint-tmp.<pid>.<counter>.<nanos>` (same directory,
-    /// so the rename stays on one filesystem). pid + a process-wide counter + the clock make
-    /// the name hard to pre-guess; `O_EXCL` (in [`TempFile::create`]) is the actual guard.
+    /// A unique sibling temp path `<name>.tzlint-tmp.<random1>.<random2>` (same directory,
+    /// so the rename stays on one filesystem).
+    /// Using `std::collections::hash_map::RandomState` gives unpredictable names,
+    /// and `O_EXCL` (in [`TempFile::create`]) is the actual guard.
     fn tmp_sibling(path: &Path) -> PathBuf {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+
+        let r1 = RandomState::new().build_hasher().finish();
+        let r2 = RandomState::new().build_hasher().finish();
+
         let mut name = path
             .file_name()
             .map(|s| s.to_os_string())
             .unwrap_or_default();
-        name.push(format!(".tzlint-tmp.{pid}.{n}.{nanos}"));
+        name.push(format!(".tzlint-tmp.{r1:016x}.{r2:016x}"));
         path.with_file_name(name)
     }
 
