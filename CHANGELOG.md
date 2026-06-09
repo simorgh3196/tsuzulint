@@ -36,6 +36,8 @@ accumulate as the release is built.
   in one sentence (the subject-marking 格助詞「が」 is not counted).
   `ja-no-redundant-expression` flags the redundant「〜することができる」family (こと + が +
   できる/可能), which reads more tightly as 「〜できる」.
+  `no-dropping-the-ra` flags ら抜き言葉 (a 一段/カ変 verb + the potential 「れる」 where
+  「られる」 is standard, e.g. 見れる → 見られる; 五段 passives like 書かれる are not flagged).
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the

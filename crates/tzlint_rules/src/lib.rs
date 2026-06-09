@@ -23,16 +23,17 @@ use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
     ja_no_mixed_period, ja_no_redundant_expression, max_kanji_continuous_len, max_ten,
-    no_doubled_conjunctive_particle_ga, no_doubled_joshi, no_exclamation_question_mark,
-    no_hankaku_kana, no_mix_dearu_desumasu, no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo,
-    no_zero_width_spaces, sentence_length,
+    no_doubled_conjunctive_particle_ga, no_doubled_joshi, no_dropping_the_ra,
+    no_exclamation_question_mark, no_hankaku_kana, no_mix_dearu_desumasu,
+    no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_zero_width_spaces, sentence_length,
 };
 pub use rules::{
     ja_no_mixed_period::JaNoMixedPeriod, ja_no_redundant_expression::JaNoRedundantExpression,
     max_kanji_continuous_len::MaxKanjiContinuousLen, max_ten::MaxTen,
     no_doubled_conjunctive_particle_ga::NoDoubledConjunctiveParticleGa,
-    no_doubled_joshi::NoDoubledJoshi, no_exclamation_question_mark::NoExclamationQuestionMark,
-    no_hankaku_kana::NoHankakuKana, no_mix_dearu_desumasu::NoMixDearuDesumasu,
+    no_doubled_joshi::NoDoubledJoshi, no_dropping_the_ra::NoDroppingTheRa,
+    no_exclamation_question_mark::NoExclamationQuestionMark, no_hankaku_kana::NoHankakuKana,
+    no_mix_dearu_desumasu::NoMixDearuDesumasu,
     no_mixed_zenkaku_hankaku_alphabet::NoMixedZenkakuHankakuAlphabet, no_nfd::NoNfd,
     no_todo::NoTodo, no_zero_width_spaces::NoZeroWidthSpaces, sentence_length::SentenceLength,
 };
@@ -54,6 +55,7 @@ pub const RULE_IDS: &[&str] = &[
     no_doubled_joshi::ID,
     no_doubled_conjunctive_particle_ga::ID,
     ja_no_redundant_expression::ID,
+    no_dropping_the_ra::ID,
 ];
 
 /// Construct a single built-in rule by `id`, applying config `options` (through the rule's
@@ -80,6 +82,7 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         no_doubled_joshi::ID => Box::new(NoDoubledJoshi::from_options(options)),
         no_doubled_conjunctive_particle_ga::ID => Box::new(NoDoubledConjunctiveParticleGa::new()),
         ja_no_redundant_expression::ID => Box::new(JaNoRedundantExpression::new()),
+        no_dropping_the_ra::ID => Box::new(NoDroppingTheRa::new()),
         _ => return None,
     };
     Some(match severity {
@@ -173,6 +176,7 @@ mod tests {
             "no-mix-dearu-desumasu",              // JA via its morphology pin
             "no-doubled-conjunctive-particle-ga", // JA via its morphology pin
             "ja-no-redundant-expression",         // JA via its morphology pin
+            "no-dropping-the-ra",                 // JA via its morphology pin
         ];
 
         for id in RULE_IDS {
