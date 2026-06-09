@@ -74,6 +74,17 @@ ruzstd = { version = "0.8.3", default-features = false, features = ["std", "hash
 # The guard itself does no I/O, so this never pulls networking into the wasm-clean core.
 url = "2"
 
+# Regular-expression engine for `ja-prh` patterns imported from `prh` `.prh.yml` dictionaries
+# (the `/source/flags` form). `regex-lite` (same author as `regex`) is chosen over the full `regex`
+# deliberately: it has **zero runtime dependencies** and a much smaller binary, so it barely grows
+# the `wasm32` artifact (the rule crate ships into the embeddable build — the embeddability moat).
+# It keeps the guarantees that matter here: worst-case `O(m*n)` matching (no catastrophic
+# backtracking → ReDoS is impossible) and a non-panicking API (`Regex::new` returns a `Result`;
+# matching never panics — required by the deny-unwrap/panic library lints). The trade-off is
+# ASCII-only Perl classes (`\d`/`\w`) and no `\p{...}`; Japanese is matched as literals in prh
+# dictionaries, so this rarely bites. Pure Rust, MIT/Apache-2.0.
+regex-lite = "0.1"
+
 # Argument parsing for the native `tzlint` CLI (the `derive` API: `Parser`/`Subcommand`/
 # `ValueEnum`). CLI-only — it never reaches the AST or the `wasm32` core (the wasm CI job
 # builds `tzlint_core` lib-only), so a native-only dependency here is fine.
