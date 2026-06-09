@@ -34,6 +34,8 @@ accumulate as the release is built.
   majority and flagging the minority, or enforcing a configured `prefer`red style.
   `no-doubled-conjunctive-particle-ga` flags the 逆接の接続助詞「が」 used more than once
   in one sentence (the subject-marking 格助詞「が」 is not counted).
+  `ja-no-redundant-expression` flags the redundant「〜することができる」family (こと + が +
+  できる/可能), which reads more tightly as 「〜できる」.
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the

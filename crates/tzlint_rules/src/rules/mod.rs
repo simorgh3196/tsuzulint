@@ -1,6 +1,7 @@
 //! The built-in rules, one module each.
 
 pub mod ja_no_mixed_period;
+pub mod ja_no_redundant_expression;
 pub mod max_kanji_continuous_len;
 pub mod max_ten;
 pub mod no_doubled_conjunctive_particle_ga;
