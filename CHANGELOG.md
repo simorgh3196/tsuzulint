@@ -38,6 +38,8 @@ accumulate as the release is built.
   できる/可能), which reads more tightly as 「〜できる」.
   `no-dropping-the-ra` flags ら抜き言葉 (a 一段/カ変 verb + the potential 「れる」 where
   「られる」 is standard, e.g. 見れる → 見られる; 五段 passives like 書かれる are not flagged).
+  `no-double-negative-ja` flags a rhetorical double negative — a negative closed by
+  「は」+ another negative (ないことはない / なくはない); 〜なければならない is not flagged.
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the
