@@ -22,15 +22,15 @@ use serde_json::Value;
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
-    ja_no_mixed_period, max_kanji_continuous_len, max_ten, no_doubled_joshi,
-    no_exclamation_question_mark, no_hankaku_kana, no_mix_dearu_desumasu,
+    ja_no_mixed_period, max_kanji_continuous_len, max_ten, no_doubled_conjunctive_particle_ga,
+    no_doubled_joshi, no_exclamation_question_mark, no_hankaku_kana, no_mix_dearu_desumasu,
     no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_zero_width_spaces, sentence_length,
 };
 pub use rules::{
     ja_no_mixed_period::JaNoMixedPeriod, max_kanji_continuous_len::MaxKanjiContinuousLen,
-    max_ten::MaxTen, no_doubled_joshi::NoDoubledJoshi,
-    no_exclamation_question_mark::NoExclamationQuestionMark, no_hankaku_kana::NoHankakuKana,
-    no_mix_dearu_desumasu::NoMixDearuDesumasu,
+    max_ten::MaxTen, no_doubled_conjunctive_particle_ga::NoDoubledConjunctiveParticleGa,
+    no_doubled_joshi::NoDoubledJoshi, no_exclamation_question_mark::NoExclamationQuestionMark,
+    no_hankaku_kana::NoHankakuKana, no_mix_dearu_desumasu::NoMixDearuDesumasu,
     no_mixed_zenkaku_hankaku_alphabet::NoMixedZenkakuHankakuAlphabet, no_nfd::NoNfd,
     no_todo::NoTodo, no_zero_width_spaces::NoZeroWidthSpaces, sentence_length::SentenceLength,
 };
@@ -50,6 +50,7 @@ pub const RULE_IDS: &[&str] = &[
     ja_no_mixed_period::ID,
     no_todo::ID,
     no_doubled_joshi::ID,
+    no_doubled_conjunctive_particle_ga::ID,
 ];
 
 /// Construct a single built-in rule by `id`, applying config `options` (through the rule's
@@ -74,6 +75,7 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         ja_no_mixed_period::ID => Box::new(JaNoMixedPeriod::new()),
         no_todo::ID => Box::new(NoTodo::from_options(options)),
         no_doubled_joshi::ID => Box::new(NoDoubledJoshi::from_options(options)),
+        no_doubled_conjunctive_particle_ga::ID => Box::new(NoDoubledConjunctiveParticleGa::new()),
         _ => return None,
     };
     Some(match severity {
@@ -163,8 +165,9 @@ mod tests {
             "max-ten",
             "no-hankaku-kana",
             "ja-no-mixed-period",
-            "no-doubled-joshi",      // JA via its morphology pin
-            "no-mix-dearu-desumasu", // JA via its morphology pin
+            "no-doubled-joshi",                   // JA via its morphology pin
+            "no-mix-dearu-desumasu",              // JA via its morphology pin
+            "no-doubled-conjunctive-particle-ga", // JA via its morphology pin
         ];
 
         for id in RULE_IDS {

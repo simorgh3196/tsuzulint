@@ -32,6 +32,8 @@ accumulate as the release is built.
 - **Japanese morphology style rules.** `no-mix-dearu-desumasu` flags mixing the である
   (plain) and ですます (polite) sentence styles within a document — auto-detecting the
   majority and flagging the minority, or enforcing a configured `prefer`red style.
+  `no-doubled-conjunctive-particle-ga` flags the 逆接の接続助詞「が」 used more than once
+  in one sentence (the subject-marking 格助詞「が」 is not counted).
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the

@@ -3,6 +3,7 @@
 pub mod ja_no_mixed_period;
 pub mod max_kanji_continuous_len;
 pub mod max_ten;
+pub mod no_doubled_conjunctive_particle_ga;
 pub mod no_doubled_joshi;
 pub mod no_exclamation_question_mark;
 pub mod no_hankaku_kana;
