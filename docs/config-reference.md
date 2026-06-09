@@ -35,17 +35,20 @@
   collision). Built-in presets:
   - `ja-basic` — `no-hankaku-kana`, `no-mixed-zenkaku-hankaku-alphabet`, `no-nfd`,
     `no-zero-width-spaces`, `ja-no-mixed-period`.
-  - `ja-technical-writing` — the above plus `no-exclamation-question-mark`, the
-    morphology-backed `no-doubled-joshi`, and thresholds: `sentence-length` `max: 100`,
-    `max-ten` `max: 3`, `max-kanji-continuous-len` `max: 6`.
+  - `ja-technical-writing` — the above plus `no-exclamation-question-mark`, thresholds
+    (`sentence-length` `max: 100`, `max-ten` `max: 3`, `max-kanji-continuous-len` `max: 6`), and the
+    morphology-backed style rules `no-doubled-joshi`, `no-mix-dearu-desumasu`,
+    `no-doubled-conjunctive-particle-ga`, `ja-no-redundant-expression`, `no-dropping-the-ra`, and
+    `no-double-negative-ja` (mirroring `textlint-rule-preset-ja-technical-writing`). `ja-prh` is not
+    bundled — its term list is project-specific, so configure it explicitly.
 
   The `ja-*` presets imply `language: ja` (your own `language` overrides it), so their Japanese
   rules run out of the box. Because activation is opt-out, a preset does **not** restrict *which*
   rules run — every built-in rule is already on, so a preset effectively supplies **options and
   severities** for the rules it names. To run a narrower set, disable the unwanted rules
-  explicitly. `ja-technical-writing` enables the morphology-backed `no-doubled-joshi`, but it is a
-  no-op until a [`morphology`](#morphology--dictionary-for-morphology-dependent-rules) dictionary
-  is configured (the engine skips it), so a preset never *silently requires* one.
+  explicitly. The morphology-backed style rules `ja-technical-writing` enables are no-ops until a
+  [`morphology`](#morphology--dictionary-for-morphology-dependent-rules) dictionary is configured
+  (the engine skips them), so a preset never *silently requires* one.
 - **Language:** `language` (e.g. `ja`) and `message-language` (the diagnostic locale,
   independent of the document language). Config keys are kebab-case (`message-language`).
   `language` also **scopes** which rules run: a JA-only rule (e.g. `sentence-length`, `max-ten`,

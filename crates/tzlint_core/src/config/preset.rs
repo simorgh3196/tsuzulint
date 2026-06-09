@@ -49,11 +49,11 @@ impl Preset {
     /// The rule settings this preset contributes as a base layer.
     ///
     /// Rule ids are referenced as strings (no dependency on `tzlint_rules`); they MUST match the
-    /// ids in `tzlint_rules::RULE_IDS` verbatim. The morphology-backed `no-doubled-joshi` is part
-    /// of `ja-technical-writing`; it is a no-op until a dictionary is provisioned (the engine skips
-    /// it), so enabling it without a configured `morphology` source is harmless. The options set
-    /// here are routed into the constructed rule instances (via `tzlint_rules::build_rule`) when a
-    /// config selects this preset through `extends`.
+    /// ids in `tzlint_rules::RULE_IDS` verbatim. The morphology-backed style rules (`no-doubled-joshi`
+    /// and the `no-mix-dearu-desumasu` family) are part of `ja-technical-writing`; each is a no-op
+    /// until a dictionary is provisioned (the engine skips it), so enabling them without a configured
+    /// `morphology` source is harmless. The options set here are routed into the constructed rule
+    /// instances (via `tzlint_rules::build_rule`) when a config selects this preset through `extends`.
     fn rules(self) -> BTreeMap<RuleId, RuleSetting> {
         match self {
             Preset::JaBasic => ja_basic(),
@@ -98,9 +98,15 @@ fn ja_technical_writing() -> BTreeMap<RuleId, RuleSetting> {
         ("no-zero-width-spaces", on(Value::Null)),
         ("no-exclamation-question-mark", on(Value::Null)),
         ("ja-no-mixed-period", on(Value::Null)),
-        // Morphology-backed: a no-op until a dictionary is provisioned (the engine skips it), so
-        // it is safe to enable here even when `morphology` is unconfigured.
+        // Morphology-backed style rules (mirroring textlint's preset-ja-technical-writing): each is
+        // a no-op until a dictionary is provisioned (the engine skips morphology rules when there is
+        // no tokenizer), so enabling them here is safe even when `morphology` is unconfigured.
         ("no-doubled-joshi", on(Value::Null)),
+        ("no-mix-dearu-desumasu", on(Value::Null)),
+        ("no-doubled-conjunctive-particle-ga", on(Value::Null)),
+        ("ja-no-redundant-expression", on(Value::Null)),
+        ("no-dropping-the-ra", on(Value::Null)),
+        ("no-double-negative-ja", on(Value::Null)),
     ]
     .into_iter()
     .map(|(id, setting)| (RuleId::from(id), setting))
@@ -273,5 +279,45 @@ mod tests {
                 .rules()
                 .contains_key(&RuleId::from("no-doubled-joshi"))
         );
+    }
+
+    #[test]
+    fn ja_technical_writing_bundles_the_morphology_style_rules() {
+        // The Japanese morphology *style* rules mirror textlint's preset-ja-technical-writing
+        // composition: they ship enabled in the technical-writing preset (a no-op until a
+        // dictionary is provisioned, exactly like no-doubled-joshi), and are absent from the
+        // lighter ja-basic base.
+        let style_rules = [
+            "no-mix-dearu-desumasu",
+            "no-doubled-conjunctive-particle-ga",
+            "ja-no-redundant-expression",
+            "no-dropping-the-ra",
+            "no-double-negative-ja",
+        ];
+        let technical = Preset::JaTechnicalWriting.rules();
+        let basic = Preset::JaBasic.rules();
+        for id in style_rules {
+            assert!(
+                technical.contains_key(&RuleId::from(id)),
+                "ja-technical-writing should bundle {id}"
+            );
+            assert!(
+                !basic.contains_key(&RuleId::from(id)),
+                "ja-basic should not bundle the style rule {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn ja_prh_is_not_bundled_in_a_preset() {
+        // `ja-prh` is configured per project (its term list is supplied via `options.terms`), so it
+        // is intentionally not part of either built-in preset — it is a no-op without terms.
+        for preset in [Preset::JaBasic, Preset::JaTechnicalWriting] {
+            assert!(
+                !preset.rules().contains_key(&RuleId::from("ja-prh")),
+                "{} should not bundle ja-prh",
+                preset.id()
+            );
+        }
     }
 }
