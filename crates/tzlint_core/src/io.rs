@@ -179,10 +179,10 @@ pub trait Host {
 mod native {
     use super::{DirEntry, EntryKind, Host, IoError, Path};
     use std::fs::{File, OpenOptions};
+    use std::hash::{BuildHasher, Hasher};
     use std::io::{Read, Write};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::hash::{BuildHasher, Hasher};
 
     /// A [`Host`](super::Host) backed by the real filesystem (`std::fs`). The default for the
     /// native CLI and LSP.
