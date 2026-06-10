@@ -415,4 +415,56 @@ mod tests {
         assert_eq!(diags.len(), 2, "{diags:?}");
         assert!(diags.iter().all(|d| d.fixes[0].replacement == "JavaScript"));
     }
+
+    #[test]
+    fn the_i_and_m_flags_compile_together() {
+        // Both flags fold into a leading `(?im)` group at compile time; the pattern still rewrites.
+        let rule = rule_with(json!([{
+            "expected": "JavaScript",
+            "regexPatterns": [{ "source": "javascript", "ignoreCase": true, "multiline": true }]
+        }]));
+        let diags = diagnose(&rule, "use JavaScript or javascript here.\n");
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].fixes[0].replacement, "JavaScript");
+    }
+
+    #[test]
+    fn a_zero_width_regex_match_is_left_alone() {
+        // A pattern that can match the empty string must not emit empty, zero-width rewrites.
+        let rule = rule_with(json!([{
+            "expected": "x",
+            "regexPatterns": [{ "source": "a*" }]
+        }]));
+        assert!(diagnose(&rule, "bbb\n").is_empty());
+    }
+
+    #[test]
+    fn expand_template_covers_every_dollar_form() {
+        // Two indexed groups: `$0` = "foo-bar", `$1` = "foo", `$2` = "bar".
+        let re = Regex::new(r"(\w+)-(\w+)").unwrap();
+        let caps = re.captures("foo-bar").unwrap();
+
+        // Bare `$N`, the braced `${N}`, and `$0` (the whole match).
+        assert_eq!(expand_template("$1", &caps), "foo");
+        assert_eq!(expand_template("${2}", &caps), "bar");
+        assert_eq!(expand_template("$0", &caps), "foo-bar");
+        assert_eq!(expand_template("[${1}/$2]", &caps), "[foo/bar]");
+        // An absent group expands to nothing, in either form.
+        assert_eq!(expand_template("a${9}b", &caps), "ab");
+        assert_eq!(expand_template("a$9b", &caps), "ab");
+        // `$$` is a literal dollar.
+        assert_eq!(expand_template("$$1", &caps), "$1");
+        // Malformed `${…}` — unterminated, or non-numeric — is kept verbatim.
+        assert_eq!(expand_template("${1", &caps), "${1");
+        assert_eq!(expand_template("${x}", &caps), "${x}");
+        assert_eq!(expand_template("${}", &caps), "${}");
+        // A `$` not followed by a digit/brace/`$` is kept verbatim, trailing one included.
+        assert_eq!(expand_template("$x", &caps), "$x");
+        assert_eq!(expand_template("a$", &caps), "a$");
+        // An index that overflows `usize` is kept literally rather than panicking.
+        assert_eq!(
+            expand_template("$99999999999999999999999999", &caps),
+            "$99999999999999999999999999"
+        );
+    }
 }
