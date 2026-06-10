@@ -353,9 +353,9 @@ mod native {
         }
     }
 
-    /// A unique sibling temp path `<name>.tzlint-tmp.<pid>.<counter>.<nanos>` (same directory,
-    /// so the rename stays on one filesystem). pid + a process-wide counter + the clock make
-    /// the name hard to pre-guess; `O_EXCL` (in [`TempFile::create`]) is the actual guard.
+    /// A unique sibling temp path `<name>.tzlint-tmp.<pid>.<counter>.<nanos>.<random_val>` (same directory,
+    /// so the rename stays on one filesystem). pid + a process-wide counter + the clock + random value
+    /// make the name hard to pre-guess; `O_EXCL` (in [`TempFile::create`]) is the actual guard.
     fn tmp_sibling(path: &Path) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
