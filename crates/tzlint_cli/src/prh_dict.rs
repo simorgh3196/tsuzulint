@@ -175,18 +175,29 @@ fn append_terms(options: &mut Value, loaded: Vec<Value>) {
 /// Lexically normalize a path — collapse `.` and resolve `..` components — so paths reached by
 /// different spellings (`a/./b`, `a/../a/b`) compare equal in the `visited` cycle guard and read
 /// the same file.
+///
+/// A `..` cancels a preceding normal segment, but a leading (or stacked) `..` on a *relative* path
+/// is kept: it cannot be resolved without knowing the cwd, so `../shared/x.yml` must stay
+/// `../shared/x.yml` — otherwise a dictionary or `imports` entry reached from a config given as
+/// `--config ../cfg/.tzlintrc.json` would resolve to the wrong file (or fail to read). A `..`
+/// directly under a root/prefix is dropped, since the root has no parent.
 fn normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
+    let mut out: Vec<Component> = Vec::new();
     for component in path.components() {
         match component {
             Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
+            // `.copied()` releases the borrow on `out` so the `out.pop()` arm can mutate it.
+            Component::ParentDir => match out.last().copied() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => out.push(Component::ParentDir),
+            },
             other => out.push(other),
         }
     }
-    out
+    out.into_iter().collect()
 }
 
 #[cfg(test)]
@@ -348,6 +359,34 @@ mod tests {
     }
 
     #[test]
+    fn a_malformed_dictionary_is_noted_and_skipped() {
+        // A dictionary that does not parse is reported with its path and skipped, never fatal.
+        let host = MapHost::new(&[("/work/broken.prh.yml", "rules: [unterminated\n")]);
+        let mut config = config_with_options(json!({ "dictionaries": ["broken.prh.yml"] }));
+        let notes = run(&mut config, &host);
+        assert!(notes.contains("broken.prh.yml"), "{notes}");
+        assert!(resolved_terms(&config).is_empty());
+    }
+
+    #[test]
+    fn a_relative_config_dir_keeps_parent_segments_when_resolving() {
+        // Regression: with `--config ../cfg/.tzlintrc.json` the dictionary base dir is relative and
+        // begins with `..`. The dictionary must resolve under that `../cfg`, not a `..`-stripped
+        // `cfg` — `normalize` keeps a leading `..` it cannot cancel.
+        let host = MapHost::new(&[(
+            "../cfg/web.prh.yml",
+            "rules:\n  - expected: JavaScript\n    pattern: Javascript\n",
+        )]);
+        let mut config = config_with_options(json!({ "dictionaries": ["web.prh.yml"] }));
+        let mut stderr = Vec::new();
+        apply_prh_dictionaries(&mut config, &host, Path::new("../cfg"), &mut stderr);
+        assert!(String::from_utf8(stderr).unwrap().is_empty());
+        let terms = resolved_terms(&config);
+        assert_eq!(terms.len(), 1, "{terms:?}");
+        assert_eq!(terms[0]["expected"], json!("JavaScript"));
+    }
+
+    #[test]
     fn no_dictionaries_option_is_a_no_op() {
         let host = MapHost::new(&[]);
         let mut config =
@@ -380,5 +419,31 @@ mod tests {
             normalize(Path::new("/work/./sub/../a.yml")),
             PathBuf::from("/work/a.yml")
         );
+    }
+
+    #[test]
+    fn normalize_keeps_leading_parent_components_on_relative_paths() {
+        // A leading `..` has nothing to cancel and cannot be resolved lexically, so it is kept —
+        // a relative `--config ../cfg/.tzlintrc.json` must still reach `../shared/web.prh.yml`.
+        assert_eq!(
+            normalize(Path::new("../shared/web.prh.yml")),
+            PathBuf::from("../shared/web.prh.yml")
+        );
+        // Stacked leading `..` are all kept (the naive `PathBuf::pop()` form drops all but one).
+        assert_eq!(
+            normalize(Path::new("../../a/b/../c.yml")),
+            PathBuf::from("../../a/c.yml")
+        );
+        // An interior `..` still cancels the segment before it before the leading ones remain.
+        assert_eq!(
+            normalize(Path::new("../a/../b.yml")),
+            PathBuf::from("../b.yml")
+        );
+    }
+
+    #[test]
+    fn normalize_drops_parent_components_at_the_root() {
+        // The root has no parent, so `..` directly under it is a no-op rather than an escape.
+        assert_eq!(normalize(Path::new("/../a.yml")), PathBuf::from("/a.yml"));
     }
 }
