@@ -182,7 +182,7 @@ mod native {
     use std::io::{Read, Write};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::hash::{BuildHasher, Hasher};
 
     /// A [`Host`](super::Host) backed by the real filesystem (`std::fs`). The default for the
     /// native CLI and LSP.
@@ -359,14 +359,16 @@ mod native {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
+        // Use RandomState for secure unpredictability of the temp file name, preventing
+        // predictable temp file vulnerabilities.
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write_u64(n); // Perturb with the local sequence just in case
+        let rand_val = hasher.finish();
         let mut name = path
             .file_name()
             .map(|s| s.to_os_string())
             .unwrap_or_default();
-        name.push(format!(".tzlint-tmp.{pid}.{n}.{nanos}"));
+        name.push(format!(".tzlint-tmp.{pid}.{n}.{rand_val:016x}"));
         path.with_file_name(name)
     }
 
