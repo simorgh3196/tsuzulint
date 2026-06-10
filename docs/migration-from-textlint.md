@@ -1,13 +1,57 @@
 # Migration from textlint
 
-> Status: template (M0).
+TsuzuLint targets the Japanese `textlint` workflow. If you lint Japanese prose with `textlint`
+and `textlint-rule-preset-ja-technical-writing` today, the concepts carry over directly — a
+rules map, per-rule options, presets, and `prh` term dictionaries — and most rule IDs are
+identical.
 
-**Compatibility scope (v1 intends to mirror):** the node-kind vocabulary (mdast/TxtAST-
-derived), config concepts (rules map, per-rule options, presets, include/exclude), and
-preset naming close to `textlint-rule-preset-ja-technical-writing`.
+## Getting started
 
-**Intentional divergence:** config filename `.tzlintrc.*` (closer to `.textlintrc`); rules
-are authored against the Rust PDK (no binary rule-API compatibility).
+The config file is `.tzlintrc.{json,yaml,toml}` (echoing `.textlintrc`). Point it at the
+bundled preset:
+
+```json
+{ "extends": "ja-technical-writing" }
+```
+
+`ja-technical-writing` mirrors `textlint-rule-preset-ja-technical-writing`: it applies the same
+length / 読点 thresholds and enables the Japanese style rules below. (`ja-basic` is the
+dictionary-free subset.) Run `tzlint rules list` to see the resolved set, and
+`tzlint rules explain <id>` for any one rule. See the [config reference](config-reference.md)
+for the full surface.
+
+## Rule mapping
+
+Where a TsuzuLint rule corresponds to a textlint one it keeps the same ID (without the
+`textlint-rule-` prefix), so a familiar preset reads the same. `ja-technical-writing` enables
+these 15 rules in 0.1.0:
+
+| Rule | Needs morphology |
+|---|---|
+| `sentence-length` | — |
+| `max-ten` | — |
+| `max-kanji-continuous-len` | — |
+| `no-hankaku-kana` | — |
+| `no-mixed-zenkaku-hankaku-alphabet` | — |
+| `no-nfd` | — |
+| `no-zero-width-spaces` | — |
+| `ja-no-mixed-period` | — |
+| `no-exclamation-question-mark` | — |
+| `no-doubled-joshi` | yes |
+| `no-mix-dearu-desumasu` | yes |
+| `no-doubled-conjunctive-particle-ga` | yes |
+| `ja-no-redundant-expression` | yes |
+| `no-dropping-the-ra` | yes |
+| `no-double-negative-ja` | yes |
+
+The morphology-backed rules tokenize Japanese, so they stay inert until you configure a
+dictionary (see [morphology](morphology.md)); until then they report nothing rather than
+guessing, so the preset is safe to enable beforehand.
+
+The two remaining built-ins are not bundled in either preset — enable them in your `rules` map:
+`no-todo` (leftover TODO/FIXME markers) and `ja-prh` (terminology / 表記ゆれ, below). textlint
+rules without a TsuzuLint equivalent are simply out of scope for 0.1.0 — the
+[roadmap](roadmap.md) tracks what is next.
 
 ## `prh` terminology dictionaries
 
@@ -23,4 +67,8 @@ unsupported — a pattern using them is skipped rather than failing the load (Ja
 literals is unaffected). The prh `specs`, `regexpMustEmpty`, and `options.wordBoundary` fields are
 parsed but not yet applied.
 
-Migration notes (config keys, rule-name mapping) filled in as rules land.
+## Intentional divergence
+
+Config filename `.tzlintrc.*` (closer to `.textlintrc`); rules are authored against the Rust
+PDK, so there is no binary rule-API compatibility — custom textlint rules are reimplemented,
+not loaded.
