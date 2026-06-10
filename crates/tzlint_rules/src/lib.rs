@@ -255,6 +255,22 @@ mod tests {
             NoMixDearuDesumasu::default().meta().id.as_str(),
             "no-mix-dearu-desumasu"
         );
+        assert_eq!(
+            NoDoubledConjunctiveParticleGa::default().meta().id.as_str(),
+            "no-doubled-conjunctive-particle-ga"
+        );
+        assert_eq!(
+            JaNoRedundantExpression::default().meta().id.as_str(),
+            "ja-no-redundant-expression"
+        );
+        assert_eq!(
+            NoDroppingTheRa::default().meta().id.as_str(),
+            "no-dropping-the-ra"
+        );
+        assert_eq!(
+            NoDoubleNegativeJa::default().meta().id.as_str(),
+            "no-double-negative-ja"
+        );
     }
 
     #[test]
