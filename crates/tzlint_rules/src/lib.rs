@@ -149,6 +149,51 @@ mod tests {
     }
 
     #[test]
+    fn rule_language_applicability_is_tagged() {
+        use tzlint_ast::morphology::Lang;
+
+        // The R5 classification. JA-only rules run only on Japanese documents and never on
+        // untagged (unset-language) text; every other rule is language-neutral and runs on any
+        // document, including untagged text.
+        const JA_ONLY: &[&str] = &[
+            "sentence-length",
+            "max-ten",
+            "no-hankaku-kana",
+            "ja-no-mixed-period",
+            "no-doubled-joshi", // JA via its morphology pin
+        ];
+
+        for id in RULE_IDS {
+            let meta_holder = build_rule(id, &Value::Null, None).expect("every id builds");
+            let meta = meta_holder.meta();
+            if JA_ONLY.contains(id) {
+                assert!(meta.applies_to(Some(Lang::JA)), "{id} should apply to JA");
+                assert!(
+                    !meta.applies_to(Some(Lang::KO)),
+                    "{id} (JA-only) should not apply to KO"
+                );
+                assert!(
+                    !meta.applies_to(None),
+                    "{id} (JA-only) should not fire on untagged text"
+                );
+            } else {
+                assert!(
+                    meta.applies_to(None),
+                    "{id} (neutral) should run on untagged text"
+                );
+                assert!(
+                    meta.applies_to(Some(Lang::JA)),
+                    "{id} (neutral) should run on JA"
+                );
+                assert!(
+                    meta.applies_to(Some(Lang::KO)),
+                    "{id} (neutral) should run on KO"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn rules_construct_via_default() {
         // `Default` delegates to `new()`; exercise each so the delegation is covered.
         assert_eq!(

@@ -1,5 +1,6 @@
 //! `no-hankaku-kana` — flag half-width katakana (full-width is preferred).
 
+use tzlint_ast::morphology::Lang;
 use tzlint_ast::{NodeKind, Span};
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
@@ -18,7 +19,7 @@ impl NoHankakuKana {
     /// Construct the rule (no options).
     pub fn new() -> Self {
         NoHankakuKana {
-            meta: RuleMeta::new(ID, Severity::Warning, vec![NodeKind::TEXT]),
+            meta: RuleMeta::new(ID, Severity::Warning, vec![NodeKind::TEXT]).for_language(Lang::JA),
         }
     }
 }

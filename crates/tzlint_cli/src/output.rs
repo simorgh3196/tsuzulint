@@ -64,8 +64,9 @@ pub fn render_text(writer: &mut dyn Write, reports: &[FileReport]) -> io::Result
 
 /// Render `reports` as a pretty-printed JSON array of `{ path, diagnostics }` objects.
 ///
-/// Each diagnostic carries the raw byte `span`, the mapped 1-based line/column `position`,
-/// the lowercase `severity`, the `rule_id`, the `message`, and any `fixes`.
+/// Each diagnostic carries the raw byte `span`, the mapped 1-based `position` (each end with a
+/// scalar-value `column` and an additive UTF-16 `utf16Column`), the lowercase `severity`, the
+/// `rule_id`, the `message`, and any `fixes`.
 pub fn render_json(writer: &mut dyn Write, reports: &[FileReport]) -> io::Result<()> {
     let files: Vec<Value> = reports
         .iter()
@@ -88,21 +89,29 @@ pub fn render_json(writer: &mut dyn Write, reports: &[FileReport]) -> io::Result
     writeln!(writer)
 }
 
+/// One end of a `position`: the 1-based `line`, the scalar-value `column` (the original key,
+/// left untouched), and the additive `utf16Column` — the UTF-16 code-unit column editors and the
+/// LSP address text by. See [`LineIndex::utf16_column`].
+fn point(index: &LineIndex, source: &str, offset: u32) -> Value {
+    let (line, column) = index.position(source, offset);
+    json!({
+        "line": line,
+        "column": column,
+        "utf16Column": index.utf16_column(source, offset),
+    })
+}
+
 /// The JSON object for a single diagnostic.
 fn diagnostic_json(source: &str, index: &LineIndex, diagnostic: &Diagnostic) -> Value {
-    let (start_line, start_col) = index.position(source, diagnostic.span.start);
-    let (end_line, end_col) = index.position(source, diagnostic.span.end);
     let fixes: Vec<Value> = diagnostic
         .fixes
         .iter()
         .map(|fix| {
-            let (fix_start_line, fix_start_col) = index.position(source, fix.span.start);
-            let (fix_end_line, fix_end_col) = index.position(source, fix.span.end);
             json!({
                 "span": { "start": fix.span.start, "end": fix.span.end },
                 "position": {
-                    "start": { "line": fix_start_line, "column": fix_start_col },
-                    "end": { "line": fix_end_line, "column": fix_end_col },
+                    "start": point(index, source, fix.span.start),
+                    "end": point(index, source, fix.span.end),
                 },
                 "replacement": fix.replacement,
             })
@@ -114,8 +123,8 @@ fn diagnostic_json(source: &str, index: &LineIndex, diagnostic: &Diagnostic) -> 
         "message": diagnostic.message,
         "span": { "start": diagnostic.span.start, "end": diagnostic.span.end },
         "position": {
-            "start": { "line": start_line, "column": start_col },
-            "end": { "line": end_line, "column": end_col },
+            "start": point(index, source, diagnostic.span.start),
+            "end": point(index, source, diagnostic.span.end),
         },
         "fixes": fixes,
     })
@@ -364,16 +373,85 @@ mod tests {
         assert_eq!(d["rule_id"], "max-ten");
         assert_eq!(d["severity"], "info");
         assert_eq!(d["span"], json!({ "start": 4, "end": 7 }));
-        assert_eq!(d["position"]["start"], json!({ "line": 2, "column": 1 }));
+        // "壱\nabc\n": the span starts at 'a' (line 2, col 1). All BMP, so utf16Column == column.
+        assert_eq!(
+            d["position"]["start"],
+            json!({ "line": 2, "column": 1, "utf16Column": 1 })
+        );
         assert_eq!(d["fixes"][0]["replacement"], "、");
         assert_eq!(d["fixes"][0]["span"], json!({ "start": 4, "end": 7 }));
         assert_eq!(
             d["fixes"][0]["position"]["start"],
-            json!({ "line": 2, "column": 1 })
+            json!({ "line": 2, "column": 1, "utf16Column": 1 })
         );
         assert_eq!(
             d["fixes"][0]["position"]["end"],
-            json!({ "line": 2, "column": 4 })
+            json!({ "line": 2, "column": 4, "utf16Column": 4 })
+        );
+    }
+
+    #[test]
+    fn json_contract_is_stable() {
+        // The full JSON contract the `editors/vscode/` extension parses (see docs/json-output.md).
+        // Pin every key and nesting level so an accidental shape change fails loudly. Source
+        // "あ x\n": あ = bytes 0..3, space 3, 'x' 4..5 — so the span over 'x' is at column 3.
+        let diag = Diagnostic::new("no-todo", Severity::Warning, Span::new(4, 5), "found x")
+            .with_fix(Fix::replace(Span::new(4, 5), "y"));
+        let value = render_json_value(&[report("doc.md", "あ x\n", vec![diag])]);
+        assert_eq!(
+            value,
+            json!([
+                {
+                    "path": "doc.md",
+                    "diagnostics": [
+                        {
+                            "rule_id": "no-todo",
+                            "severity": "warning",
+                            "message": "found x",
+                            "span": { "start": 4, "end": 5 },
+                            "position": {
+                                "start": { "line": 1, "column": 3, "utf16Column": 3 },
+                                "end": { "line": 1, "column": 4, "utf16Column": 4 },
+                            },
+                            "fixes": [
+                                {
+                                    "span": { "start": 4, "end": 5 },
+                                    "position": {
+                                        "start": { "line": 1, "column": 3, "utf16Column": 3 },
+                                        "end": { "line": 1, "column": 4, "utf16Column": 4 },
+                                    },
+                                    "replacement": "y",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]),
+            "{value:#}"
+        );
+    }
+
+    #[test]
+    fn json_carries_a_utf16_column_alongside_the_scalar_column() {
+        // "😀" is an astral-plane char: one scalar value but two UTF-16 code units. The diagnostic
+        // covers the 'x' that follows it, so the UTF-16 column runs ahead of the scalar column —
+        // and the scalar `column` key is untouched.
+        let diag = Diagnostic::new("no-todo", Severity::Warning, Span::new(4, 5), "msg")
+            .with_fix(Fix::replace(Span::new(4, 5), "y"));
+        let value = render_json_value(&[report("a.md", "😀x\n", vec![diag])]);
+        let d = &value[0]["diagnostics"][0];
+        assert_eq!(
+            d["position"]["start"],
+            json!({ "line": 1, "column": 2, "utf16Column": 3 })
+        );
+        assert_eq!(
+            d["position"]["end"],
+            json!({ "line": 1, "column": 3, "utf16Column": 4 })
+        );
+        // The fix position carries it too.
+        assert_eq!(
+            d["fixes"][0]["position"]["start"],
+            json!({ "line": 1, "column": 2, "utf16Column": 3 })
         );
     }
 

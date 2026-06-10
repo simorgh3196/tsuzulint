@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
+use tzlint_ast::morphology::Lang;
 use tzlint_core::processor::{ColumnTarget, DelimitedConfig};
 use tzlint_core::{Config, ProcessorConfig, RegionRules, RuleSetting};
 use tzlint_pdk::{Rule, RuleId, Severity};
@@ -86,11 +87,27 @@ pub fn processor_config_for(config: &Config, ext: Option<&str>) -> ProcessorConf
     }
 }
 
+/// Drop the rules that do not apply to the document language `lang` (R6 scoping).
+///
+/// A language-neutral rule always survives; a language-scoped rule survives only when `lang` is
+/// one of its languages — and never when `lang` is `None` (an unset language runs only the neutral
+/// rules). This is applied where the lint-time rule set is built (not in [`resolve_rules`] or
+/// [`rule_infos`], so `rules list` still reports every configured rule regardless of language).
+fn scope_to_language(rules: Vec<Box<dyn Rule>>, lang: Option<Lang>) -> Vec<Box<dyn Rule>> {
+    rules
+        .into_iter()
+        .filter(|rule| rule.meta().applies_to(lang))
+        .collect()
+}
+
 /// The [`RegionRules`] for a file with extension `ext` under `config`: a base set from
-/// `config.rules`, plus one set per configured column (its overlay layered over the base).
+/// `config.rules`, plus one set per configured column (its overlay layered over the base). Both
+/// are scoped to the document language ([`Config::document_lang`]): a JA-only rule does not run on
+/// non-Japanese (or untagged) text.
 #[must_use]
 pub fn region_rules_for(config: &Config, ext: Option<&str>) -> RegionRules {
-    let mut rr = RegionRules::base_only(resolve_rules(config));
+    let lang = config.document_lang();
+    let mut rr = RegionRules::base_only(scope_to_language(resolve_rules(config), lang));
     if let Some(fmt) = ext.and_then(|e| config.formats.get(&e.to_ascii_lowercase())) {
         for col in &fmt.columns {
             // base ⊕ column overlay (column wins).
@@ -98,7 +115,7 @@ pub fn region_rules_for(config: &Config, ext: Option<&str>) -> RegionRules {
             for (id, setting) in &col.rules {
                 merged.insert(id.clone(), setting.clone());
             }
-            let rules = resolve_rules_from_map(&merged);
+            let rules = scope_to_language(resolve_rules_from_map(&merged), lang);
             match &col.selector {
                 tzlint_core::processor::ColumnSelector::Index(one_based) => {
                     rr.push_column(one_based.checked_sub(1), None, rules);
@@ -397,6 +414,47 @@ mod processing_builders {
             processor_config_for(&config, Some("md"))
                 .delimited
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn region_rules_for_scopes_rules_by_document_language() {
+        use tzlint_core::RegionTag;
+        let names = |config: &Config| -> Vec<String> {
+            region_rules_for(config, None)
+                .for_tag(&RegionTag::whole())
+                .iter()
+                .map(|r| r.meta().id.as_str().to_string())
+                .collect()
+        };
+
+        // Language unset ⇒ only language-neutral rules run; JA-only rules are scoped out.
+        let unset = names(&Config::default());
+        assert!(
+            unset.contains(&"no-nfd".to_string()),
+            "a neutral rule still runs"
+        );
+        assert!(
+            !unset.contains(&"sentence-length".to_string()),
+            "a JA-only rule is scoped out when the language is unset"
+        );
+        assert!(
+            !unset.contains(&"no-doubled-joshi".to_string()),
+            "a JA morphology rule is scoped out when the language is unset"
+        );
+
+        // language: ja ⇒ JA rules run alongside the neutral ones.
+        let ja = names(&Config {
+            language: Some("ja".into()),
+            ..Default::default()
+        });
+        assert!(
+            ja.contains(&"sentence-length".to_string()),
+            "JA-only runs under ja"
+        );
+        assert!(
+            ja.contains(&"no-nfd".to_string()),
+            "neutral still runs under ja"
         );
     }
 

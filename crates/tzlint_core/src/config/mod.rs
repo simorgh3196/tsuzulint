@@ -27,6 +27,7 @@ mod schema;
 use std::collections::BTreeMap;
 use std::fmt;
 
+use tzlint_ast::morphology::Lang;
 use tzlint_pdk::RuleId;
 
 pub use discover::{DiscoveredConfig, ShadowedCandidate, discover};
@@ -92,6 +93,25 @@ impl Config {
     /// preset are errors. Rule-specific `options` are preserved verbatim as JSON values.
     pub fn parse(text: &str, format: ConfigFormat) -> Result<Self, ConfigError> {
         format::parse(text, format)
+    }
+
+    /// The document [`Lang`] this config's [`language`](Config::language) tag resolves to, or
+    /// `None` when the tag is unset or unrecognized.
+    ///
+    /// The primary subtag is matched case-insensitively (`"ja"`, `"JA"`, `"ja-JP"` all map to
+    /// [`Lang::JA`]), so an editor- or BCP-47-style tag works. An unknown language is treated as
+    /// unset rather than an error: rule scoping then runs only the language-neutral rules, which is
+    /// the predictable behavior for untagged text.
+    #[must_use]
+    pub fn document_lang(&self) -> Option<Lang> {
+        let tag = self.language.as_deref()?;
+        let primary = tag.split(['-', '_']).next().unwrap_or(tag);
+        match primary.to_ascii_lowercase().as_str() {
+            "ja" => Some(Lang::JA),
+            "ko" => Some(Lang::KO),
+            "zh" => Some(Lang::ZH),
+            _ => None,
+        }
     }
 }
 
@@ -263,6 +283,29 @@ mod tests {
             Config::parse("{ not json", ConfigFormat::Json),
             Err(ConfigError::Parse { .. })
         ));
+    }
+
+    #[test]
+    fn document_lang_maps_known_tags_and_leaves_the_rest_unset() {
+        use tzlint_ast::morphology::Lang;
+        let lang = |tag: Option<&str>| {
+            Config {
+                language: tag.map(str::to_string),
+                ..Default::default()
+            }
+            .document_lang()
+        };
+        // Unset stays unset (⇒ neutral-only scoping downstream).
+        assert_eq!(lang(None), None);
+        // Known primary subtags map to their `Lang`, case- and region-insensitively.
+        assert_eq!(lang(Some("ja")), Some(Lang::JA));
+        assert_eq!(lang(Some("JA")), Some(Lang::JA));
+        assert_eq!(lang(Some("ja-JP")), Some(Lang::JA));
+        assert_eq!(lang(Some("ko")), Some(Lang::KO));
+        assert_eq!(lang(Some("zh-Hans")), Some(Lang::ZH));
+        // An unrecognized tag is treated as unset, not an error.
+        assert_eq!(lang(Some("en")), None);
+        assert_eq!(lang(Some("")), None);
     }
 }
 

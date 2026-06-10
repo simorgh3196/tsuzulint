@@ -37,6 +37,15 @@ impl Preset {
         }
     }
 
+    /// The document language this preset implies, layered under (and overridden by) the user's own
+    /// `language`. The `ja-*` presets imply `"ja"` so their Japanese rules run out of the box; a
+    /// future language-neutral preset would return `None`.
+    pub fn language(self) -> Option<&'static str> {
+        match self {
+            Preset::JaBasic | Preset::JaTechnicalWriting => Some("ja"),
+        }
+    }
+
     /// The rule settings this preset contributes as a base layer.
     ///
     /// Rule ids are referenced as strings (no dependency on `tzlint_rules`); they MUST match the
@@ -97,12 +106,15 @@ fn ja_technical_writing() -> BTreeMap<RuleId, RuleSetting> {
 /// Resolve a `user` config over an optional `preset` base.
 ///
 /// The preset's rules form the base layer; the user's rules override by id (user wins on a
-/// collision). `language`/`message_language` come from the user config — presets do not set
-/// them in M1.
+/// collision). `language` comes from the user config, falling back to the preset's implied
+/// language (a `ja-*` preset implies `"ja"`, so its Japanese rules run without the user writing
+/// `language: ja`); `message_language` is the user's alone.
 pub fn resolve(preset: Option<Preset>, user: Config) -> Config {
     let base = preset.map(Preset::rules).unwrap_or_default();
     Config {
-        language: user.language,
+        language: user
+            .language
+            .or_else(|| preset.and_then(Preset::language).map(str::to_string)),
         message_language: user.message_language,
         rules: merge(base, user.rules),
         // Formats are not preset-layered; layering preserves the user's resolved formats.
@@ -191,6 +203,25 @@ mod tests {
         assert!(resolved.rules.contains_key(&RuleId::from("custom-rule")));
         // No preset → identity.
         assert_eq!(resolve(None, user.clone()), user);
+    }
+
+    #[test]
+    fn a_ja_preset_implies_language_ja_unless_the_user_sets_it() {
+        // A `ja-*` preset implies `language: ja`, so its JA rules fire out of the box without the
+        // user having to write `language: ja`.
+        let resolved = resolve(Some(Preset::JaTechnicalWriting), Config::default());
+        assert_eq!(resolved.language.as_deref(), Some("ja"));
+
+        // The user's own language wins over the preset's implied one.
+        let user = Config {
+            language: Some("ko".into()),
+            ..Default::default()
+        };
+        let resolved = resolve(Some(Preset::JaTechnicalWriting), user);
+        assert_eq!(resolved.language.as_deref(), Some("ko"));
+
+        // No preset ⇒ language is whatever the user had (here, unset).
+        assert_eq!(resolve(None, Config::default()).language, None);
     }
 
     #[test]

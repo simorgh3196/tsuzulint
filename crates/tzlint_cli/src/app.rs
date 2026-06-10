@@ -798,6 +798,15 @@ mod tests {
         })
     }
 
+    /// A [`MockHost`] holding `path` plus a discovered `{ "language": "ja" }` config at the test
+    /// cwd, so JA-only rules are in scope. (R6 runs only the language-neutral rules when the
+    /// document language is unset, so a test that exercises a JA rule must declare the language.)
+    fn ja_host(path: &str, contents: &str) -> MockHost {
+        let host = MockHost::with(path, contents);
+        host.put("/work/.tzlintrc.json", "{ \"language\": \"ja\" }");
+        host
+    }
+
     fn rules_list_cli(format: RuleListFormat) -> Cli {
         cli(Command::Rules {
             command: RulesCommand::List { format },
@@ -918,7 +927,7 @@ mod tests {
     fn lint_sarif_output_is_a_valid_log_with_results() {
         // `--format sarif` emits a SARIF 2.1.0 log; the half-width kana triggers `no-hankaku-kana`,
         // which surfaces as one result referencing that rule.
-        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let host = ja_host("a.md", "ﾊﾛｰ\n");
         let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Sarif), &host);
         assert_eq!(status, ExitStatus::Findings);
         let value: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -947,7 +956,7 @@ mod tests {
         // Both code paths (cached vs. direct bridge) must produce identical output, including when
         // rules emit diagnostics — half-width kana triggers `no-hankaku-kana` under the default
         // (all-on) rule set.
-        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let host = ja_host("a.md", "ﾊﾛｰ\n");
         let (_s1, cached_out, _e1) = run_capture(&lint_cli("a.md", OutputFormat::Json), &host);
         let mut direct = lint_cli("a.md", OutputFormat::Json);
         direct.no_cache = true;
@@ -1003,7 +1012,7 @@ mod tests {
     fn lint_reports_a_violation_and_exits_findings() {
         // Half-width kana triggers `no-hankaku-kana` under the default (all-on) rule set, so the
         // command path reaches `Findings` and renders a real diagnostic.
-        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let host = ja_host("a.md", "ﾊﾛｰ\n");
         let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
         assert_eq!(status, ExitStatus::Findings);
         assert!(out.contains("no-hankaku-kana"), "{out}");
@@ -1032,7 +1041,7 @@ mod tests {
         host.put("a.md", "これは、テストです。\n");
         host.put(
             "strict.json",
-            "{ \"rules\": { \"max-ten\": { \"options\": { \"max\": 0 } } } }",
+            "{ \"language\": \"ja\", \"rules\": { \"max-ten\": { \"options\": { \"max\": 0 } } } }",
         );
         let mut c = lint_cli("a.md", OutputFormat::Text);
         c.config = Some(PathBuf::from("strict.json"));
@@ -1199,7 +1208,7 @@ mod tests {
     fn cache_persists_across_runs() {
         // Run twice against the same host: the second run loads the cache file the first wrote and
         // hits, producing identical output to the fresh lint.
-        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let host = ja_host("a.md", "ﾊﾛｰ\n");
         let (status1, out1, _e1) = run_capture(&lint_cli("a.md", OutputFormat::Json), &host);
         assert!(host.read("/work/.tzlintcache").is_some());
         let (status2, out2, _e2) = run_capture(&lint_cli("a.md", OutputFormat::Json), &host);
@@ -1231,7 +1240,9 @@ mod tests {
             }
         }
         let host = ReadOkWriteFailHost {
-            source: "ﾊﾛｰ\n".to_string(),
+            // `no-todo` is language-neutral, so it fires without a configured language (R6) — this
+            // test is about the cache-write warning, not language scoping.
+            source: "TODO fix\n".to_string(),
         };
         let (status, _out, err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
         assert_eq!(status, ExitStatus::Findings); // cache write failure did NOT become an error
@@ -1279,6 +1290,7 @@ mod tests {
     fn lint_reads_stdin_under_the_stdin_label() {
         // `-` reads stdin; the diagnostic is labeled `<stdin>` and counted like a file.
         let host = MockHost::new();
+        host.put("/work/.tzlintrc.json", "{ \"language\": \"ja\" }"); // JA rules in scope (R6)
         let (status, out, _err) = run_capture_stdin(
             &lint_cli("-", OutputFormat::Text),
             &host,
@@ -1293,7 +1305,7 @@ mod tests {
     #[test]
     fn lint_lints_stdin_and_a_file_together() {
         // `-` may be combined with file paths; stdin is reported first, then the file.
-        let host = MockHost::with("a.md", "本文。\n");
+        let host = ja_host("a.md", "本文。\n");
         let c = cli(Command::Lint {
             paths: vec![PathBuf::from("-"), PathBuf::from("a.md")],
             format: OutputFormat::Text,
@@ -1485,7 +1497,7 @@ mod tests {
     fn lint_routes_through_processor_seam_unchanged_for_markdown() {
         // Same half-width-kana input as `lint_reports_a_violation_*`: routing through the
         // processor seam must still produce the `no-hankaku-kana` diagnostic identically.
-        let host = MockHost::with("a.md", "ﾊﾛｰ\n");
+        let host = ja_host("a.md", "ﾊﾛｰ\n");
         let (status, out, _err) = run_capture(&lint_cli("a.md", OutputFormat::Text), &host);
         assert_eq!(status, ExitStatus::Findings);
         assert!(out.contains("no-hankaku-kana"), "{out}");
@@ -1693,7 +1705,9 @@ mod tests {
         host.put("a.md", "私は彼は来た。\n");
         host.put(
             "c.json",
-            &format!(r#"{{ "morphology": {{ "path": "ja.dict.zst", "pin": "{PIN64}" }} }}"#),
+            &format!(
+                r#"{{ "language": "ja", "morphology": {{ "path": "ja.dict.zst", "pin": "{PIN64}" }} }}"#
+            ),
         );
         let mut c = lint_cli("a.md", OutputFormat::Text);
         c.config = Some(PathBuf::from("c.json"));
@@ -1732,7 +1746,7 @@ mod tests {
         host.put(
             "c.json",
             &format!(
-                r#"{{ "morphology": {{ "path": "ja.dict.zst", "pin": "{PIN64}" }}, "rules": {{ "no-doubled-joshi": false }}, "formats": {{ "csv": {{ "columns": {{ "1": {{ "rules": {{ "no-doubled-joshi": true }} }} }} }} }} }}"#
+                r#"{{ "language": "ja", "morphology": {{ "path": "ja.dict.zst", "pin": "{PIN64}" }}, "rules": {{ "no-doubled-joshi": false }}, "formats": {{ "csv": {{ "columns": {{ "1": {{ "rules": {{ "no-doubled-joshi": true }} }} }} }} }} }}"#
             ),
         );
         let mut c = lint_cli("a.csv", OutputFormat::Text);
@@ -1772,7 +1786,7 @@ mod tests {
         host.put(
             "c.json",
             &format!(
-                r#"{{ "morphology": {{ "url": "https://dict.example.com/ja.dict.zst", "pin": "{PIN64}" }} }}"#
+                r#"{{ "language": "ja", "morphology": {{ "url": "https://dict.example.com/ja.dict.zst", "pin": "{PIN64}" }} }}"#
             ),
         );
         let mut c = lint_cli("a.md", OutputFormat::Text);

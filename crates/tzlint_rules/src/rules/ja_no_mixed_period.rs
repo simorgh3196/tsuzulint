@@ -4,6 +4,7 @@
 //! `check` call (visited-guarded, so a byte-valid but cyclic archive can neither loop nor OOM),
 //! collecting `。` and qualifying `.` terminators, then reports the minority style.
 
+use tzlint_ast::morphology::Lang;
 use tzlint_ast::{NodeKind, Span};
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
@@ -19,7 +20,7 @@ impl JaNoMixedPeriod {
     /// Construct the rule (no options).
     pub fn new() -> Self {
         JaNoMixedPeriod {
-            meta: RuleMeta::new(ID, Severity::Warning, vec![NodeKind::ROOT]),
+            meta: RuleMeta::new(ID, Severity::Warning, vec![NodeKind::ROOT]).for_language(Lang::JA),
         }
     }
 

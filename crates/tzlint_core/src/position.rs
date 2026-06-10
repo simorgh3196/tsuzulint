@@ -7,8 +7,9 @@
 /// to a 1-based `(line, column)` position.
 ///
 /// Column is counted in **Unicode scalar values** (chars) from the start of the line,
-/// matching typical CLI output; a UTF-16 column (for LSP) can be layered on later. Build
-/// the index with the same text whose offsets you will map.
+/// matching typical CLI output; [`utf16_column`](LineIndex::utf16_column) layers a UTF-16
+/// code-unit column on top (for editors/LSP that address text in UTF-16). Build the index with
+/// the same text whose offsets you will map.
 #[derive(Debug, Clone)]
 pub struct LineIndex {
     /// Byte offset at which each line begins. Always starts with `0`.
@@ -34,15 +35,14 @@ impl LineIndex {
         self.line_starts.len()
     }
 
-    /// Map an absolute byte `offset` into `text` to a 1-based `(line, column)`.
+    /// Clamp `offset` into range and down to a char boundary, then locate its line.
     ///
-    /// `text` must be the same source passed to [`LineIndex::new`]. An out-of-range or
-    /// non-char-boundary offset is clamped, never panics.
-    pub fn position(&self, text: &str, offset: u32) -> (u32, u32) {
-        // Clamp into range and down to a char boundary: the slice below then can't panic,
-        // and an offset that lands inside a multibyte char maps to the column of the char
-        // that contains it (a multibyte char never straddles a newline, so this stays on
-        // the same line).
+    /// Returns the 0-based line index plus the `start..end` byte range of the line prefix up to
+    /// the (clamped) offset — the slice whose length, counted in some unit, is the column. An
+    /// offset that lands inside a multibyte char floors to that char's start; since a multibyte
+    /// char never straddles a newline, this stays on the same line. The returned range is always
+    /// a valid `text` slice, so callers can `text.get(start..end)` without panicking.
+    fn locate(&self, text: &str, offset: u32) -> (usize, usize, usize) {
         let mut end = (offset as usize).min(text.len());
         while end > 0 && !text.is_char_boundary(end) {
             end -= 1;
@@ -54,6 +54,15 @@ impl LineIndex {
             .saturating_sub(1);
         let line_start = self.line_starts.get(line_idx).copied().unwrap_or(0) as usize;
         let start = line_start.min(end);
+        (line_idx, start, end)
+    }
+
+    /// Map an absolute byte `offset` into `text` to a 1-based `(line, column)`.
+    ///
+    /// Column is counted in Unicode scalar values. `text` must be the same source passed to
+    /// [`LineIndex::new`]. An out-of-range or non-char-boundary offset is clamped, never panics.
+    pub fn position(&self, text: &str, offset: u32) -> (u32, u32) {
+        let (line_idx, start, end) = self.locate(text, offset);
         let column = text.get(start..end).map_or(0, |slice| {
             let mut count = 0;
             for &b in slice.as_bytes() {
@@ -66,6 +75,21 @@ impl LineIndex {
             count
         });
         (line_idx as u32 + 1, column as u32 + 1)
+    }
+
+    /// The 1-based **UTF-16 code-unit** column for an absolute byte `offset`.
+    ///
+    /// Counts UTF-16 code units from the start of the line, so a BMP char counts as 1 and an
+    /// astral-plane char (≥ U+10000, encoded as a surrogate pair) counts as 2 — the column
+    /// editors and the LSP use, which address text in UTF-16. The line is the same one
+    /// [`position`](Self::position) reports; clamping is identical. Add this alongside the scalar
+    /// column rather than replacing it.
+    pub fn utf16_column(&self, text: &str, offset: u32) -> u32 {
+        let (_, start, end) = self.locate(text, offset);
+        let units = text
+            .get(start..end)
+            .map_or(0, |slice| slice.chars().map(char::len_utf16).sum::<usize>());
+        units as u32 + 1
     }
 }
 
@@ -139,5 +163,37 @@ mod tests {
         assert_eq!(idx.position(text, 1), (1, 1)); // inside あ → floors to 0 → column 1
         assert_eq!(idx.position(text, 3), (1, 2)); // start of い
         assert_eq!(idx.position(text, 4), (1, 2)); // inside い → floors to 3 → column 2
+    }
+
+    #[test]
+    fn utf16_column_matches_scalar_for_bmp() {
+        // Every BMP char (including CJK) is a single UTF-16 code unit, so the UTF-16 column
+        // equals the scalar column there.
+        let text = "あいう\nx"; // 9 bytes + '\n' + 'x'
+        let idx = LineIndex::new(text);
+        assert_eq!(idx.utf16_column(text, 0), 1); // あ
+        assert_eq!(idx.utf16_column(text, 3), 2); // い
+        assert_eq!(idx.utf16_column(text, 6), 3); // う
+        assert_eq!(idx.utf16_column(text, 9), 4); // '\n'
+        assert_eq!(idx.utf16_column(text, 10), 1); // x on line 2 — UTF-16 column resets per line
+    }
+
+    #[test]
+    fn utf16_column_counts_astral_chars_as_two_units() {
+        // "😀" is U+1F600 (astral plane): 4 UTF-8 bytes but 2 UTF-16 code units (a surrogate pair).
+        let text = "😀x"; // 😀 occupies bytes 0..4; 'x' starts at byte 4
+        let idx = LineIndex::new(text);
+        assert_eq!(idx.utf16_column(text, 0), 1); // start of 😀
+        // Before 'x' there is one scalar value but two UTF-16 units.
+        assert_eq!(idx.position(text, 4), (1, 2)); // scalar column
+        assert_eq!(idx.utf16_column(text, 4), 3); // UTF-16 column
+    }
+
+    #[test]
+    fn utf16_column_clamps_like_position() {
+        let text = "😀"; // boundaries at 0 and 4
+        let idx = LineIndex::new(text);
+        assert_eq!(idx.utf16_column(text, 2), 1); // inside the astral char → floors to its start
+        assert_eq!(idx.utf16_column(text, 999), 3); // past the end → clamps to end (2 units + 1)
     }
 }
