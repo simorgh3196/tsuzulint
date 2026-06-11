@@ -82,7 +82,9 @@ impl CacheKey {
     /// Parse a 64-char lowercase-hex digest (as produced by [`to_hex`](CacheKey::to_hex)) back
     /// into a key, or `None` if it is not exactly 64 ASCII hex characters.
     pub fn from_hex(hex: &str) -> Option<CacheKey> {
-        blake3::Hash::from_hex(hex).ok().map(|h| CacheKey(*h.as_bytes()))
+        blake3::Hash::from_hex(hex)
+            .ok()
+            .map(|h| CacheKey(*h.as_bytes()))
     }
 }
 
