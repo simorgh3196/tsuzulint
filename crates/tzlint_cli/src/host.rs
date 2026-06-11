@@ -120,9 +120,20 @@ mod tests {
 
     #[test]
     fn delegates_filesystem_operations_to_the_native_host() {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+
+        let r1 = RandomState::new().build_hasher().finish();
+        let r2 = RandomState::new().build_hasher().finish();
+
         // `CliHost` must be a drop-in for `NativeHost` on every filesystem method (the CLI runs
         // entirely on it), so a write/read round-trip through `CliHost` behaves identically.
-        let dir = std::env::temp_dir().join(format!("tzlint-clihost-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "tzlint-clihost-{}-{:016x}-{:016x}",
+            std::process::id(),
+            r1,
+            r2
+        ));
         let host = CliHost::new();
         host.create_dir_all(&dir).unwrap();
         let path = dir.join("d.bin");
