@@ -29,6 +29,20 @@ accumulate as the release is built.
   `no-mixed-zenkaku-hankaku-alphabet`, `no-nfd`, `no-zero-width-spaces`,
   `ja-no-mixed-period`, `no-exclamation-question-mark`, `no-todo`, `sentence-length`,
   `max-ten`, `max-kanji-continuous-len`, and the morphology-backed `no-doubled-joshi`.
+- **Japanese morphology style rules.** `no-mix-dearu-desumasu` flags mixing the である
+  (plain) and ですます (polite) sentence styles within a document — auto-detecting the
+  majority and flagging the minority, or enforcing a configured `prefer`red style.
+  `no-doubled-conjunctive-particle-ga` flags the 逆接の接続助詞「が」 used more than once
+  in one sentence (the subject-marking 格助詞「が」 is not counted).
+  `ja-no-redundant-expression` flags the redundant「〜することができる」family (こと + が +
+  できる/可能), which reads more tightly as 「〜できる」.
+  `no-dropping-the-ra` flags ら抜き言葉 (a 一段/カ変 verb + the potential 「れる」 where
+  「られる」 is standard, e.g. 見れる → 見られる; 五段 passives like 書かれる are not flagged).
+  `no-double-negative-ja` flags a rhetorical double negative — a negative closed by
+  「は」+ another negative (ないことはない / なくはない); 〜なければならない is not flagged.
+  All five ship enabled in the `ja-technical-writing` preset (alongside `no-doubled-joshi`),
+  mirroring `textlint-rule-preset-ja-technical-writing`; they stay no-ops until a morphology
+  dictionary is configured.
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the

@@ -22,14 +22,19 @@ use serde_json::Value;
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
-    ja_no_mixed_period, max_kanji_continuous_len, max_ten, no_doubled_joshi,
-    no_exclamation_question_mark, no_hankaku_kana, no_mixed_zenkaku_hankaku_alphabet, no_nfd,
-    no_todo, no_zero_width_spaces, sentence_length,
+    ja_no_mixed_period, ja_no_redundant_expression, max_kanji_continuous_len, max_ten,
+    no_double_negative_ja, no_doubled_conjunctive_particle_ga, no_doubled_joshi,
+    no_dropping_the_ra, no_exclamation_question_mark, no_hankaku_kana, no_mix_dearu_desumasu,
+    no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_zero_width_spaces, sentence_length,
 };
 pub use rules::{
-    ja_no_mixed_period::JaNoMixedPeriod, max_kanji_continuous_len::MaxKanjiContinuousLen,
-    max_ten::MaxTen, no_doubled_joshi::NoDoubledJoshi,
+    ja_no_mixed_period::JaNoMixedPeriod, ja_no_redundant_expression::JaNoRedundantExpression,
+    max_kanji_continuous_len::MaxKanjiContinuousLen, max_ten::MaxTen,
+    no_double_negative_ja::NoDoubleNegativeJa,
+    no_doubled_conjunctive_particle_ga::NoDoubledConjunctiveParticleGa,
+    no_doubled_joshi::NoDoubledJoshi, no_dropping_the_ra::NoDroppingTheRa,
     no_exclamation_question_mark::NoExclamationQuestionMark, no_hankaku_kana::NoHankakuKana,
+    no_mix_dearu_desumasu::NoMixDearuDesumasu,
     no_mixed_zenkaku_hankaku_alphabet::NoMixedZenkakuHankakuAlphabet, no_nfd::NoNfd,
     no_todo::NoTodo, no_zero_width_spaces::NoZeroWidthSpaces, sentence_length::SentenceLength,
 };
@@ -41,6 +46,7 @@ pub const RULE_IDS: &[&str] = &[
     max_ten::ID,
     max_kanji_continuous_len::ID,
     no_hankaku_kana::ID,
+    no_mix_dearu_desumasu::ID,
     no_mixed_zenkaku_hankaku_alphabet::ID,
     no_nfd::ID,
     no_zero_width_spaces::ID,
@@ -48,6 +54,10 @@ pub const RULE_IDS: &[&str] = &[
     ja_no_mixed_period::ID,
     no_todo::ID,
     no_doubled_joshi::ID,
+    no_doubled_conjunctive_particle_ga::ID,
+    ja_no_redundant_expression::ID,
+    no_dropping_the_ra::ID,
+    no_double_negative_ja::ID,
 ];
 
 /// Construct a single built-in rule by `id`, applying config `options` (through the rule's
@@ -62,6 +72,7 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         max_ten::ID => Box::new(MaxTen::from_options(options)),
         max_kanji_continuous_len::ID => Box::new(MaxKanjiContinuousLen::from_options(options)),
         no_hankaku_kana::ID => Box::new(NoHankakuKana::new()),
+        no_mix_dearu_desumasu::ID => Box::new(NoMixDearuDesumasu::from_options(options)),
         no_mixed_zenkaku_hankaku_alphabet::ID => Box::new(NoMixedZenkakuHankakuAlphabet::new()),
         no_nfd::ID => Box::new(NoNfd::new()),
         no_zero_width_spaces::ID => Box::new(NoZeroWidthSpaces::new()),
@@ -71,6 +82,10 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         ja_no_mixed_period::ID => Box::new(JaNoMixedPeriod::new()),
         no_todo::ID => Box::new(NoTodo::from_options(options)),
         no_doubled_joshi::ID => Box::new(NoDoubledJoshi::from_options(options)),
+        no_doubled_conjunctive_particle_ga::ID => Box::new(NoDoubledConjunctiveParticleGa::new()),
+        ja_no_redundant_expression::ID => Box::new(JaNoRedundantExpression::new()),
+        no_dropping_the_ra::ID => Box::new(NoDroppingTheRa::new()),
+        no_double_negative_ja::ID => Box::new(NoDoubleNegativeJa::new()),
         _ => return None,
     };
     Some(match severity {
@@ -160,7 +175,12 @@ mod tests {
             "max-ten",
             "no-hankaku-kana",
             "ja-no-mixed-period",
-            "no-doubled-joshi", // JA via its morphology pin
+            "no-doubled-joshi",                   // JA via its morphology pin
+            "no-mix-dearu-desumasu",              // JA via its morphology pin
+            "no-doubled-conjunctive-particle-ga", // JA via its morphology pin
+            "ja-no-redundant-expression",         // JA via its morphology pin
+            "no-dropping-the-ra",                 // JA via its morphology pin
+            "no-double-negative-ja",              // JA via its morphology pin
         ];
 
         for id in RULE_IDS {
@@ -230,6 +250,26 @@ mod tests {
         assert_eq!(
             NoDoubledJoshi::default().meta().id.as_str(),
             "no-doubled-joshi"
+        );
+        assert_eq!(
+            NoMixDearuDesumasu::default().meta().id.as_str(),
+            "no-mix-dearu-desumasu"
+        );
+        assert_eq!(
+            NoDoubledConjunctiveParticleGa::default().meta().id.as_str(),
+            "no-doubled-conjunctive-particle-ga"
+        );
+        assert_eq!(
+            JaNoRedundantExpression::default().meta().id.as_str(),
+            "ja-no-redundant-expression"
+        );
+        assert_eq!(
+            NoDroppingTheRa::default().meta().id.as_str(),
+            "no-dropping-the-ra"
+        );
+        assert_eq!(
+            NoDoubleNegativeJa::default().meta().id.as_str(),
+            "no-double-negative-ja"
         );
     }
 
