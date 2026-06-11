@@ -88,15 +88,7 @@ impl From<UrlPolicyError> for DictError {
 
 /// The hash-addressed cache filename for a dictionary pinned to `hash`: lowercase hex + `.dict`.
 fn cache_file_name(hash: &[u8; 32]) -> String {
-    let mut name = String::with_capacity(64 + ".dict".len());
-    for byte in hash {
-        // `from_digit` is infallible for radix 16 and a nibble (0..=15); the fallback is
-        // unreachable and keeps this panic-free (same idiom as `CacheKey::to_hex`).
-        name.push(char::from_digit(u32::from(byte >> 4), 16).unwrap_or('0'));
-        name.push(char::from_digit(u32::from(byte & 0x0f), 16).unwrap_or('0'));
-    }
-    name.push_str(".dict");
-    name
+    format!("{}.dict", blake3::Hash::from(*hash).to_hex())
 }
 
 /// Provision the dictionary pinned to `pinned_hash`, returning its decompressed bytes.

@@ -76,28 +76,13 @@ impl CacheKey {
 
     /// Lowercase hex encoding (64 chars). Used as the key in the on-disk cache file.
     pub fn to_hex(&self) -> String {
-        let mut hex = String::with_capacity(64);
-        for byte in &self.0 {
-            // `from_digit` is infallible for radix 16 and a nibble (0..=15); the fallback is
-            // unreachable and keeps this panic-free.
-            hex.push(char::from_digit((byte >> 4) as u32, 16).unwrap_or('0'));
-            hex.push(char::from_digit((byte & 0x0f) as u32, 16).unwrap_or('0'));
-        }
-        hex
+        blake3::Hash::from(self.0).to_hex().to_string()
     }
 
     /// Parse a 64-char lowercase-hex digest (as produced by [`to_hex`](CacheKey::to_hex)) back
     /// into a key, or `None` if it is not exactly 64 ASCII hex characters.
     pub fn from_hex(hex: &str) -> Option<CacheKey> {
-        if hex.len() != 64 || !hex.is_ascii() {
-            return None;
-        }
-        let mut bytes = [0u8; 32];
-        for (i, byte) in bytes.iter_mut().enumerate() {
-            // `hex` is ASCII and 64 long, so each 2-char window is in range and on a boundary.
-            *byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok()?;
-        }
-        Some(CacheKey(bytes))
+        blake3::Hash::from_hex(hex).ok().map(|h| CacheKey(*h.as_bytes()))
     }
 }
 
