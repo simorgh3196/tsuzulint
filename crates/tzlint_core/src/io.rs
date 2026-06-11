@@ -358,6 +358,9 @@ mod native {
         use std::collections::hash_map::RandomState;
         use std::hash::{BuildHasher, Hasher};
 
+        // `RandomState::new()` seeds each hasher with fresh random keys, re-seeded
+        // per call. Calling `finish()` with no bytes written returns a value derived
+        // solely from those keys — an unpredictable per-call value, so `r1 != r2`.
         let r1 = RandomState::new().build_hasher().finish();
         let r2 = RandomState::new().build_hasher().finish();
 
