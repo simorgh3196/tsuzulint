@@ -54,6 +54,24 @@
   `language` also **scopes** which rules run: a JA-only rule (e.g. `sentence-length`, `max-ten`,
   `no-doubled-joshi`) runs only on Japanese documents, and when `language` is unset only the
   language-neutral rules run — so set `language: ja` (or extend a `ja-*` preset) to lint Japanese.
+- **`ja-prh` terminology dictionaries:** the `ja-prh` rule reads terms two ways, which combine. An
+  inline list under `options.terms` (`{ expected, pattern?, patterns?, regexPatterns? }`), and a
+  list of external [`prh`](https://github.com/prh/prh) `.prh.yml` files under `options.dictionaries`
+  (paths resolved relative to the config file):
+
+  ```json
+  { "rules": { "ja-prh": { "options": {
+      "dictionaries": ["./prh/web.yml", "./prh/tech.yml"],
+      "terms": [{ "expected": "JavaScript", "patterns": ["Javascript"] }]
+  } } } }
+  ```
+
+  Each dictionary's `version` / `imports` / `rules` are honored: a rule's `expected` is the
+  replacement (a `$1`-style template for a regex match), and a `pattern` written `/source/flags` is
+  a regex. Regex matching uses a small, ReDoS-free engine; a pattern it cannot compile (e.g.
+  lookaround) is skipped, and `specs` / `regexpMustEmpty` / `options.wordBoundary` are not yet
+  applied. A dictionary that cannot be read or parsed is reported on stderr and skipped (lint still
+  runs). Dictionaries are loaded at `lint`/`fix` time, not for `tzlint rules`.
 - **JSON Schema:** a Draft 2020-12 schema is published as `tzlint_core::CONFIG_SCHEMA`
   (`$id` `https://tsuzulint.dev/schema/config/v1.json`) for editor completion/validation and
   CLI emission. It describes the **JSON-level** contract and is intentionally stricter than the

@@ -29,6 +29,7 @@ pub mod morphology;
 pub mod net;
 pub mod parse;
 pub mod position;
+pub mod prh;
 pub mod processor;
 
 pub use cache::{
@@ -49,6 +50,7 @@ pub use morphology::{DictId, MorphologyRegistry};
 pub use net::{UrlPolicyError, validate_dictionary_url};
 pub use parse::{ParseError, parse};
 pub use position::LineIndex;
+pub use prh::{PrhDictionary, PrhError, PrhPattern, PrhRule, parse_prh};
 pub use processor::{
     ColumnSelector, ColumnTarget, DelimitedConfig, DelimitedProcessor, ParseMode, Parsed,
     Processor, ProcessorConfig, Region, RegionRules, RegionTag, Registry, lint_document,

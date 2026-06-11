@@ -19,6 +19,9 @@ workspace = true
 tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
 tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
 serde_json = { workspace = true }
+# `ja-prh` regex patterns (prh `/source/flags`). A tiny, zero-dependency, ReDoS-free, non-panicking
+# engine — see the workspace dependency note for why `regex-lite` over the full `regex` here.
+regex-lite = { workspace = true }
 
 [dev-dependencies]
 # Test-only: the parser + engine, used to run a rule end-to-end over markdown (see

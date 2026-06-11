@@ -32,6 +32,7 @@ use tzlint_pdk::RuleId;
 
 pub use discover::{DiscoveredConfig, ShadowedCandidate, discover};
 pub use format::ConfigFormat;
+pub(crate) use format::reject_yaml_anchors;
 pub use format_config::{ColumnConfig, FormatConfig};
 pub use model::RuleSetting;
 pub use preset::{Preset, resolve};

@@ -43,6 +43,15 @@ accumulate as the release is built.
   All five ship enabled in the `ja-technical-writing` preset (alongside `no-doubled-joshi`),
   mirroring `textlint-rule-preset-ja-technical-writing`; they stay no-ops until a morphology
   dictionary is configured.
+- **Terminology / 表記ゆれ (`ja-prh`).** The `prh` counterpart: each configured term pairs
+  an `expected` spelling with the `patterns` to rewrite to it (e.g. `Javascript` →
+  `JavaScript`, `サーバ` → `サーバー`), reported with an autofix. Idempotent (a match already
+  in the expected form is left alone). Terms are supplied inline via `options.terms` and/or by
+  importing external [`prh`](https://github.com/prh/prh) `.prh.yml` dictionaries named in
+  `options.dictionaries` (with `imports` followed). Patterns may be literal or regex
+  (`/source/flags`), and `expected` is a `$1`-style replacement template for a regex match; regex
+  matching uses the ReDoS-free `regex-lite` engine (lookaround/backreferences and Unicode-property
+  classes are unsupported and such patterns are skipped).
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the
