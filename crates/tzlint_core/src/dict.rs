@@ -290,11 +290,19 @@ mod tests {
 
     /// A unique, freshly-created temp directory (cleaned up by the caller).
     fn temp_dir() -> PathBuf {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
         static N: AtomicU64 = AtomicU64::new(0);
+
+        let r1 = RandomState::new().build_hasher().finish();
+        let r2 = RandomState::new().build_hasher().finish();
+
         let dir = std::env::temp_dir().join(format!(
-            "tzlint-dict-test-{}-{}",
+            "tzlint-dict-test-{}-{}-{:016x}-{:016x}",
             std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
+            N.fetch_add(1, Ordering::Relaxed),
+            r1,
+            r2
         ));
         NativeHost.create_dir_all(&dir).unwrap();
         dir
