@@ -52,6 +52,13 @@ accumulate as the release is built.
   (`/source/flags`), and `expected` is a `$1`-style replacement template for a regex match; regex
   matching uses the ReDoS-free `regex-lite` engine (lookaround/backreferences and Unicode-property
   classes are unsupported and such patterns are skipped).
+- **Surface parity rules (`textlint-rule-preset-ja-technical-writing`).** `max-comma`
+  (limits ASCII commas per sentence, the sibling of `max-ten`), `no-invalid-control-character`
+  (flags invalid C0 / DEL control characters), `no-unmatched-pair` (flags unmatched
+  brackets/quotes within a text block), `ja-unnatural-alphabet` (flags a stray single Latin
+  letter sandwiched between Japanese characters, a likely IME input error), and
+  `arabic-kanji-numbers` (Arabic vs. kanji numeral usage, JTF style guide 2.2.2) — closing the
+  surface half of the preset-parity gap. Report-only.
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the
