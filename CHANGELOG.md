@@ -63,6 +63,14 @@ accumulate as the release is built.
   never flagged); its opt-in `detectOrphanedClosers` option additionally flags orphaned Japanese
   quotation/corner-bracket closers (`」` `』` `】` and guillemets), which can never be enumeration
   markers.
+- **Lexical & repetition parity rules (`textlint-rule-preset-ja-technical-writing`).**
+  `ja-no-weak-phrase` (flags weak / hedging expressions such as the 「かも」 family),
+  `ja-no-abusage` (flags common Japanese misuses, 誤用, from a ported dictionary),
+  `no-doubled-conjunction` (flags the same 接続詞 opening consecutive sentences), and
+  `ja-no-successive-word` (flags a word repeated in immediate succession) — the
+  lexicon / morphology half of the preset-parity gap. `no-doubled-conjunction` and
+  `ja-no-successive-word` are morphology-backed (no-ops until a dictionary is configured).
+  Report-only.
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the
