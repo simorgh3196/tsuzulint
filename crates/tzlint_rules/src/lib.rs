@@ -22,21 +22,27 @@ use serde_json::Value;
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
-    ja_no_mixed_period, ja_no_redundant_expression, ja_prh, max_kanji_continuous_len, max_ten,
-    no_double_negative_ja, no_doubled_conjunctive_particle_ga, no_doubled_joshi,
-    no_dropping_the_ra, no_exclamation_question_mark, no_hankaku_kana, no_mix_dearu_desumasu,
-    no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_zero_width_spaces, sentence_length,
+    arabic_kanji_numbers, ja_no_mixed_period, ja_no_redundant_expression, ja_prh,
+    ja_unnatural_alphabet, max_comma, max_kanji_continuous_len, max_ten, no_double_negative_ja,
+    no_doubled_conjunctive_particle_ga, no_doubled_joshi, no_dropping_the_ra,
+    no_exclamation_question_mark, no_hankaku_kana, no_invalid_control_character,
+    no_mix_dearu_desumasu, no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_unmatched_pair,
+    no_zero_width_spaces, sentence_length,
 };
 pub use rules::{
-    ja_no_mixed_period::JaNoMixedPeriod, ja_no_redundant_expression::JaNoRedundantExpression,
-    ja_prh::JaPrh, max_kanji_continuous_len::MaxKanjiContinuousLen, max_ten::MaxTen,
+    arabic_kanji_numbers::ArabicKanjiNumbers, ja_no_mixed_period::JaNoMixedPeriod,
+    ja_no_redundant_expression::JaNoRedundantExpression, ja_prh::JaPrh,
+    ja_unnatural_alphabet::JaUnnaturalAlphabet, max_comma::MaxComma,
+    max_kanji_continuous_len::MaxKanjiContinuousLen, max_ten::MaxTen,
     no_double_negative_ja::NoDoubleNegativeJa,
     no_doubled_conjunctive_particle_ga::NoDoubledConjunctiveParticleGa,
     no_doubled_joshi::NoDoubledJoshi, no_dropping_the_ra::NoDroppingTheRa,
     no_exclamation_question_mark::NoExclamationQuestionMark, no_hankaku_kana::NoHankakuKana,
+    no_invalid_control_character::NoInvalidControlCharacter,
     no_mix_dearu_desumasu::NoMixDearuDesumasu,
     no_mixed_zenkaku_hankaku_alphabet::NoMixedZenkakuHankakuAlphabet, no_nfd::NoNfd,
-    no_todo::NoTodo, no_zero_width_spaces::NoZeroWidthSpaces, sentence_length::SentenceLength,
+    no_todo::NoTodo, no_unmatched_pair::NoUnmatchedPair, no_zero_width_spaces::NoZeroWidthSpaces,
+    sentence_length::SentenceLength,
 };
 
 /// The ids of every built-in rule, in [`builtin_rules`] order. Single source of truth — preset
@@ -59,6 +65,11 @@ pub const RULE_IDS: &[&str] = &[
     no_dropping_the_ra::ID,
     no_double_negative_ja::ID,
     ja_prh::ID,
+    max_comma::ID,
+    no_invalid_control_character::ID,
+    no_unmatched_pair::ID,
+    ja_unnatural_alphabet::ID,
+    arabic_kanji_numbers::ID,
 ];
 
 /// Construct a single built-in rule by `id`, applying config `options` (through the rule's
@@ -88,6 +99,11 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         no_dropping_the_ra::ID => Box::new(NoDroppingTheRa::new()),
         no_double_negative_ja::ID => Box::new(NoDoubleNegativeJa::new()),
         ja_prh::ID => Box::new(JaPrh::from_options(options)),
+        max_comma::ID => Box::new(MaxComma::from_options(options)),
+        no_invalid_control_character::ID => Box::new(NoInvalidControlCharacter::new()),
+        no_unmatched_pair::ID => Box::new(NoUnmatchedPair::from_options(options)),
+        ja_unnatural_alphabet::ID => Box::new(JaUnnaturalAlphabet::new()),
+        arabic_kanji_numbers::ID => Box::new(ArabicKanjiNumbers::new()),
         _ => return None,
     };
     Some(match severity {
@@ -184,6 +200,10 @@ mod tests {
             "no-dropping-the-ra",                 // JA via its morphology pin
             "no-double-negative-ja",              // JA via its morphology pin
             "ja-prh",                             // JA-only (surface terminology rule)
+            "max-comma",                          // JA-only (surface, sibling of max-ten)
+            "no-unmatched-pair",                  // JA-only (surface bracket matching)
+            "ja-unnatural-alphabet",              // JA-only (surface)
+            "arabic-kanji-numbers",               // JA-only (surface, JTF 2.2.2)
         ];
 
         for id in RULE_IDS {
@@ -273,6 +293,23 @@ mod tests {
         assert_eq!(
             NoDoubleNegativeJa::default().meta().id.as_str(),
             "no-double-negative-ja"
+        );
+        assert_eq!(MaxComma::default().meta().id.as_str(), "max-comma");
+        assert_eq!(
+            NoInvalidControlCharacter::default().meta().id.as_str(),
+            "no-invalid-control-character"
+        );
+        assert_eq!(
+            NoUnmatchedPair::default().meta().id.as_str(),
+            "no-unmatched-pair"
+        );
+        assert_eq!(
+            JaUnnaturalAlphabet::default().meta().id.as_str(),
+            "ja-unnatural-alphabet"
+        );
+        assert_eq!(
+            ArabicKanjiNumbers::default().meta().id.as_str(),
+            "arabic-kanji-numbers"
         );
     }
 
