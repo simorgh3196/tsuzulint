@@ -16,8 +16,8 @@ workspace = true
 # need `tzlint_ast` only for `NodeKind`/`Span`. They deliberately do NOT depend on `tzlint_core`
 # (the engine): rules are pure visitors, and keeping the dep out avoids a cycle once `tzlint_core`
 # wires the registry. `serde_json` parses rule options leniently.
-tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
-tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
+tzlint_pdk = { path = "../tzlint_pdk", version = "0.1.0" }
+tzlint_ast = { path = "../tzlint_ast", version = "0.1.0" }
 serde_json = { workspace = true }
 # `ja-prh` regex patterns (prh `/source/flags`). A tiny, zero-dependency, ReDoS-free, non-panicking
 # engine — see the workspace dependency note for why `regex-lite` over the full `regex` here.
@@ -27,4 +27,4 @@ regex-lite = { workspace = true }
 # Test-only: the parser + engine, used to run a rule end-to-end over markdown (see
 # `src/test_support.rs`). A dev-dependency — never part of the normal graph — so it does not
 # create a cycle even once `tzlint_core` references the rule registry.
-tzlint_core = { path = "../tzlint_core", version = "0.0.0" }
+tzlint_core = { path = "../tzlint_core", version = "0.1.0" }
