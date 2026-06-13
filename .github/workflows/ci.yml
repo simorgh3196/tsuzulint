@@ -201,7 +201,7 @@ jobs:
           cargo llvm-cov nextest -p tzlint_wasm --features morphology --no-report
           cargo llvm-cov report --lcov --output-path lcov.info
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }} # required for private repos / protected branches
           files: lcov.info
