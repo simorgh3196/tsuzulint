@@ -126,7 +126,42 @@ fn ipv6_is_blocked(addr: Ipv6Addr) -> bool {
     if addr.to_ipv4().is_some_and(ipv4_is_blocked) {
         return true;
     }
+
     let segments = addr.segments();
+
+    // Check embedded IPv4 addresses in transition mechanisms
+    // NAT64 (64:ff9b::/96)
+    if segments[0] == 0x0064
+        && segments[1] == 0xff9b
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+        && segments[5] == 0
+    {
+        let ip = Ipv4Addr::new(
+            (segments[6] >> 8) as u8,
+            (segments[6] & 0xff) as u8,
+            (segments[7] >> 8) as u8,
+            (segments[7] & 0xff) as u8,
+        );
+        if ipv4_is_blocked(ip) {
+            return true;
+        }
+    }
+
+    // 6to4 (2002::/16)
+    if segments[0] == 0x2002 {
+        let ip = Ipv4Addr::new(
+            (segments[1] >> 8) as u8,
+            (segments[1] & 0xff) as u8,
+            (segments[2] >> 8) as u8,
+            (segments[2] & 0xff) as u8,
+        );
+        if ipv4_is_blocked(ip) {
+            return true;
+        }
+    }
+
     addr.is_loopback()        // ::1
         || addr.is_unspecified() // ::
         || addr.is_multicast()   // ff00::/8
@@ -244,14 +279,18 @@ mod tests {
     #[test]
     fn rejects_blocked_ipv6_literals() {
         for host in [
-            "[::1]",              // loopback
-            "[::]",               // unspecified
-            "[fc00::1]",          // unique local
-            "[fe80::1]",          // link-local
-            "[ff02::1]",          // multicast
-            "[::ffff:127.0.0.1]", // IPv4-mapped loopback
-            "[::ffff:10.0.0.1]",  // IPv4-mapped private
-            "[::127.0.0.1]",      // IPv4-compatible loopback
+            "[::1]",                // loopback
+            "[::]",                 // unspecified
+            "[fc00::1]",            // unique local
+            "[fe80::1]",            // link-local
+            "[ff02::1]",            // multicast
+            "[::ffff:127.0.0.1]",   // IPv4-mapped loopback
+            "[::ffff:10.0.0.1]",    // IPv4-mapped private
+            "[::127.0.0.1]",        // IPv4-compatible loopback
+            "[64:ff9b::127.0.0.1]", // NAT64 loopback
+            "[64:ff9b::10.0.0.1]",  // NAT64 private
+            "[2002:7f00:0001::]",   // 6to4 loopback (127.0.0.1)
+            "[2002:0a00:0001::]",   // 6to4 private (10.0.0.1)
         ] {
             let url = format!("https://{host}/d.zst");
             assert!(
