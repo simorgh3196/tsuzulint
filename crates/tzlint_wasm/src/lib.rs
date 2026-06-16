@@ -169,28 +169,12 @@ fn severity_str(severity: Severity) -> &'static str {
 /// Decode 64 hex characters into a 32-byte pin, panic-free.
 #[cfg(feature = "morphology")]
 fn decode_pin(hex: &str) -> Result<[u8; 32], String> {
-    let bytes = hex.as_bytes();
-    if bytes.len() != 64 {
+    if hex.len() != 64 {
         return Err("dictionary pin must be 64 hexadecimal characters".to_string());
     }
-    let mut out = [0u8; 32];
-    for (i, slot) in out.iter_mut().enumerate() {
-        let hi = hex_nibble(bytes[i * 2]).ok_or("dictionary pin has a non-hex character")?;
-        let lo = hex_nibble(bytes[i * 2 + 1]).ok_or("dictionary pin has a non-hex character")?;
-        *slot = (hi << 4) | lo;
-    }
-    Ok(out)
-}
-
-/// The value of one hex digit (`0-9`, `a-f`, `A-F`), or `None`.
-#[cfg(feature = "morphology")]
-fn hex_nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    blake3::Hash::from_hex(hex)
+        .map(|hash| *hash.as_bytes())
+        .map_err(|_| "dictionary pin has a non-hex character".to_string())
 }
 
 /// The `#[wasm_bindgen]` JS bindings — a thin wrapper over [`Linter`], compiled only for `wasm32`.

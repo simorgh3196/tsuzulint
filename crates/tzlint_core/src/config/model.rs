@@ -85,30 +85,12 @@ impl RawMorphology {
 /// Decode a 64-character hex string into a 32-byte pin, panic-free. A wrong length or a non-hex
 /// character is a [`ConfigError::InvalidDictPin`].
 fn decode_pin(hex: &str) -> Result<[u8; 32], ConfigError> {
-    let bytes = hex.as_bytes();
-    if bytes.len() != 64 {
+    if hex.len() != 64 {
         return Err(ConfigError::InvalidDictPin(hex.to_string()));
     }
-    let mut out = [0u8; 32];
-    for (i, slot) in out.iter_mut().enumerate() {
-        // `bytes.len() == 64` and `i < 32`, so `i*2 + 1 <= 63` — both indexes are in bounds.
-        let hi =
-            hex_nibble(bytes[i * 2]).ok_or_else(|| ConfigError::InvalidDictPin(hex.to_string()))?;
-        let lo = hex_nibble(bytes[i * 2 + 1])
-            .ok_or_else(|| ConfigError::InvalidDictPin(hex.to_string()))?;
-        *slot = (hi << 4) | lo;
-    }
-    Ok(out)
-}
-
-/// The numeric value of one hex digit (`0-9`, `a-f`, `A-F`), or `None`.
-fn hex_nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    blake3::Hash::from_hex(hex)
+        .map(|hash| *hash.as_bytes())
+        .map_err(|_| ConfigError::InvalidDictPin(hex.to_string()))
 }
 
 /// The on-disk shape of one `formats.<id>` section.
