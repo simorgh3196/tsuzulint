@@ -127,6 +127,40 @@ fn ipv6_is_blocked(addr: Ipv6Addr) -> bool {
         return true;
     }
     let segments = addr.segments();
+
+    // Check transition mechanisms that embed an IPv4 address.
+    // 6to4 (2002::/16) embeds the IPv4 address in segments 1 and 2.
+    if segments[0] == 0x2002 {
+        let v4 = Ipv4Addr::new(
+            (segments[1] >> 8) as u8,
+            (segments[1] & 0xff) as u8,
+            (segments[2] >> 8) as u8,
+            (segments[2] & 0xff) as u8,
+        );
+        if ipv4_is_blocked(v4) {
+            return true;
+        }
+    }
+
+    // NAT64 (64:ff9b::/96) embeds the IPv4 address in segments 6 and 7.
+    if segments[0] == 0x0064
+        && segments[1] == 0xff9b
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+        && segments[5] == 0
+    {
+        let v4 = Ipv4Addr::new(
+            (segments[6] >> 8) as u8,
+            (segments[6] & 0xff) as u8,
+            (segments[7] >> 8) as u8,
+            (segments[7] & 0xff) as u8,
+        );
+        if ipv4_is_blocked(v4) {
+            return true;
+        }
+    }
+
     addr.is_loopback()        // ::1
         || addr.is_unspecified() // ::
         || addr.is_multicast()   // ff00::/8
@@ -252,6 +286,25 @@ mod tests {
             "[::ffff:127.0.0.1]", // IPv4-mapped loopback
             "[::ffff:10.0.0.1]",  // IPv4-mapped private
             "[::127.0.0.1]",      // IPv4-compatible loopback
+        ] {
+            let url = format!("https://{host}/d.zst");
+            assert!(
+                matches!(
+                    validate_dictionary_url(&url),
+                    Err(UrlPolicyError::BlockedHost(_))
+                ),
+                "expected {host} to be blocked"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_ipv4_transition_mechanisms_with_blocked_addresses() {
+        for host in [
+            "[2002:7f00:0001::]",   // 6to4 mapped 127.0.0.1
+            "[2002:0a00:0001::]",   // 6to4 mapped 10.0.0.1
+            "[64:ff9b::7f00:0001]", // NAT64 mapped 127.0.0.1
+            "[64:ff9b::0a00:0001]", // NAT64 mapped 10.0.0.1
         ] {
             let url = format!("https://{host}/d.zst");
             assert!(
