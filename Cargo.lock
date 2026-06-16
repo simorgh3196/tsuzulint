@@ -2408,6 +2408,7 @@ dependencies = [
 name = "tzlint_wasm"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "console_error_panic_hook",
  "serde_json",
  "tzlint_core",
