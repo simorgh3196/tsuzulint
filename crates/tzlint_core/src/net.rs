@@ -318,6 +318,17 @@ mod tests {
     }
 
     #[test]
+    fn accepts_ipv4_transition_mechanisms_with_public_addresses() {
+        for host in [
+            "[2002:0808:0808::]",   // 6to4 mapped 8.8.8.8
+            "[64:ff9b::0808:0808]", // NAT64 mapped 8.8.8.8
+        ] {
+            let url = format!("https://{host}/d.zst");
+            validate_dictionary_url(&url).unwrap();
+        }
+    }
+
+    #[test]
     fn accepts_a_public_ipv6_literal() {
         validate_dictionary_url("https://[2001:4860:4860::8888]/d.zst").unwrap();
     }
