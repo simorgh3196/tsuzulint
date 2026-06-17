@@ -86,27 +86,44 @@ fn ja_basic() -> BTreeMap<RuleId, RuleSetting> {
 }
 
 /// The `ja-technical-writing` preset: stricter, with thresholds.
+///
+/// This mirrors the full 23-rule `textlint-rule-preset-ja-technical-writing` composition (its
+/// `rulesConfig` defaults are copied verbatim — `max-comma` 3, `max-ten` 3, `max-kanji-continuous-len`
+/// 6, `sentence-length` 100, the rest enabled), plus one tsuzulint-original surface rule that has no
+/// upstream counterpart: `no-mixed-zenkaku-hankaku-alphabet`. The morphology-backed rules are no-ops
+/// until a dictionary is provisioned (the engine skips morphology rules when there is no tokenizer),
+/// so enabling them here is safe even when `morphology` is unconfigured.
 fn ja_technical_writing() -> BTreeMap<RuleId, RuleSetting> {
     use serde_json::{Value, json};
     [
+        // Surface rules with thresholds (upstream `rulesConfig` values).
         ("sentence-length", on(json!({ "max": 100 }))),
+        ("max-comma", on(json!({ "max": 3 }))),
         ("max-ten", on(json!({ "max": 3 }))),
         ("max-kanji-continuous-len", on(json!({ "max": 6 }))),
-        ("no-hankaku-kana", on(Value::Null)),
-        ("no-mixed-zenkaku-hankaku-alphabet", on(Value::Null)),
+        // Surface rules, enabled with defaults.
+        ("arabic-kanji-numbers", on(Value::Null)),
+        ("ja-no-mixed-period", on(Value::Null)),
         ("no-nfd", on(Value::Null)),
+        ("no-invalid-control-character", on(Value::Null)),
         ("no-zero-width-spaces", on(Value::Null)),
         ("no-exclamation-question-mark", on(Value::Null)),
-        ("ja-no-mixed-period", on(Value::Null)),
-        // Morphology-backed style rules (mirroring textlint's preset-ja-technical-writing): each is
-        // a no-op until a dictionary is provisioned (the engine skips morphology rules when there is
-        // no tokenizer), so enabling them here is safe even when `morphology` is unconfigured.
-        ("no-doubled-joshi", on(Value::Null)),
-        ("no-mix-dearu-desumasu", on(Value::Null)),
-        ("no-doubled-conjunctive-particle-ga", on(Value::Null)),
+        ("no-hankaku-kana", on(Value::Null)),
+        ("ja-no-weak-phrase", on(Value::Null)),
+        ("ja-no-abusage", on(Value::Null)),
         ("ja-no-redundant-expression", on(Value::Null)),
-        ("no-dropping-the-ra", on(Value::Null)),
+        ("ja-unnatural-alphabet", on(Value::Null)),
+        ("no-unmatched-pair", on(Value::Null)),
+        // tsuzulint-original surface rule (no upstream-preset counterpart).
+        ("no-mixed-zenkaku-hankaku-alphabet", on(Value::Null)),
+        // Morphology-backed style rules (a no-op until a dictionary is provisioned).
+        ("no-mix-dearu-desumasu", on(Value::Null)),
+        ("no-doubled-conjunction", on(Value::Null)),
+        ("no-doubled-conjunctive-particle-ga", on(Value::Null)),
         ("no-double-negative-ja", on(Value::Null)),
+        ("no-dropping-the-ra", on(Value::Null)),
+        ("no-doubled-joshi", on(Value::Null)),
+        ("ja-no-successive-word", on(Value::Null)),
     ]
     .into_iter()
     .map(|(id, setting)| (RuleId::from(id), setting))
@@ -146,7 +163,7 @@ fn merge(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     fn on() -> RuleSetting {
         RuleSetting::On {
@@ -293,6 +310,9 @@ mod tests {
             "ja-no-redundant-expression",
             "no-dropping-the-ra",
             "no-double-negative-ja",
+            // R9 morphology-backed parity rules.
+            "no-doubled-conjunction",
+            "ja-no-successive-word",
         ];
         let technical = Preset::JaTechnicalWriting.rules();
         let basic = Preset::JaBasic.rules();
@@ -305,6 +325,52 @@ mod tests {
                 !basic.contains_key(&RuleId::from(id)),
                 "ja-basic should not bundle the style rule {id}"
             );
+        }
+    }
+
+    #[test]
+    fn ja_technical_writing_has_full_upstream_preset_parity() {
+        // `ja-technical-writing` mirrors the full 23-rule `textlint-rule-preset-ja-technical-writing`
+        // composition. This pins the complete upstream rule set (ids + the threshold values from the
+        // upstream `rulesConfig`), so a dropped or mis-defaulted parity rule fails loudly.
+        let technical = Preset::JaTechnicalWriting.rules();
+
+        // Every rule of the upstream preset, with its upstream-default options where applicable.
+        let upstream: &[(&str, Value)] = &[
+            ("sentence-length", json!({ "max": 100 })),
+            ("max-comma", json!({ "max": 3 })),
+            ("max-ten", json!({ "max": 3 })),
+            ("max-kanji-continuous-len", json!({ "max": 6 })),
+            ("no-mix-dearu-desumasu", Value::Null),
+            ("ja-no-mixed-period", Value::Null),
+            ("arabic-kanji-numbers", Value::Null),
+            ("no-doubled-conjunction", Value::Null),
+            ("no-doubled-conjunctive-particle-ga", Value::Null),
+            ("no-double-negative-ja", Value::Null),
+            ("no-doubled-joshi", Value::Null),
+            ("no-dropping-the-ra", Value::Null),
+            ("no-nfd", Value::Null),
+            ("no-invalid-control-character", Value::Null),
+            ("no-zero-width-spaces", Value::Null),
+            ("no-exclamation-question-mark", Value::Null),
+            ("no-hankaku-kana", Value::Null),
+            ("ja-no-weak-phrase", Value::Null),
+            ("ja-no-successive-word", Value::Null),
+            ("ja-no-abusage", Value::Null),
+            ("ja-no-redundant-expression", Value::Null),
+            ("ja-unnatural-alphabet", Value::Null),
+            ("no-unmatched-pair", Value::Null),
+        ];
+        assert_eq!(upstream.len(), 23, "upstream preset has 23 rules");
+
+        for (id, want_options) in upstream {
+            match technical.get(&RuleId::from(*id)) {
+                Some(RuleSetting::On { options, .. }) => assert_eq!(
+                    options, want_options,
+                    "ja-technical-writing rule {id} should carry the upstream default options"
+                ),
+                other => panic!("ja-technical-writing should enable {id}, got {other:?}"),
+            }
         }
     }
 

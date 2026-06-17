@@ -71,6 +71,12 @@ accumulate as the release is built.
   lexicon / morphology half of the preset-parity gap. `no-doubled-conjunction` and
   `ja-no-successive-word` are morphology-backed (no-ops until a dictionary is configured).
   Report-only.
+- **Full `ja-technical-writing` preset parity.** The `ja-technical-writing` preset now bundles all
+  23 rules of `textlint-rule-preset-ja-technical-writing` — the surface and lexical/morphology
+  parity rules above join the style rules already shipped — with the upstream `rulesConfig`
+  thresholds copied verbatim (`max-comma` 3, `max-ten` 3, `max-kanji-continuous-len` 6,
+  `sentence-length` 100). The preset also keeps the tsuzulint-original `no-mixed-zenkaku-hankaku-alphabet`,
+  which has no upstream counterpart.
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the
