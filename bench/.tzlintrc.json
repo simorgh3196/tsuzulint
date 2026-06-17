@@ -1,0 +1,12 @@
+{
+  "extends": "ja-technical-writing",
+  "language": "ja",
+  "morphology": {
+    "path": "ipadic.dict.zst",
+    "pin": "f325b4ce20b0f974ea2654ec1351a1618a8b5ee8ee3139561a969b916db6399b",
+    "lang": "ja"
+  },
+  "rules": {
+    "no-mixed-zenkaku-hankaku-alphabet": false
+  }
+}
