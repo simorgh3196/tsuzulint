@@ -22,19 +22,21 @@ use serde_json::Value;
 use tzlint_pdk::{Context, NodeRef, Rule, RuleMeta, Severity};
 
 use rules::{
-    arabic_kanji_numbers, ja_no_mixed_period, ja_no_redundant_expression, ja_prh,
-    ja_unnatural_alphabet, max_comma, max_kanji_continuous_len, max_ten, no_double_negative_ja,
+    arabic_kanji_numbers, ja_no_abusage, ja_no_mixed_period, ja_no_redundant_expression,
+    ja_no_successive_word, ja_no_weak_phrase, ja_prh, ja_unnatural_alphabet, max_comma,
+    max_kanji_continuous_len, max_ten, no_double_negative_ja, no_doubled_conjunction,
     no_doubled_conjunctive_particle_ga, no_doubled_joshi, no_dropping_the_ra,
     no_exclamation_question_mark, no_hankaku_kana, no_invalid_control_character,
     no_mix_dearu_desumasu, no_mixed_zenkaku_hankaku_alphabet, no_nfd, no_todo, no_unmatched_pair,
     no_zero_width_spaces, sentence_length,
 };
 pub use rules::{
-    arabic_kanji_numbers::ArabicKanjiNumbers, ja_no_mixed_period::JaNoMixedPeriod,
-    ja_no_redundant_expression::JaNoRedundantExpression, ja_prh::JaPrh,
+    arabic_kanji_numbers::ArabicKanjiNumbers, ja_no_abusage::JaNoAbusage,
+    ja_no_mixed_period::JaNoMixedPeriod, ja_no_redundant_expression::JaNoRedundantExpression,
+    ja_no_successive_word::JaNoSuccessiveWord, ja_no_weak_phrase::JaNoWeakPhrase, ja_prh::JaPrh,
     ja_unnatural_alphabet::JaUnnaturalAlphabet, max_comma::MaxComma,
     max_kanji_continuous_len::MaxKanjiContinuousLen, max_ten::MaxTen,
-    no_double_negative_ja::NoDoubleNegativeJa,
+    no_double_negative_ja::NoDoubleNegativeJa, no_doubled_conjunction::NoDoubledConjunction,
     no_doubled_conjunctive_particle_ga::NoDoubledConjunctiveParticleGa,
     no_doubled_joshi::NoDoubledJoshi, no_dropping_the_ra::NoDroppingTheRa,
     no_exclamation_question_mark::NoExclamationQuestionMark, no_hankaku_kana::NoHankakuKana,
@@ -70,6 +72,10 @@ pub const RULE_IDS: &[&str] = &[
     no_unmatched_pair::ID,
     ja_unnatural_alphabet::ID,
     arabic_kanji_numbers::ID,
+    no_doubled_conjunction::ID,
+    ja_no_successive_word::ID,
+    ja_no_weak_phrase::ID,
+    ja_no_abusage::ID,
 ];
 
 /// Construct a single built-in rule by `id`, applying config `options` (through the rule's
@@ -104,6 +110,10 @@ pub fn build_rule(id: &str, options: &Value, severity: Option<Severity>) -> Opti
         no_unmatched_pair::ID => Box::new(NoUnmatchedPair::from_options(options)),
         ja_unnatural_alphabet::ID => Box::new(JaUnnaturalAlphabet::new()),
         arabic_kanji_numbers::ID => Box::new(ArabicKanjiNumbers::new()),
+        no_doubled_conjunction::ID => Box::new(NoDoubledConjunction::new()),
+        ja_no_successive_word::ID => Box::new(JaNoSuccessiveWord::from_options(options)),
+        ja_no_weak_phrase::ID => Box::new(JaNoWeakPhrase::new()),
+        ja_no_abusage::ID => Box::new(JaNoAbusage::new()),
         _ => return None,
     };
     Some(match severity {
@@ -204,6 +214,10 @@ mod tests {
             "no-unmatched-pair",                  // JA-only (surface bracket matching)
             "ja-unnatural-alphabet",              // JA-only (surface)
             "arabic-kanji-numbers",               // JA-only (surface, JTF 2.2.2)
+            "no-doubled-conjunction",             // JA via its morphology pin
+            "ja-no-successive-word",              // JA via its morphology pin
+            "ja-no-weak-phrase",                  // JA-only (surface weak-phrase dictionary)
+            "ja-no-abusage",                      // JA-only (surface misuse dictionary)
         ];
 
         for id in RULE_IDS {
@@ -311,6 +325,19 @@ mod tests {
             ArabicKanjiNumbers::default().meta().id.as_str(),
             "arabic-kanji-numbers"
         );
+        assert_eq!(
+            NoDoubledConjunction::default().meta().id.as_str(),
+            "no-doubled-conjunction"
+        );
+        assert_eq!(
+            JaNoSuccessiveWord::default().meta().id.as_str(),
+            "ja-no-successive-word"
+        );
+        assert_eq!(
+            JaNoWeakPhrase::default().meta().id.as_str(),
+            "ja-no-weak-phrase"
+        );
+        assert_eq!(JaNoAbusage::default().meta().id.as_str(), "ja-no-abusage");
     }
 
     #[test]
