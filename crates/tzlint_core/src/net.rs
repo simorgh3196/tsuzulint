@@ -119,11 +119,47 @@ fn ipv4_is_blocked(addr: Ipv4Addr) -> bool {
         || a >= 240 // 240.0.0.0/4 (reserved, includes the 255/8 broadcast block)
 }
 
+/// Extracts an embedded IPv4 address from transition-form IPv6 addresses.
+///
+/// Handles:
+/// - IPv4-mapped and IPv4-compatible (`::ffff:a.b.c.d` and `::a.b.c.d` via `to_ipv4`)
+/// - NAT64 well-known prefix (`64:ff9b::a.b.c.d` — RFC 6052)
+/// - 6to4 (`2002:abcd:efgh::` — RFC 3056)
+fn extract_ipv4(addr: Ipv6Addr) -> Option<Ipv4Addr> {
+    if let Some(v4) = addr.to_ipv4() {
+        return Some(v4);
+    }
+    let segments = addr.segments();
+    // NAT64 (RFC 6052) Well-Known Prefix: 64:ff9b::/96
+    if segments[0] == 0x0064
+        && segments[1] == 0xff9b
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+        && segments[5] == 0
+    {
+        let a = (segments[6] >> 8) as u8;
+        let b = (segments[6] & 0xff) as u8;
+        let c = (segments[7] >> 8) as u8;
+        let d = (segments[7] & 0xff) as u8;
+        return Some(Ipv4Addr::new(a, b, c, d));
+    }
+    // 6to4 (RFC 3056): 2002::/16
+    if segments[0] == 0x2002 {
+        let a = (segments[1] >> 8) as u8;
+        let b = (segments[1] & 0xff) as u8;
+        let c = (segments[2] >> 8) as u8;
+        let d = (segments[2] & 0xff) as u8;
+        return Some(Ipv4Addr::new(a, b, c, d));
+    }
+    None
+}
+
 /// Whether an IPv6 literal is in a range that must not be fetched. An IPv4-mapped address
 /// (`::ffff:a.b.c.d`) is re-checked through the IPv4 rules so a mapped private address cannot slip
 /// through as "just an IPv6 host".
 fn ipv6_is_blocked(addr: Ipv6Addr) -> bool {
-    if addr.to_ipv4().is_some_and(ipv4_is_blocked) {
+    if extract_ipv4(addr).is_some_and(ipv4_is_blocked) {
         return true;
     }
     let segments = addr.segments();
@@ -244,14 +280,18 @@ mod tests {
     #[test]
     fn rejects_blocked_ipv6_literals() {
         for host in [
-            "[::1]",              // loopback
-            "[::]",               // unspecified
-            "[fc00::1]",          // unique local
-            "[fe80::1]",          // link-local
-            "[ff02::1]",          // multicast
-            "[::ffff:127.0.0.1]", // IPv4-mapped loopback
-            "[::ffff:10.0.0.1]",  // IPv4-mapped private
-            "[::127.0.0.1]",      // IPv4-compatible loopback
+            "[::1]",                // loopback
+            "[::]",                 // unspecified
+            "[fc00::1]",            // unique local
+            "[fe80::1]",            // link-local
+            "[ff02::1]",            // multicast
+            "[::ffff:127.0.0.1]",   // IPv4-mapped loopback
+            "[::ffff:10.0.0.1]",    // IPv4-mapped private
+            "[::127.0.0.1]",        // IPv4-compatible loopback
+            "[64:ff9b::127.0.0.1]", // NAT64 loopback
+            "[64:ff9b::10.0.0.1]",  // NAT64 private
+            "[2002:7f00:0001::]",   // 6to4 loopback (127.0.0.1)
+            "[2002:0a00:0001::]",   // 6to4 private (10.0.0.1)
         ] {
             let url = format!("https://{host}/d.zst");
             assert!(
