@@ -10,3 +10,13 @@
 
 # Local-only tooling state (not the lockfile — Cargo.lock is committed for the binary)
 .jules/
+
+# Benchmark local artifacts: regenerable outputs are not committed; only their sources are
+# (gen_corpus.py for the corpus, build-dict.sh for the dictionary, package-lock.json for the deps).
+/bench/corpus/
+/bench/*.dict
+/bench/*.dict.zst
+/bench/textlint/node_modules/
+/bench/results/
+/bench/.tzlint/
+/bench/.tzlintcache
