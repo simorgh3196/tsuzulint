@@ -28,6 +28,10 @@ serde_json = { workspace = true }
 # The native morphology backend — pulled ONLY by the `morphology` feature, so the default (lean)
 # wasm artifact is tokenizer-free and tiny. The backend and its deps are pure Rust and build for wasm32.
 tzlint_morphology_native = { path = "../tzlint_morphology_native", version = "0.0.0", optional = true }
+# `blake3::Hash::from_hex` decodes the dictionary pin — pulled ONLY by the `morphology` feature
+# (the lean artifact never decodes a pin). Already linked transitively via `tzlint_core`, so this
+# adds no weight to the full build; it just lets the binding name `blake3` directly.
+blake3 = { workspace = true, optional = true }
 
 # wasm-only glue: the `#[wasm_bindgen]` JS bindings + a panic→console.error hook. Native builds (the
 # unit tests of the `Linter` core) never pull these.
@@ -50,4 +54,4 @@ wasm-bindgen-test = "0.3"
 # so there is no compile-time language axis to split on. Japanese is the language wired today; ko/zh
 # reuse this same build once their dictionaries and rules land. Named for the capability, so a
 # consumer opts in by whether it needs morphology, not by a backend or a language.
-morphology = ["dep:tzlint_morphology_native"]
+morphology = ["dep:tzlint_morphology_native", "dep:blake3"]
