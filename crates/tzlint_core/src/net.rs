@@ -288,18 +288,18 @@ mod tests {
     #[test]
     fn rejects_blocked_ipv6_literals() {
         for host in [
-            "[::1]",                // loopback
-            "[::]",                 // unspecified
-            "[fc00::1]",            // unique local
-            "[fe80::1]",            // link-local
-            "[ff02::1]",            // multicast
-            "[::ffff:127.0.0.1]",   // IPv4-mapped loopback
-            "[::ffff:10.0.0.1]",    // IPv4-mapped private
-            "[::127.0.0.1]",        // IPv4-compatible loopback
-            "[64:ff9b::127.0.0.1]", // NAT64 loopback
-            "[64:ff9b::10.0.0.1]",  // NAT64 private
-            "[2002:7f00:0001::]",   // 6to4 loopback (127.0.0.1)
-            "[2002:0a00:0001::]",   // 6to4 private (10.0.0.1)
+            "[::1]",                                     // loopback
+            "[::]",                                      // unspecified
+            "[fc00::1]",                                 // unique local
+            "[fe80::1]",                                 // link-local
+            "[ff02::1]",                                 // multicast
+            "[::ffff:127.0.0.1]",                        // IPv4-mapped loopback
+            "[::ffff:10.0.0.1]",                         // IPv4-mapped private
+            "[::127.0.0.1]",                             // IPv4-compatible loopback
+            "[64:ff9b::127.0.0.1]",                      // NAT64 loopback
+            "[64:ff9b::10.0.0.1]",                       // NAT64 private
+            "[2002:7f00:0001::]",                        // 6to4 loopback (127.0.0.1)
+            "[2002:0a00:0001::]",                        // 6to4 private (10.0.0.1)
             "[2001:0000:4136:e378:8000:63bf:80ff:fffe]", // Teredo loopback (127.0.0.1)
             "[2001:0000:4136:e378:8000:63bf:f5ff:fffe]", // Teredo private (10.0.0.1)
         ] {
