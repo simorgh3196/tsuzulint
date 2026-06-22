@@ -153,7 +153,8 @@ fn diagnostics_to_json(diagnostics: &[Diagnostic]) -> String {
             })
         })
         .collect();
-    Value::Array(items).to_string()
+    // Items are pure JSON types generated locally above; serialization cannot fail.
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// The lowercase wire spelling of a severity (matches the config schema's `severity` enum).
