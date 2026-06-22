@@ -152,6 +152,14 @@ fn extract_ipv4(addr: Ipv6Addr) -> Option<Ipv4Addr> {
         let d = (segments[2] & 0xff) as u8;
         return Some(Ipv4Addr::new(a, b, c, d));
     }
+    // Teredo (RFC 4380): 2001:0000::/32
+    if segments[0] == 0x2001 && segments[1] == 0x0000 {
+        let a = ((segments[6] >> 8) as u8) ^ 0xff;
+        let b = ((segments[6] & 0xff) as u8) ^ 0xff;
+        let c = ((segments[7] >> 8) as u8) ^ 0xff;
+        let d = ((segments[7] & 0xff) as u8) ^ 0xff;
+        return Some(Ipv4Addr::new(a, b, c, d));
+    }
     None
 }
 
@@ -292,6 +300,8 @@ mod tests {
             "[64:ff9b::10.0.0.1]",  // NAT64 private
             "[2002:7f00:0001::]",   // 6to4 loopback (127.0.0.1)
             "[2002:0a00:0001::]",   // 6to4 private (10.0.0.1)
+            "[2001:0000:4136:e378:8000:63bf:80ff:fffe]", // Teredo loopback (127.0.0.1)
+            "[2001:0000:4136:e378:8000:63bf:f5ff:fffe]", // Teredo private (10.0.0.1)
         ] {
             let url = format!("https://{host}/d.zst");
             assert!(
