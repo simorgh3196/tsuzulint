@@ -406,8 +406,7 @@ impl DocumentCache {
             "version": CACHE_FILE_VERSION,
             "entries": Value::Object(entries),
         });
-        // `Value`'s `Display` is infallible, so no serialization error to handle here.
-        let text = document.to_string();
+        let text = serde_json::to_string(&document).unwrap_or_default();
         if text.len() > limit {
             return Err(CacheError::Io(IoError::TooLarge { limit }));
         }
