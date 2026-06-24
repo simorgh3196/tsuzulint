@@ -125,6 +125,7 @@ fn ipv4_is_blocked(addr: Ipv4Addr) -> bool {
 /// - IPv4-mapped and IPv4-compatible (`::ffff:a.b.c.d` and `::a.b.c.d` via `to_ipv4`)
 /// - NAT64 well-known prefix (`64:ff9b::a.b.c.d` — RFC 6052)
 /// - 6to4 (`2002:abcd:efgh::` — RFC 3056)
+/// - Teredo (`2001:0000::/32` — RFC 4380)
 fn extract_ipv4(addr: Ipv6Addr) -> Option<Ipv4Addr> {
     if let Some(v4) = addr.to_ipv4() {
         return Some(v4);
@@ -150,6 +151,14 @@ fn extract_ipv4(addr: Ipv6Addr) -> Option<Ipv4Addr> {
         let b = (segments[1] & 0xff) as u8;
         let c = (segments[2] >> 8) as u8;
         let d = (segments[2] & 0xff) as u8;
+        return Some(Ipv4Addr::new(a, b, c, d));
+    }
+    // Teredo (RFC 4380): 2001:0000::/32 (last 32 bits are obfuscated by XORing with 0xFFFF)
+    if segments[0] == 0x2001 && segments[1] == 0x0000 {
+        let a = ((segments[6] >> 8) ^ 0xff) as u8;
+        let b = ((segments[6] & 0xff) ^ 0xff) as u8;
+        let c = ((segments[7] >> 8) ^ 0xff) as u8;
+        let d = ((segments[7] & 0xff) ^ 0xff) as u8;
         return Some(Ipv4Addr::new(a, b, c, d));
     }
     None
@@ -292,6 +301,8 @@ mod tests {
             "[64:ff9b::10.0.0.1]",  // NAT64 private
             "[2002:7f00:0001::]",   // 6to4 loopback (127.0.0.1)
             "[2002:0a00:0001::]",   // 6to4 private (10.0.0.1)
+            "[2001:0000:4136:e378:8000:63bf:80ff:fffe]", // Teredo loopback (127.0.0.1)
+            "[2001:0000:4136:e378:8000:63bf:f5ff:fffe]", // Teredo private (10.0.0.1)
         ] {
             let url = format!("https://{host}/d.zst");
             assert!(
