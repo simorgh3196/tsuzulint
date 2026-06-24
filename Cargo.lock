@@ -2410,6 +2410,7 @@ name = "tzlint_wasm"
 version = "0.0.0"
 dependencies = [
  "console_error_panic_hook",
+ "serde",
  "serde_json",
  "tzlint_core",
  "tzlint_morphology_native",

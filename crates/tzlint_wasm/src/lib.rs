@@ -141,19 +141,29 @@ fn resolve_rules(config: &Config) -> Vec<Box<dyn Rule>> {
 
 /// Serialize diagnostics to a compact JSON array. Spans are byte offsets into the source.
 fn diagnostics_to_json(diagnostics: &[Diagnostic]) -> String {
-    let items: Vec<Value> = diagnostics
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct JsonDiagnostic<'a> {
+        rule_id: &'a str,
+        severity: &'static str,
+        message: &'a str,
+        start: u32,
+        end: u32,
+    }
+
+    let items: Vec<JsonDiagnostic> = diagnostics
         .iter()
-        .map(|d| {
-            serde_json::json!({
-                "ruleId": d.rule_id.as_str(),
-                "severity": severity_str(d.severity),
-                "message": d.message,
-                "start": d.span.start,
-                "end": d.span.end,
-            })
+        .map(|d| JsonDiagnostic {
+            rule_id: d.rule_id.as_str(),
+            severity: severity_str(d.severity),
+            message: &d.message,
+            start: d.span.start,
+            end: d.span.end,
         })
         .collect();
-    Value::Array(items).to_string()
+
+    // Infallible because `JsonDiagnostic` strings are valid UTF-8 and there are no map keys.
+    serde_json::to_string(&items).unwrap_or_default()
 }
 
 /// The lowercase wire spelling of a severity (matches the config schema's `severity` enum).
