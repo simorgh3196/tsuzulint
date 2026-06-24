@@ -85,7 +85,7 @@ pub fn render_json(writer: &mut dyn Write, reports: &[FileReport]) -> io::Result
         .collect();
 
     // `serde_json` only fails here on an underlying writer error, which is already `io`.
-    serde_json::to_writer_pretty(&mut *writer, &Value::Array(files)).map_err(io::Error::other)?;
+    serde_json::to_writer_pretty(&mut *writer, &files).map_err(io::Error::other)?;
     writeln!(writer)
 }
 
@@ -261,7 +261,7 @@ pub fn render_rule_list_json(writer: &mut dyn Write, infos: &[RuleInfo]) -> io::
             })
         })
         .collect();
-    serde_json::to_writer_pretty(&mut *writer, &Value::Array(rules)).map_err(io::Error::other)?;
+    serde_json::to_writer_pretty(&mut *writer, &rules).map_err(io::Error::other)?;
     writeln!(writer)
 }
 

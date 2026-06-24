@@ -153,7 +153,7 @@ fn diagnostics_to_json(diagnostics: &[Diagnostic]) -> String {
             })
         })
         .collect();
-    Value::Array(items).to_string()
+    serde_json::to_string(&items).unwrap_or_else(|_| String::from("[]"))
 }
 
 /// The lowercase wire spelling of a severity (matches the config schema's `severity` enum).
