@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 workspace = true
 
 [dependencies]
+serde = { workspace = true }
 # The lint pipeline (parser/engine/config/`lint_document`), the morphology registry seam, and the
 # `Host`-free `decompress_dictionary` the full build uses to verify a JS-supplied dictionary blob.
 tzlint_core = { path = "../tzlint_core", version = "0.0.0" }
