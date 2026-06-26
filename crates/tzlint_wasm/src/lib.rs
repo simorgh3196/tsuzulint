@@ -141,19 +141,33 @@ fn resolve_rules(config: &Config) -> Vec<Box<dyn Rule>> {
 
 /// Serialize diagnostics to a compact JSON array. Spans are byte offsets into the source.
 fn diagnostics_to_json(diagnostics: &[Diagnostic]) -> String {
-    let items: Vec<Value> = diagnostics
+    // PERFORMANCE OPTIMIZATION (⚡ Bolt):
+    // By using a strongly-typed struct with #[derive(serde::Serialize)] instead of the
+    // serde_json::json! macro, we avoid the heavy overhead of creating an intermediate
+    // dynamic JSON DOM (Value::Object/Value::Array). This significantly reduces heap allocations
+    // and improves serialization speed on the critical WASM execution path.
+    #[derive(serde::Serialize)]
+    struct DiagnosticJson<'a> {
+        #[serde(rename = "ruleId")]
+        rule_id: &'a str,
+        severity: &'static str,
+        message: &'a str,
+        start: u32,
+        end: u32,
+    }
+
+    let items: Vec<DiagnosticJson> = diagnostics
         .iter()
-        .map(|d| {
-            serde_json::json!({
-                "ruleId": d.rule_id.as_str(),
-                "severity": severity_str(d.severity),
-                "message": d.message,
-                "start": d.span.start,
-                "end": d.span.end,
-            })
+        .map(|d| DiagnosticJson {
+            rule_id: d.rule_id.as_str(),
+            severity: severity_str(d.severity),
+            message: d.message.as_str(),
+            start: d.span.start,
+            end: d.span.end,
         })
         .collect();
-    Value::Array(items).to_string()
+
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// The lowercase wire spelling of a severity (matches the config schema's `severity` enum).
