@@ -1110,7 +1110,7 @@ dependencies = [
  "csv",
  "daachorse",
  "kanaria",
- "lindera-dictionary",
+ "lindera-dictionary 3.0.7",
  "lindera-ipadic",
  "log",
  "once_cell",
@@ -1161,6 +1161,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "lindera-dictionary"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ee9be0de7cbe3f2764b9e7f6715243958e43140703114acdcae8be2b2e6f24d"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "csv",
+ "daachorse",
+ "derive_builder",
+ "encoding_rs",
+ "encoding_rs_io",
+ "glob",
+ "log",
+ "memmap2",
+ "num_cpus",
+ "once_cell",
+ "regex",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "strum",
+ "strum_macros",
+ "thiserror",
+]
+
+[[package]]
 name = "lindera-ipadic"
 version = "3.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1169,7 +1196,7 @@ dependencies = [
  "anyhow",
  "byteorder",
  "csv",
- "lindera-dictionary",
+ "lindera-dictionary 3.0.7",
  "serde_json",
  "tokio",
 ]
@@ -2378,7 +2405,7 @@ name = "tzlint_morphology_native"
 version = "0.0.0"
 dependencies = [
  "lindera",
- "lindera-dictionary",
+ "lindera-dictionary 4.0.0",
  "rkyv",
  "serde_json",
  "tzlint_ast",

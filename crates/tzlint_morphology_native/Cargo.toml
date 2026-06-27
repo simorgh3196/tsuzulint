@@ -26,7 +26,7 @@ lindera = "3.0.7"
 # `lindera` meta-crate does not re-export. Needed to assemble a `Dictionary` in memory from the
 # container's component byte ranges (`from_dictionary_bytes`). Already in the graph as a transitive
 # dependency of `lindera` at this exact version; MIT.
-lindera-dictionary = "3.0.7"
+lindera-dictionary = "4.0.0"
 # The wasm-clean, lindera-free dictionary-container codec (`tzlint_core::dict::container`) used to
 # split the decompressed blob into component byte ranges. A native-only edge (core never depends on
 # this crate, so there is no cycle and the wasm graph is untouched).
