@@ -20,7 +20,7 @@ tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
 # The morphological analyzer. NATIVE-ONLY by construction: this crate has no dependency edge from
 # the wasm-facing crates (ast/pdk/core), so cargo never resolves lindera for the `wasm32` build,
 # and the crate's `lib.rs` is `#![cfg(not(target_arch = "wasm32"))]` as a second guard. MIT.
-lindera = "3.0.7"
+lindera = "4.0.0"
 # The dictionary component types + their byte-`load()`s (PrefixDictionary, ConnectionCostMatrix,
 # CharacterDefinition, UnknownDictionary, Metadata, and the `Dictionary` struct), which the
 # `lindera` meta-crate does not re-export. Needed to assemble a `Dictionary` in memory from the
