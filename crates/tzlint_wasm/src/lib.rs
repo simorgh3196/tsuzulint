@@ -14,7 +14,7 @@
 //! its caching (IndexedDB/OPFS) live on the JS side — wasm only verifies the pin and decompresses
 //! the bytes it is handed (reusing the same container/pin pipeline as the CLI).
 
-use serde_json::Value;
+use serde::Serialize;
 use tzlint_core::{
     Config, ConfigFormat, MorphologyRegistry, ProcessorConfig, RegionRules, Registry, RuleSetting,
     lint_document,
@@ -134,26 +134,39 @@ fn resolve_rules(config: &Config) -> Vec<Box<dyn Rule>> {
         .filter_map(|id| match config.rules.get(&RuleId::from(*id)) {
             Some(RuleSetting::Off) => None,
             Some(RuleSetting::On { severity, options }) => build_rule(id, options, *severity),
-            None => build_rule(id, &Value::Null, None),
+            None => build_rule(id, &serde_json::Value::Null, None),
         })
         .collect()
 }
 
 /// Serialize diagnostics to a compact JSON array. Spans are byte offsets into the source.
 fn diagnostics_to_json(diagnostics: &[Diagnostic]) -> String {
-    let items: Vec<Value> = diagnostics
+    // 🎓 Scholar improvement: Avoid intermediate `serde_json::Value` allocations
+    // See docs: https://docs.rs/serde_json/latest/serde_json/value/enum.Value.html
+    // and https://docs.rs/serde_json/latest/serde_json/fn.to_string.html
+    // "In general, using strongly-typed data structures is faster and has a smaller memory footprint than using Value."
+    #[derive(Serialize)]
+    struct DiagnosticJson<'a> {
+        #[serde(rename = "ruleId")]
+        rule_id: &'a str,
+        severity: &'static str,
+        message: &'a str,
+        start: u32,
+        end: u32,
+    }
+
+    let items: Vec<DiagnosticJson> = diagnostics
         .iter()
-        .map(|d| {
-            serde_json::json!({
-                "ruleId": d.rule_id.as_str(),
-                "severity": severity_str(d.severity),
-                "message": d.message,
-                "start": d.span.start,
-                "end": d.span.end,
-            })
+        .map(|d| DiagnosticJson {
+            rule_id: d.rule_id.as_str(),
+            severity: severity_str(d.severity),
+            message: &d.message,
+            start: d.span.start,
+            end: d.span.end,
         })
         .collect();
-    Value::Array(items).to_string()
+
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// The lowercase wire spelling of a severity (matches the config schema's `severity` enum).
