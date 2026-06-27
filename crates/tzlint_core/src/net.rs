@@ -152,6 +152,14 @@ fn extract_ipv4(addr: Ipv6Addr) -> Option<Ipv4Addr> {
         let d = (segments[2] & 0xff) as u8;
         return Some(Ipv4Addr::new(a, b, c, d));
     }
+    // Teredo (RFC 4380): 2001::/32
+    if segments[0] == 0x2001 && segments[1] == 0x0000 {
+        let a = (!segments[6] >> 8) as u8;
+        let b = (!segments[6] & 0xff) as u8;
+        let c = (!segments[7] >> 8) as u8;
+        let d = (!segments[7] & 0xff) as u8;
+        return Some(Ipv4Addr::new(a, b, c, d));
+    }
     None
 }
 
@@ -280,18 +288,20 @@ mod tests {
     #[test]
     fn rejects_blocked_ipv6_literals() {
         for host in [
-            "[::1]",                // loopback
-            "[::]",                 // unspecified
-            "[fc00::1]",            // unique local
-            "[fe80::1]",            // link-local
-            "[ff02::1]",            // multicast
-            "[::ffff:127.0.0.1]",   // IPv4-mapped loopback
-            "[::ffff:10.0.0.1]",    // IPv4-mapped private
-            "[::127.0.0.1]",        // IPv4-compatible loopback
-            "[64:ff9b::127.0.0.1]", // NAT64 loopback
-            "[64:ff9b::10.0.0.1]",  // NAT64 private
-            "[2002:7f00:0001::]",   // 6to4 loopback (127.0.0.1)
-            "[2002:0a00:0001::]",   // 6to4 private (10.0.0.1)
+            "[::1]",                  // loopback
+            "[::]",                   // unspecified
+            "[fc00::1]",              // unique local
+            "[fe80::1]",              // link-local
+            "[ff02::1]",              // multicast
+            "[::ffff:127.0.0.1]",     // IPv4-mapped loopback
+            "[::ffff:10.0.0.1]",      // IPv4-mapped private
+            "[::127.0.0.1]",          // IPv4-compatible loopback
+            "[64:ff9b::127.0.0.1]",   // NAT64 loopback
+            "[64:ff9b::10.0.0.1]",    // NAT64 private
+            "[2002:7f00:0001::]",     // 6to4 loopback (127.0.0.1)
+            "[2002:0a00:0001::]",     // 6to4 private (10.0.0.1)
+            "[2001:0000::80ff:fffe]", // Teredo loopback (127.0.0.1)
+            "[2001:0000::f5ff:fffe]", // Teredo private (10.0.0.1)
         ] {
             let url = format!("https://{host}/d.zst");
             assert!(
