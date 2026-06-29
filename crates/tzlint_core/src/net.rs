@@ -301,7 +301,7 @@ mod tests {
             "[64:ff9b::10.0.0.1]",                       // NAT64 private
             "[2002:7f00:0001::]",                        // 6to4 loopback (127.0.0.1)
             "[2002:0a00:0001::]",                        // 6to4 private (10.0.0.1)
-            "[2001:0000:4136:e378:8000:63bf:3fff:fdd2]", // Teredo private (192.0.2.45)
+            "[2001:0000:4136:e378:8000:63bf:3fff:fdd2]", // Teredo documentation (192.0.2.45)
             "[2001:0000:4136:e378:8000:63bf:80ff:fffe]", // Teredo loopback (127.0.0.1)
         ] {
             let url = format!("https://{host}/d.zst");
