@@ -17,6 +17,19 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     groups:
+      # `lindera` and `lindera-dictionary` are co-versioned (the meta-crate pulls the dictionary
+      # crate at its own exact version), and `tzlint_morphology_native` depends on BOTH directly.
+      # A split bump leaves two `lindera-dictionary` versions in the graph and fails to compile
+      # (`expected Dictionary, found a different Dictionary`), so they must move together — majors
+      # included. Listed before `cargo-minor-and-patch` so it wins the match for every update type.
+      lindera:
+        patterns:
+          - "lindera"
+          - "lindera-*"
+        update-types:
+          - major
+          - minor
+          - patch
       # Batch low-risk updates into one PR; majors still get their own for careful review.
       cargo-minor-and-patch:
         update-types:
