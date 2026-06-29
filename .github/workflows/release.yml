@@ -1,0 +1,153 @@
+name: Release
+
+# Cut a release by pushing a SemVer tag (e.g. `v0.1.0`). This builds a prebuilt `tzlint`
+# binary per platform, attaches the archives + a SHA256SUMS manifest to a GitHub Release, and
+# (when an NPM_TOKEN secret is configured) publishes the thin npm wrapper at the same version.
+# `workflow_dispatch` allows a dry rehearsal that builds + uploads artifacts without releasing.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            linker: gcc-aarch64-linux-gnu
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # aarch64 Linux is cross-compiled from the x86_64 runner: install the GNU cross linker and
+      # point cargo at it. Everything in the tree is pure Rust (blake3 `pure`, rustls TLS), so no
+      # C toolchain beyond the linker is needed.
+      - name: Install aarch64 cross linker
+        if: matrix.linker != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.linker }}
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release --locked -p tzlint_cli --target ${{ matrix.target }}
+
+      # Package a self-contained archive named `tzlint-<version>-<target>.{tar.gz,zip}` plus a
+      # per-asset `.sha256`. `<version>` is the tag without the leading `v` (workflow_dispatch
+      # rehearsals fall back to the commit short SHA so nothing collides with a real release).
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ref="${GITHUB_REF_NAME:-}"
+          version="${ref#v}"
+          [ "${{ github.event_name }}" = "push" ] || version="0.0.0-${GITHUB_SHA::8}"
+          base="tzlint-${version}-${{ matrix.target }}"
+          mkdir -p dist
+          tar -czf "dist/${base}.tar.gz" -C "target/${{ matrix.target }}/release" tzlint
+          shasum -a 256 "dist/${base}.tar.gz" | awk '{print $1}' > "dist/${base}.tar.gz.sha256"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ref="${GITHUB_REF_NAME:-}"
+          version="${ref#v}"
+          [ "${{ github.event_name }}" = "push" ] || version="0.0.0-${GITHUB_SHA::8}"
+          base="tzlint-${version}-${{ matrix.target }}"
+          mkdir -p dist
+          7z a "dist/${base}.zip" "./target/${{ matrix.target }}/release/tzlint.exe" >/dev/null
+          certutil -hashfile "dist/${base}.zip" SHA256 | sed -n 2p | tr -d ' \r' > "dist/${base}.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and upload assets
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: dist-*
+          merge-multiple: true
+
+      # Collect every per-asset hash into one signed-off SHA256SUMS manifest next to the archives.
+      - name: Assemble SHA256SUMS
+        working-directory: artifacts
+        run: |
+          : > SHA256SUMS
+          for f in *.sha256; do
+            printf '%s  %s\n' "$(cat "$f")" "${f%.sha256}" >> SHA256SUMS
+          done
+          rm -f *.sha256
+          echo "--- SHA256SUMS ---"; cat SHA256SUMS
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+            artifacts/*
+
+  npm:
+    name: publish npm wrapper
+    needs: release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      # Publishing is opt-in: without an NPM_TOKEN secret the job is a no-op (the binaries are
+      # already released above), so a fork or an unconfigured repo never fails here.
+      - name: Publish (skips when NPM_TOKEN is unset)
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "NPM_TOKEN not set — skipping npm publish."
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          npm version "$version" --no-git-tag-version --allow-same-version
+          npm publish --provenance --access public
