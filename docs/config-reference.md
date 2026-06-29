@@ -35,12 +35,20 @@
   collision). Built-in presets:
   - `ja-basic` — `no-hankaku-kana`, `no-mixed-zenkaku-hankaku-alphabet`, `no-nfd`,
     `no-zero-width-spaces`, `ja-no-mixed-period`.
-  - `ja-technical-writing` — the above plus `no-exclamation-question-mark`, thresholds
-    (`sentence-length` `max: 100`, `max-ten` `max: 3`, `max-kanji-continuous-len` `max: 6`), and the
-    morphology-backed style rules `no-doubled-joshi`, `no-mix-dearu-desumasu`,
-    `no-doubled-conjunctive-particle-ga`, `ja-no-redundant-expression`, `no-dropping-the-ra`, and
-    `no-double-negative-ja` (mirroring `textlint-rule-preset-ja-technical-writing`). `ja-prh` is not
-    bundled — its term list is project-specific, so configure it explicitly.
+  - `ja-technical-writing` — full parity with the 23-rule
+    [`textlint-rule-preset-ja-technical-writing`](https://github.com/textlint-ja/textlint-rule-preset-ja-technical-writing):
+    the upstream thresholds copied verbatim (`sentence-length` `max: 100`, `max-comma` `max: 3`,
+    `max-ten` `max: 3`, `max-kanji-continuous-len` `max: 6`) plus every other preset rule enabled —
+    the surface rules (`arabic-kanji-numbers`, `ja-no-mixed-period`, `no-nfd`,
+    `no-invalid-control-character`, `no-zero-width-spaces`, `no-exclamation-question-mark`,
+    `no-hankaku-kana`, `ja-no-weak-phrase`, `ja-no-abusage`, `ja-unnatural-alphabet`,
+    `no-unmatched-pair`) and the morphology-backed style rules (`no-doubled-joshi`,
+    `no-mix-dearu-desumasu`, `no-doubled-conjunction`, `no-doubled-conjunctive-particle-ga`,
+    `no-double-negative-ja`, `no-dropping-the-ra`, `ja-no-redundant-expression`,
+    `ja-no-successive-word`). It also bundles the tsuzulint-original `no-mixed-zenkaku-hankaku-alphabet`
+    (no upstream counterpart). `ja-prh` is **not** bundled — its term list is project-specific, so
+    configure it explicitly. See [`docs/migration-from-textlint.md`](migration-from-textlint.md) for
+    the full rule-name mapping.
 
   The `ja-*` presets imply `language: ja` (your own `language` overrides it), so their Japanese
   rules run out of the box. Because activation is opt-out, a preset does **not** restrict *which*
@@ -85,6 +93,56 @@
   dictionary fingerprint (the pins of the dictionaries active for the run), so any change that
   could alter diagnostics — including a dictionary upgrade — invalidates the entry. A cache
   read/write failure only warns; results are unaffected.
+
+## Built-in rules
+
+Every rule below is **on by default** (opt-out); disable one with `rule-id: false`. The
+**Lang** column reflects rule scoping (see *Language* above): language-neutral rules always run,
+`ja` rules run only when the document language is Japanese. Morphology-backed rules are marked
+**(morph)** — they are inert until a [`morphology`](#morphology--dictionary-for-morphology-dependent-rules)
+dictionary is configured. Use `tzlint rules list` for the resolved on/off + severity and
+`tzlint rules explain <id>` for one rule's effective options.
+
+### Language-neutral
+
+| Rule | What it flags |
+| --- | --- |
+| `no-nfd` | NFD (decomposed) Unicode; prefer NFC (autofix) |
+| `no-zero-width-spaces` | zero-width space characters (autofix) |
+| `no-mixed-zenkaku-hankaku-alphabet` | mixing full-width and half-width Latin letters in one run |
+| `no-exclamation-question-mark` | `!` / `?` (and full-width `！` / `？`) in prose |
+| `max-kanji-continuous-len` | runs longer than `max` (default 6) continuous kanji |
+| `no-invalid-control-character` | invalid C0 / DEL control characters |
+| `no-todo` | `TODO` / `FIXME` markers left in prose |
+
+### Japanese — surface (no morphology)
+
+| Rule | What it flags |
+| --- | --- |
+| `no-hankaku-kana` | half-width katakana; prefer full-width (autofix) |
+| `ja-no-mixed-period` | mixed sentence-ending punctuation (`。` vs `.`) |
+| `sentence-length` | sentences longer than `max` (default 100) |
+| `max-ten` | more than `max` (default 3) 読点「、」 per sentence |
+| `max-comma` | more than `max` (default 3) ASCII commas per sentence |
+| `arabic-kanji-numbers` | inconsistent Arabic vs. kanji numeral usage (JTF 2.2.2) |
+| `ja-unnatural-alphabet` | a stray single Latin letter between Japanese characters (likely IME error) |
+| `no-unmatched-pair` | unmatched brackets / quotes (`detectOrphanedClosers` opts in to orphaned closers) |
+| `ja-no-weak-phrase` | weak / hedging expressions (the 「かも」 family) |
+| `ja-no-abusage` | common Japanese misuses (誤用) |
+| `ja-prh` | 表記ゆれ / terminology from term lists + `.prh.yml` (autofix; see below) |
+
+### Japanese — morphology-backed (need a dictionary)
+
+| Rule | What it flags |
+| --- | --- |
+| `no-doubled-joshi` | the same 助詞 repeated within one sentence |
+| `no-mix-dearu-desumasu` | mixing である (plain) and ですます (polite) styles in a document |
+| `no-doubled-conjunction` | the same 接続詞 opening consecutive sentences |
+| `no-doubled-conjunctive-particle-ga` | the 逆接の接続助詞「が」 used more than once in one sentence |
+| `no-double-negative-ja` | a rhetorical double negative (ないことはない / なくはない) |
+| `no-dropping-the-ra` | ら抜き言葉 (見れる → 見られる) |
+| `ja-no-redundant-expression` | the redundant「〜することができる」family (reads as「〜できる」) |
+| `ja-no-successive-word` | a word repeated in immediate succession |
 
 ## `formats` — per-format options
 

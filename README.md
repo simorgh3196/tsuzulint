@@ -1,10 +1,16 @@
 # TsuzuLint
 
-> **Status: research / WIP — clean redesign in progress.** This repository is the
-> ground-up redesign of TsuzuLint. See [`docs/roadmap.md`](docs/roadmap.md) for milestones.
+> **Status: pre-release (0.1.0 in progress).** The Japanese linting core is complete — full
+> `textlint-rule-preset-ja-technical-writing` parity (26 built-in rules), morphology-driven style
+> rules, and a `prh`-equivalent terminology rule. The VSCode extension and release packaging are
+> the remaining 0.1.0 work. See [`docs/roadmap.md`](docs/roadmap.md) for milestones.
 
-**TsuzuLint** is a high-performance natural-language linter written in Rust, inspired by
-textlint and specialized for CJK (Japanese first; Korean/Chinese planned).
+**TsuzuLint** is a high-performance natural-language linter written in Rust — a fast, embeddable
+**Japanese `textlint` replacement** (Korean/Chinese planned). On the full `ja-technical-writing`
+preset it runs roughly **15× faster** than Node `textlint` at a fraction of the memory
+(see [benchmarks](docs/benchmarks.md)), and is **migration-friendly**: its rules deliberately mirror
+textlint's names and it imports existing `prh` `.prh.yml` dictionaries
+(see [migrating from textlint](docs/migration-from-textlint.md)).
 
 - **Brand:** TsuzuLint. **Command / crates:** `tzlint` (`tzlint_*`). A short command name
   behind a longer brand is a common convention (e.g. Visual Studio Code → `code`).
@@ -15,7 +21,9 @@ textlint and specialized for CJK (Japanese first; Korean/Chinese planned).
 
 ## Usage
 
-Build the binary (`cargo build --release` → `target/release/tzlint`), then:
+[Install `tzlint`](docs/install.md) — from source today (`cargo install --git …` or
+`cargo build --release` → `target/release/tzlint`); prebuilt binaries, an npm wrapper, and the
+editor extension ship with 0.1.0. Then:
 
 ```sh
 # Lint files, directories (recursed for Markdown), or globs; `-` reads stdin.
@@ -57,9 +65,12 @@ $ printf 'これはﾊﾛｰという文です。\n' | tzlint lint -
 1 file(s) checked, 1 issue(s) found
 ```
 
-See [`docs/config-reference.md`](docs/config-reference.md) for configuration,
-[`docs/json-output.md`](docs/json-output.md) for the `--format json` contract, and
-[`docs/processors.md`](docs/processors.md) for CSV/TSV column linting.
+See [`docs/install.md`](docs/install.md) for install methods,
+[`docs/config-reference.md`](docs/config-reference.md) for configuration (and the full rule list),
+[`docs/migration-from-textlint.md`](docs/migration-from-textlint.md) for switching from textlint,
+[`docs/json-output.md`](docs/json-output.md) for the `--format json` contract,
+[`docs/processors.md`](docs/processors.md) for CSV/TSV column linting, and
+[`docs/benchmarks.md`](docs/benchmarks.md) for the textlint performance comparison.
 
 ## Workspace layout
 
