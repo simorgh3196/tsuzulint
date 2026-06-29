@@ -1,13 +1,13 @@
 # TsuzuLint
 
-> **Status: pre-release (0.1.0 in progress).** The Japanese linting core is complete — full
-> `textlint-rule-preset-ja-technical-writing` parity (26 built-in rules), morphology-driven style
-> rules, and a `prh`-equivalent terminology rule. The VSCode extension and release packaging are
-> the remaining 0.1.0 work. See [`docs/roadmap.md`](docs/roadmap.md) for milestones.
+> **Status: pre-release (0.1.0 in progress).** The Japanese linting core is complete — full parity
+> with the 23-rule `textlint-rule-preset-ja-technical-writing` (26 built-in rules in total),
+> morphology-driven style rules, and a `prh`-equivalent terminology rule. The VSCode extension and
+> release packaging are the remaining 0.1.0 work. See [`docs/roadmap.md`](docs/roadmap.md) for milestones.
 
 **TsuzuLint** is a high-performance natural-language linter written in Rust — a fast, embeddable
 **Japanese `textlint` replacement** (Korean/Chinese planned). On the full `ja-technical-writing`
-preset it runs roughly **15× faster** than Node `textlint` at a fraction of the memory
+preset it runs roughly **15× faster** than Node `textlint` using far less memory
 (see [benchmarks](docs/benchmarks.md)), and is **migration-friendly**: its rules deliberately mirror
 textlint's names and it imports existing `prh` `.prh.yml` dictionaries
 (see [migrating from textlint](docs/migration-from-textlint.md)).

@@ -118,7 +118,7 @@ Existing `prh` `.prh.yml` dictionaries (as used by `textlint-rule-prh`) load dir
 `version`, `imports`, and `rules` (`expected` + `pattern`/`patterns`) are read; `expected` is the
 replacement and may use `$1`-style capture references for a regex (`/source/flags`) pattern.
 
-Limitations to be aware of when migrating: matching uses a smaller regex engine
+Migration limitations: matching uses a smaller regex engine
 (`regex-lite`), so Unicode-property classes (`\p{…}`) and lookaround/backreferences are
 unsupported — a pattern using them is skipped rather than failing the load (Japanese matched as
 literals is unaffected). The prh `specs`, `regexpMustEmpty`, and `options.wordBoundary` fields are

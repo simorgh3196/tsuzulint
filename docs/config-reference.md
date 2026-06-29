@@ -35,18 +35,18 @@
   collision). Built-in presets:
   - `ja-basic` — `no-hankaku-kana`, `no-mixed-zenkaku-hankaku-alphabet`, `no-nfd`,
     `no-zero-width-spaces`, `ja-no-mixed-period`.
-  - `ja-technical-writing` — full parity with the 23-rule
-    [`textlint-rule-preset-ja-technical-writing`](https://github.com/textlint-ja/textlint-rule-preset-ja-technical-writing):
-    the upstream thresholds copied verbatim (`sentence-length` `max: 100`, `max-comma` `max: 3`,
-    `max-ten` `max: 3`, `max-kanji-continuous-len` `max: 6`) plus every other preset rule enabled —
-    the surface rules (`arabic-kanji-numbers`, `ja-no-mixed-period`, `no-nfd`,
+  - `ja-technical-writing` — full parity with the upstream 23-rule
+    [`textlint-rule-preset-ja-technical-writing`](https://github.com/textlint-ja/textlint-rule-preset-ja-technical-writing),
+    plus the tsuzulint-original `no-mixed-zenkaku-hankaku-alphabet` (no upstream counterpart) —
+    **24 rules in total**. The upstream thresholds are copied verbatim (`sentence-length` `max: 100`,
+    `max-comma` `max: 3`, `max-ten` `max: 3`, `max-kanji-continuous-len` `max: 6`) and every other
+    preset rule is enabled: the surface rules (`arabic-kanji-numbers`, `ja-no-mixed-period`, `no-nfd`,
     `no-invalid-control-character`, `no-zero-width-spaces`, `no-exclamation-question-mark`,
     `no-hankaku-kana`, `ja-no-weak-phrase`, `ja-no-abusage`, `ja-unnatural-alphabet`,
     `no-unmatched-pair`) and the morphology-backed style rules (`no-doubled-joshi`,
     `no-mix-dearu-desumasu`, `no-doubled-conjunction`, `no-doubled-conjunctive-particle-ga`,
     `no-double-negative-ja`, `no-dropping-the-ra`, `ja-no-redundant-expression`,
-    `ja-no-successive-word`). It also bundles the tsuzulint-original `no-mixed-zenkaku-hankaku-alphabet`
-    (no upstream counterpart). `ja-prh` is **not** bundled — its term list is project-specific, so
+    `ja-no-successive-word`). `ja-prh` is **not** bundled — its term list is project-specific, so
     configure it explicitly. See [`docs/migration-from-textlint.md`](migration-from-textlint.md) for
     the full rule-name mapping.
 
@@ -96,12 +96,18 @@
 
 ## Built-in rules
 
-Every rule below is **on by default** (opt-out); disable one with `rule-id: false`. The
-**Lang** column reflects rule scoping (see *Language* above): language-neutral rules always run,
-`ja` rules run only when the document language is Japanese. Morphology-backed rules are marked
-**(morph)** — they are inert until a [`morphology`](#morphology--dictionary-for-morphology-dependent-rules)
-dictionary is configured. Use `tzlint rules list` for the resolved on/off + severity and
-`tzlint rules explain <id>` for one rule's effective options.
+Every built-in rule is **on by default** (opt-out); disable one with `rule-id: false`. The rules
+are grouped by scoping (see *Language* above): **language-neutral** rules always run, while the
+**Japanese** rules run only when the document language is Japanese. The morphology-backed group is
+inert until a [`morphology`](#morphology--dictionary-for-morphology-dependent-rules) dictionary is
+configured (the engine skips those rules otherwise). Use `tzlint rules list` for the resolved
+on/off + severity and `tzlint rules explain <id>` for one rule's effective options.
+
+This catalog lists **all** built-in rules, which is not the same as preset membership: `no-todo` is
+a standalone rule (not in `ja-technical-writing`, and not an upstream textlint-preset rule), `ja-prh`
+is intentionally not bundled (see above), and `no-mixed-zenkaku-hankaku-alphabet` is a
+tsuzulint-original that *is* bundled into the preset. See
+[`docs/migration-from-textlint.md`](migration-from-textlint.md) for the textlint preset mapping.
 
 ### Language-neutral
 
