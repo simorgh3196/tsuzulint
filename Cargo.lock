@@ -2411,6 +2411,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "console_error_panic_hook",
+ "serde",
  "serde_json",
  "tzlint_core",
  "tzlint_morphology_native",

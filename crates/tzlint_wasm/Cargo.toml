@@ -24,6 +24,7 @@ tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
 # The built-in rules (`RULE_IDS`/`build_rule`) the linter resolves the active set from.
 tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
 # Serialize the diagnostics to JSON for the JS boundary (the diagnostic model is serde-free).
+serde = { workspace = true }
 serde_json = { workspace = true }
 # The native morphology backend — pulled ONLY by the `morphology` feature, so the default (lean)
 # wasm artifact is tokenizer-free and tiny. The backend and its deps are pure Rust and build for wasm32.
