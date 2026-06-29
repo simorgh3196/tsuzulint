@@ -14,9 +14,9 @@ workspace = true
 [dependencies]
 # The frozen MorphologyV1 data model the provider fills (MorphologyBuilder, Token, FeatureKey,
 # Tagset, Lang) and Span/NodeId. `no_std`, ABI-frozen — shared with the wasm-facing crates.
-tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
+tzlint_ast = { path = "../tzlint_ast", version = "0.1.0" }
 # The `MorphologyProvider` trait this crate implements (and `MorphologyError`).
-tzlint_pdk = { path = "../tzlint_pdk", version = "0.0.0" }
+tzlint_pdk = { path = "../tzlint_pdk", version = "0.1.0" }
 # The morphological analyzer. NATIVE-ONLY by construction: this crate has no dependency edge from
 # the wasm-facing crates (ast/pdk/core), so cargo never resolves lindera for the `wasm32` build,
 # and the crate's `lib.rs` is `#![cfg(not(target_arch = "wasm32"))]` as a second guard. MIT.
@@ -30,7 +30,7 @@ lindera-dictionary = "3.0.7"
 # The wasm-clean, lindera-free dictionary-container codec (`tzlint_core::dict::container`) used to
 # split the decompressed blob into component byte ranges. A native-only edge (core never depends on
 # this crate, so there is no cycle and the wasm graph is untouched).
-tzlint_core = { path = "../tzlint_core", version = "0.0.0" }
+tzlint_core = { path = "../tzlint_core", version = "0.1.0" }
 # Packaging-only (behind the `package` feature): re-serialize a loaded dictionary's components back
 # to their on-disk byte forms when BUILDING a distributable container. `serde_json` re-emits
 # `metadata.json`; `rkyv` re-emits the `char_def.bin`/`unk.bin` archives. Both are already in the
@@ -62,4 +62,4 @@ required-features = ["embed-ipadic"]
 # The morphology rule under test (`NoDoubledJoshi`) for the end-to-end firing test: a real lindera
 # provider, wired through `tzlint_core::lint_document`, must make the rule fire. Test-only — there is
 # no production edge from this backend crate to the rules crate.
-tzlint_rules = { path = "../tzlint_rules", version = "0.0.0" }
+tzlint_rules = { path = "../tzlint_rules", version = "0.1.0" }

@@ -2323,21 +2323,21 @@ checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "tzlint_abi"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "tzlint_ast",
 ]
 
 [[package]]
 name = "tzlint_ast"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "rkyv",
 ]
 
 [[package]]
 name = "tzlint_cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "glob",
@@ -2352,7 +2352,7 @@ dependencies = [
 
 [[package]]
 name = "tzlint_core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "jsonschema",
@@ -2368,14 +2368,14 @@ dependencies = [
 
 [[package]]
 name = "tzlint_lsp"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "tzlint_core",
 ]
 
 [[package]]
 name = "tzlint_morphology_native"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lindera",
  "lindera-dictionary",
@@ -2389,14 +2389,14 @@ dependencies = [
 
 [[package]]
 name = "tzlint_pdk"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "tzlint_ast",
 ]
 
 [[package]]
 name = "tzlint_rules"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "regex-lite",
  "serde_json",
@@ -2407,7 +2407,7 @@ dependencies = [
 
 [[package]]
 name = "tzlint_wasm"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "serde_json",

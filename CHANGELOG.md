@@ -8,11 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 While the project is in `0.x`, the public API and rule behavior may change between
 minor releases.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-06-10
 
 The first public release: a fast, embeddable Japanese prose linter — the Rust
-counterpart to `textlint`. The release date is set when 0.1.0 is cut; entries below
-accumulate as the release is built.
+counterpart to `textlint`. Ships the `tzlint` CLI (`lint` / `fix` / `init` / `rules`),
+**17 built-in rules** behind the `ja-basic` and `ja-technical-writing` presets, `.prh.yml`
+terminology import, and an opt-in Japanese morphology pipeline.
 
 ### Added
 
