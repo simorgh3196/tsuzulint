@@ -1,0 +1,3 @@
+## 2024-05-18 - Optimize WebAssembly JSON Serialization
+**Learning:** In performance-critical WebAssembly bindings, allocating intermediate `Vec` collections for JSON serialization (e.g., mapping elements then calling `collect()`) incurs unnecessary heap allocations. Using a custom wrapper struct with `serde::Serialize` and `serializer.collect_seq()` streams the data directly, bypassing the intermediate allocation and improving speed, especially in memory-constrained targets like WASM.
+**Action:** When serializing collections in performance-critical paths (especially in WASM), avoid `collect::<Vec<_>>()`. Instead, use `serializer.collect_seq()` inside a custom `Serialize` implementation to stream the iterator directly.
