@@ -149,19 +149,32 @@ struct DiagnosticJson<'a> {
     end: u32,
 }
 
+struct DiagnosticsJsonWrapper<'a>(&'a [Diagnostic]);
+
+impl<'a> serde::Serialize for DiagnosticsJsonWrapper<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for d in self.0 {
+            seq.serialize_element(&DiagnosticJson {
+                rule_id: d.rule_id.as_str(),
+                severity: severity_str(d.severity),
+                message: d.message.as_str(),
+                start: d.span.start,
+                end: d.span.end,
+            })?;
+        }
+        seq.end()
+    }
+}
+
 /// Serialize diagnostics to a compact JSON array. Spans are byte offsets into the source.
 fn diagnostics_to_json(diagnostics: &[Diagnostic]) -> String {
-    let items: Vec<DiagnosticJson> = diagnostics
-        .iter()
-        .map(|d| DiagnosticJson {
-            rule_id: d.rule_id.as_str(),
-            severity: severity_str(d.severity),
-            message: d.message.as_str(),
-            start: d.span.start,
-            end: d.span.end,
-        })
-        .collect();
-    serde_json::to_string(&items).unwrap_or_else(|_| String::from("[]"))
+    serde_json::to_string(&DiagnosticsJsonWrapper(diagnostics))
+        .unwrap_or_else(|_| String::from("[]"))
 }
 
 /// The lowercase wire spelling of a severity (matches the config schema's `severity` enum).
