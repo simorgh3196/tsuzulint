@@ -397,17 +397,8 @@ impl DocumentCache {
     /// the in-memory bytes before the write keeps it TOCTOU-free. (`MAX_CACHE_FILE` in practice;
     /// the parameter lets tests drive the bound without a 64 MiB fixture.)
     fn save_within(&self, host: &dyn Host, path: &Path, limit: usize) -> Result<(), CacheError> {
-        let mut entries = serde_json::Map::with_capacity(self.entries.len());
-        for (key, diagnostics) in &self.entries {
-            let array: Vec<Value> = diagnostics.iter().map(diagnostic_to_value).collect();
-            entries.insert(key.to_hex(), Value::Array(array));
-        }
-        let document = serde_json::json!({
-            "version": CACHE_FILE_VERSION,
-            "entries": Value::Object(entries),
-        });
-        // `Value`'s `Display` is infallible, so no serialization error to handle here.
-        let text = document.to_string();
+        let text = serde_json::to_string(&CacheDocumentWrapper(self))
+            .map_err(|e| CacheError::Archive(format!("failed to serialize cache: {}", e)))?;
         if text.len() > limit {
             return Err(CacheError::Io(IoError::TooLarge { limit }));
         }
@@ -564,21 +555,112 @@ fn severity_from_name(name: &str) -> Option<Severity> {
 }
 
 /// Serialize one diagnostic to the cache-file JSON shape.
-fn diagnostic_to_value(diagnostic: &Diagnostic) -> Value {
-    serde_json::json!({
-        "rule_id": diagnostic.rule_id.as_str(),
-        "severity": severity_name(diagnostic.severity),
-        "message": diagnostic.message,
-        "span": { "start": diagnostic.span.start, "end": diagnostic.span.end },
-        "fixes": diagnostic
-            .fixes
-            .iter()
-            .map(|fix| serde_json::json!({
-                "span": { "start": fix.span.start, "end": fix.span.end },
-                "replacement": fix.replacement,
-            }))
-            .collect::<Vec<_>>(),
-    })
+struct CacheDocumentWrapper<'a>(&'a DocumentCache);
+
+impl<'a> serde::Serialize for CacheDocumentWrapper<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("CacheDocument", 2)?;
+        state.serialize_field("version", &CACHE_FILE_VERSION)?;
+        state.serialize_field("entries", &EntriesWrapper(&self.0.entries))?;
+        state.end()
+    }
+}
+
+struct EntriesWrapper<'a>(&'a HashMap<CacheKey, Vec<Diagnostic>>);
+
+impl<'a> serde::Serialize for EntriesWrapper<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, diagnostics) in self.0 {
+            map.serialize_entry(&key.to_hex(), &DiagnosticsWrapper(diagnostics))?;
+        }
+        map.end()
+    }
+}
+
+struct DiagnosticsWrapper<'a>(&'a [Diagnostic]);
+
+impl<'a> serde::Serialize for DiagnosticsWrapper<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_seq(self.0.iter().map(DiagnosticJson::from))
+    }
+}
+
+#[derive(serde::Serialize)]
+struct DiagnosticJson<'a> {
+    rule_id: &'a str,
+    severity: &'static str,
+    message: &'a str,
+    span: SpanJson,
+    #[serde(skip_serializing_if = "FixesWrapper::is_empty")]
+    fixes: FixesWrapper<'a>,
+}
+
+impl<'a> From<&'a Diagnostic> for DiagnosticJson<'a> {
+    fn from(d: &'a Diagnostic) -> Self {
+        DiagnosticJson {
+            rule_id: d.rule_id.as_str(),
+            severity: severity_name(d.severity),
+            message: d.message.as_str(),
+            span: SpanJson {
+                start: d.span.start,
+                end: d.span.end,
+            },
+            fixes: FixesWrapper(&d.fixes),
+        }
+    }
+}
+
+struct FixesWrapper<'a>(&'a [Fix]);
+
+impl<'a> FixesWrapper<'a> {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'a> serde::Serialize for FixesWrapper<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_seq(self.0.iter().map(FixJson::from))
+    }
+}
+
+#[derive(serde::Serialize)]
+struct SpanJson {
+    start: u32,
+    end: u32,
+}
+
+#[derive(serde::Serialize)]
+struct FixJson<'a> {
+    span: SpanJson,
+    replacement: &'a str,
+}
+
+impl<'a> From<&'a Fix> for FixJson<'a> {
+    fn from(f: &'a Fix) -> Self {
+        FixJson {
+            span: SpanJson {
+                start: f.span.start,
+                end: f.span.end,
+            },
+            replacement: f.replacement.as_str(),
+        }
+    }
 }
 
 /// Reconstruct a diagnostic from the cache-file JSON shape, or `None` if any field is missing or
