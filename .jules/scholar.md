@@ -1,0 +1,4 @@
+## 2024-07-04 - Zero-copy JSON serialization with Serde
+**Library:** serde v1.0 / serde_json v1.0
+**Discovery:** According to Serde best practices and memory constraints optimization guidelines, when serializing slices or iterators of structs, collecting them into intermediate `Vec` collections is unnecessary and expensive in WebAssembly targets. We can use a custom wrapper struct that implements `serde::Serialize` and utilizes `serializer.collect_seq()` to stream the data directly without any intermediate heap allocations.
+**Application:** Applied to `diagnostics_to_json` in `tzlint_wasm` where the diagnostics slice was unnecessarily collected into a `Vec<DiagnosticJson>` prior to serialization. Wrapping `&[Diagnostic]` and implementing `Serialize` with `serializer.collect_seq()` bypasses this intermediate heap allocation.
