@@ -177,8 +177,10 @@ fn ipv6_is_blocked(addr: Ipv6Addr) -> bool {
         || addr.is_multicast()   // ff00::/8
         || (segments[0] & 0xfe00) == 0xfc00 // fc00::/7  (unique local)
         || (segments[0] & 0xffc0) == 0xfe80 // fe80::/10 (link-local)
+        || (segments[0] == 0x2001 && segments[1] == 0x0db8) // 2001:db8::/32 (documentation)
+        || (segments[0] == 0x2001 && segments[1] == 0x0002 && segments[2] == 0x0000) // 2001:2::/48 (BMWG)
+        || (segments[0] == 0x0100 && segments[1] == 0x0000 && segments[2] == 0x0000 && segments[3] == 0x0000) // 100::/64 (discard)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,6 +305,9 @@ mod tests {
             "[2002:0a00:0001::]",                        // 6to4 private (10.0.0.1)
             "[2001:0000:4136:e378:8000:63bf:3fff:fdd2]", // Teredo documentation (192.0.2.45)
             "[2001:0000:4136:e378:8000:63bf:80ff:fffe]", // Teredo loopback (127.0.0.1)
+            "[2001:db8::1]",                             // documentation
+            "[2001:2::1]",                               // BMWG
+            "[100::1]",                                  // discard
         ] {
             let url = format!("https://{host}/d.zst");
             assert!(
