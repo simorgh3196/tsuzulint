@@ -1,0 +1,4 @@
+## 2025-07-09 - SSRF Fix: Manual IPv6 Subnet Blocking
+**Vulnerability:** IPv6 documentation (2001:db8::/32) and benchmarking (2001:2::/48) prefixes were unblocked in `net.rs`, which could allow SSRF bypasses via reserved non-local prefixes routing internally.
+**Learning:** `Ipv6Addr::to_ipv4()` only handles mapped/compatible addresses, and many standard library segment inspection functions are unstable or unavailable. Validating specific subnets requires explicit mapping of CIDR lengths to 16-bit segment comparisons in the form `segments[N] == 0xXXXX`.
+**Prevention:** Always manually validate and implement required internal or reserved IP blocklist masks using strict segment-level checks when using standard Rust networking primitives without `std::net`'s unstable subnet methods, and write dedicated tests for any edge cases.
