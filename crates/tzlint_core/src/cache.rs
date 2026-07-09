@@ -397,17 +397,16 @@ impl DocumentCache {
     /// the in-memory bytes before the write keeps it TOCTOU-free. (`MAX_CACHE_FILE` in practice;
     /// the parameter lets tests drive the bound without a 64 MiB fixture.)
     fn save_within(&self, host: &dyn Host, path: &Path, limit: usize) -> Result<(), CacheError> {
-        let mut entries = serde_json::Map::with_capacity(self.entries.len());
-        for (key, diagnostics) in &self.entries {
-            let array: Vec<Value> = diagnostics.iter().map(diagnostic_to_value).collect();
-            entries.insert(key.to_hex(), Value::Array(array));
-        }
-        let document = serde_json::json!({
-            "version": CACHE_FILE_VERSION,
-            "entries": Value::Object(entries),
-        });
-        // `Value`'s `Display` is infallible, so no serialization error to handle here.
-        let text = document.to_string();
+        let document = CacheDocument {
+            version: CACHE_FILE_VERSION,
+            entries: &self.entries,
+        };
+        let text = serde_json::to_string(&document).map_err(|e| {
+            CacheError::Parse(ParseError {
+                message: e.to_string(),
+            })
+        })?;
+
         if text.len() > limit {
             return Err(CacheError::Io(IoError::TooLarge { limit }));
         }
@@ -543,15 +542,6 @@ pub fn lint_cached(
 }
 
 /// The on-disk wire name for a severity (round-trips with [`severity_from_name`]).
-fn severity_name(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info => "info",
-        Severity::Hint => "hint",
-    }
-}
-
 /// Parse a severity wire name, or `None` if unrecognized.
 fn severity_from_name(name: &str) -> Option<Severity> {
     match name {
@@ -561,24 +551,6 @@ fn severity_from_name(name: &str) -> Option<Severity> {
         "hint" => Some(Severity::Hint),
         _ => None,
     }
-}
-
-/// Serialize one diagnostic to the cache-file JSON shape.
-fn diagnostic_to_value(diagnostic: &Diagnostic) -> Value {
-    serde_json::json!({
-        "rule_id": diagnostic.rule_id.as_str(),
-        "severity": severity_name(diagnostic.severity),
-        "message": diagnostic.message,
-        "span": { "start": diagnostic.span.start, "end": diagnostic.span.end },
-        "fixes": diagnostic
-            .fixes
-            .iter()
-            .map(|fix| serde_json::json!({
-                "span": { "start": fix.span.start, "end": fix.span.end },
-                "replacement": fix.replacement,
-            }))
-            .collect::<Vec<_>>(),
-    })
 }
 
 /// Reconstruct a diagnostic from the cache-file JSON shape, or `None` if any field is missing or
@@ -607,6 +579,147 @@ fn span_from_value(value: &Value) -> Option<Span> {
     let start = u32::try_from(value.get("start")?.as_u64()?).ok()?;
     let end = u32::try_from(value.get("end")?.as_u64()?).ok()?;
     Some(Span::new(start, end))
+}
+
+// --- Streaming Serialization Types ---
+
+struct CacheDocument<'a> {
+    version: u64,
+    entries: &'a std::collections::HashMap<CacheKey, Vec<Diagnostic>>,
+}
+
+impl<'a> serde::Serialize for CacheDocument<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("version", &self.version)?;
+        map.serialize_entry("entries", &CacheEntries(self.entries))?;
+        map.end()
+    }
+}
+
+struct CacheEntries<'a>(&'a std::collections::HashMap<CacheKey, Vec<Diagnostic>>);
+
+impl<'a> serde::Serialize for CacheEntries<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut keys: Vec<_> = self.0.keys().collect();
+        keys.sort_by_key(|k| k.to_hex()); // The tests enforce deterministic serialization order
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for key in keys {
+            map.serialize_entry(&key.to_hex(), &DiagnosticList(&self.0[key]))?;
+        }
+        map.end()
+    }
+}
+
+struct DiagnosticList<'a>(&'a [Diagnostic]);
+
+impl<'a> serde::Serialize for DiagnosticList<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for diag in self.0 {
+            seq.serialize_element(&DiagnosticOutput(diag))?;
+        }
+        seq.end()
+    }
+}
+
+struct DiagnosticOutput<'a>(&'a Diagnostic);
+
+impl<'a> serde::Serialize for DiagnosticOutput<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("rule_id", self.0.rule_id.as_str())?;
+        map.serialize_entry(
+            "severity",
+            match self.0.severity {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+                Severity::Info => "info",
+                Severity::Hint => "hint",
+            },
+        )?;
+        map.serialize_entry("message", &self.0.message)?;
+        map.serialize_entry(
+            "span",
+            &SpanOutput {
+                start: self.0.span.start,
+                end: self.0.span.end,
+            },
+        )?;
+        map.serialize_entry("fixes", &FixList(&self.0.fixes))?;
+        map.end()
+    }
+}
+
+struct SpanOutput {
+    start: u32,
+    end: u32,
+}
+
+impl serde::Serialize for SpanOutput {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("start", &self.start)?;
+        map.serialize_entry("end", &self.end)?;
+        map.end()
+    }
+}
+
+struct FixList<'a>(&'a [Fix]);
+
+impl<'a> serde::Serialize for FixList<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for fix in self.0 {
+            seq.serialize_element(&FixOutput(fix))?;
+        }
+        seq.end()
+    }
+}
+
+struct FixOutput<'a>(&'a Fix);
+
+impl<'a> serde::Serialize for FixOutput<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry(
+            "span",
+            &SpanOutput {
+                start: self.0.span.start,
+                end: self.0.span.end,
+            },
+        )?;
+        map.serialize_entry("replacement", &self.0.replacement)?;
+        map.end()
+    }
 }
 
 #[cfg(test)]
