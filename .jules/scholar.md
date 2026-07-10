@@ -1,0 +1,8 @@
+## 2023-11-20 - [Example]
+**Library:** [Name vX.Y.Z]
+**Discovery:** [Details]
+**Application:** [Details]
+## 2024-07-10 - [Serde Streaming Serialization]
+**Library:** [serde v1.0]
+**Discovery:** [The `Serializer::collect_seq` and `Serializer::serialize_seq` methods allow streaming an iterator directly without allocating an intermediate container.]
+**Application:** [Refactored `diagnostics_to_json` in `tzlint_wasm` to stream diagnostics directly to JSON, bypassing intermediate `Vec` heap allocations.]
