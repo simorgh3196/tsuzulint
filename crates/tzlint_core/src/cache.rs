@@ -397,17 +397,54 @@ impl DocumentCache {
     /// the in-memory bytes before the write keeps it TOCTOU-free. (`MAX_CACHE_FILE` in practice;
     /// the parameter lets tests drive the bound without a 64 MiB fixture.)
     fn save_within(&self, host: &dyn Host, path: &Path, limit: usize) -> Result<(), CacheError> {
-        let mut entries = serde_json::Map::with_capacity(self.entries.len());
-        for (key, diagnostics) in &self.entries {
-            let array: Vec<Value> = diagnostics.iter().map(diagnostic_to_value).collect();
-            entries.insert(key.to_hex(), Value::Array(array));
+        #[derive(serde::Serialize)]
+        struct CacheDocument<'a> {
+            version: u64,
+            entries: std::collections::BTreeMap<String, Vec<DiagnosticView<'a>>>,
         }
-        let document = serde_json::json!({
-            "version": CACHE_FILE_VERSION,
-            "entries": Value::Object(entries),
-        });
-        // `Value`'s `Display` is infallible, so no serialization error to handle here.
-        let text = document.to_string();
+
+        #[derive(serde::Serialize)]
+        struct DiagnosticView<'a> {
+            rule_id: &'a str,
+            severity: &'static str,
+            message: &'a str,
+            span: SpanView,
+            fixes: Vec<FixView<'a>>,
+        }
+
+        #[derive(serde::Serialize)]
+        struct SpanView {
+            start: u32,
+            end: u32,
+        }
+
+        #[derive(serde::Serialize)]
+        struct FixView<'a> {
+            span: SpanView,
+            replacement: &'a str,
+        }
+
+        let mut entries = std::collections::BTreeMap::new();
+        for (key, diagnostics) in &self.entries {
+            let view = diagnostics.iter().map(|d| DiagnosticView {
+                rule_id: d.rule_id.as_str(),
+                severity: severity_name(d.severity),
+                message: d.message.as_str(),
+                span: SpanView { start: d.span.start, end: d.span.end },
+                fixes: d.fixes.iter().map(|f| FixView {
+                    span: SpanView { start: f.span.start, end: f.span.end },
+                    replacement: f.replacement.as_str(),
+                }).collect(),
+            }).collect();
+            entries.insert(key.to_hex(), view);
+        }
+
+        let document = CacheDocument {
+            version: CACHE_FILE_VERSION,
+            entries,
+        };
+
+        let text = serde_json::to_string(&document).map_err(CacheError::Key)?;
         if text.len() > limit {
             return Err(CacheError::Io(IoError::TooLarge { limit }));
         }
@@ -437,6 +474,7 @@ pub enum CacheError {
     /// diagnostic format is defined alongside the CLI, M1g.)
     Parse(ParseError),
     /// Building the cache key failed (canonicalizing rule `options` to JSON).
+    /// Can also occur if serialization of the cache file fails.
     Key(serde_json::Error),
     /// Archiving/accessing the parsed AST failed (an internal round-trip that should not occur
     /// for a freshly-parsed document); surfaced rather than served as a fake empty hit.
@@ -561,24 +599,6 @@ fn severity_from_name(name: &str) -> Option<Severity> {
         "hint" => Some(Severity::Hint),
         _ => None,
     }
-}
-
-/// Serialize one diagnostic to the cache-file JSON shape.
-fn diagnostic_to_value(diagnostic: &Diagnostic) -> Value {
-    serde_json::json!({
-        "rule_id": diagnostic.rule_id.as_str(),
-        "severity": severity_name(diagnostic.severity),
-        "message": diagnostic.message,
-        "span": { "start": diagnostic.span.start, "end": diagnostic.span.end },
-        "fixes": diagnostic
-            .fixes
-            .iter()
-            .map(|fix| serde_json::json!({
-                "span": { "start": fix.span.start, "end": fix.span.end },
-                "replacement": fix.replacement,
-            }))
-            .collect::<Vec<_>>(),
-    })
 }
 
 /// Reconstruct a diagnostic from the cache-file JSON shape, or `None` if any field is missing or

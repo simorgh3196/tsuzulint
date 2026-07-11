@@ -1,0 +1,3 @@
+## 2024-07-11 - Optimize json serialization using typed structs
+**Learning:** Using `serde_json::json!` to create an intermediate dynamic `Value` object for JSON serialization causes unnecessary heap allocations. The serialization can be sped up significantly by directly passing a local `#[derive(serde::Serialize)]` struct to `serde_json::to_string()`. Also, when writing intermediate structures avoid creating dynamic objects at all costs. Instead, `BTreeMap` can be used to construct dynamic JSON objects and preserve keys sorting logic.
+**Action:** Always prefer statically defined data structures, potentially wrapping references and using `BTreeMap` to achieve the same result as `serde_json::json!` but faster, thus keeping WebAssembly binary small and fast.
