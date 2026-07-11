@@ -426,16 +426,29 @@ impl DocumentCache {
 
         let mut entries = std::collections::BTreeMap::new();
         for (key, diagnostics) in &self.entries {
-            let view = diagnostics.iter().map(|d| DiagnosticView {
-                rule_id: d.rule_id.as_str(),
-                severity: severity_name(d.severity),
-                message: d.message.as_str(),
-                span: SpanView { start: d.span.start, end: d.span.end },
-                fixes: d.fixes.iter().map(|f| FixView {
-                    span: SpanView { start: f.span.start, end: f.span.end },
-                    replacement: f.replacement.as_str(),
-                }).collect(),
-            }).collect();
+            let view = diagnostics
+                .iter()
+                .map(|d| DiagnosticView {
+                    rule_id: d.rule_id.as_str(),
+                    severity: severity_name(d.severity),
+                    message: d.message.as_str(),
+                    span: SpanView {
+                        start: d.span.start,
+                        end: d.span.end,
+                    },
+                    fixes: d
+                        .fixes
+                        .iter()
+                        .map(|f| FixView {
+                            span: SpanView {
+                                start: f.span.start,
+                                end: f.span.end,
+                            },
+                            replacement: f.replacement.as_str(),
+                        })
+                        .collect(),
+                })
+                .collect();
             entries.insert(key.to_hex(), view);
         }
 
