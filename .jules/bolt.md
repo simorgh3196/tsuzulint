@@ -1,0 +1,3 @@
+## 2024-03-24 - Zero-Allocation WASM Serialization
+**Learning:** To optimize serialization performance (especially in memory-constrained targets like WebAssembly), avoid collecting iterators into intermediate `Vec` collections prior to serialization.
+**Action:** Instead, wrap the slice or iterator in a custom struct and implement `serde::Serialize` utilizing `serializer.collect_seq()` or `serializer.serialize_seq()` to stream data directly without intermediate heap allocations. Also, explicitly declare a named lifetime parameter in trait implementation blocks (e.g. `impl<'a> serde::Serialize for MyStruct<'a>`).
