@@ -1,0 +1,3 @@
+## 2026-07-15 - Streamlined serialization without intermediate Vec allocation
+**Learning:** In WebAssembly (and performance-critical paths), collecting iterators into a `Vec` just to serialize them to JSON introduces unnecessary heap allocations. Using `serde::Serializer::collect_seq()` allows streaming elements directly from an iterator, bypassing the intermediate buffer.
+**Action:** Always consider using a wrapper struct with a custom `Serialize` implementation using `collect_seq()` when serializing slices/iterators, rather than allocating a temporary `Vec` (like `let items: Vec<_> = ...collect()`).
