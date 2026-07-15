@@ -1,0 +1,4 @@
+## 2024-07-15 - Missing Special Purpose IPv6 blocks in SSRF Filter
+**Vulnerability:** The SSRF filter for `tzlint` fetches allowed special-purpose IPv6 address blocks (Documentation `2001:db8::/32`, Discard-only `0100::/64`, and Benchmarking `2001:2::/48`) that could potentially be exploited by attackers to bypass SSRF protections or waste resources.
+**Learning:** Checking `is_loopback`, `is_unspecified`, and `is_multicast` alongside `fc00::/7` and `fe80::/10` is insufficient. Many other IPv6 blocks exist that should not be queried externally, such as `2001:db8::/32` which could be sinkholed internally.
+**Prevention:** Always validate against a comprehensive list of IANA IPv6 Special-Purpose Address Registry blocks, manually masking and checking segments where stable Rust features (like `is_documentation()`) are not yet available or exhaustive.
