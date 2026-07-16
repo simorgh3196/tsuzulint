@@ -177,6 +177,9 @@ fn ipv6_is_blocked(addr: Ipv6Addr) -> bool {
         || addr.is_multicast()   // ff00::/8
         || (segments[0] & 0xfe00) == 0xfc00 // fc00::/7  (unique local)
         || (segments[0] & 0xffc0) == 0xfe80 // fe80::/10 (link-local)
+        || segments[0] == 0x0100            // 0100::/64 (discard-only)
+        || (segments[0] == 0x2001 && segments[1] == 0x0db8) // 2001:db8::/32 (documentation)
+        || (segments[0] == 0x2001 && segments[1] == 0x0002 && segments[2] == 0x0000) // 2001:2::/48 (benchmarking)
 }
 
 #[cfg(test)]
@@ -294,6 +297,9 @@ mod tests {
             "[fc00::1]",                                 // unique local
             "[fe80::1]",                                 // link-local
             "[ff02::1]",                                 // multicast
+            "[0100::1]",                                 // discard-only
+            "[2001:db8::1]",                             // documentation
+            "[2001:2::1]",                               // benchmarking
             "[::ffff:127.0.0.1]",                        // IPv4-mapped loopback
             "[::ffff:10.0.0.1]",                         // IPv4-mapped private
             "[::127.0.0.1]",                             // IPv4-compatible loopback

@@ -1,0 +1,4 @@
+## 2026-07-16 - Prevent SSRF via specialized IPv6 subnets
+**Vulnerability:** The application's SSRF blocklist allowed certain non-routable or specialized IPv6 networks such as Discard-only (0100::/64), Documentation (2001:db8::/32), and Benchmarking (2001:2::/48) prefixes, which could potentially be abused to probe internal routing or benchmarking systems.
+**Learning:** Rust's standard library has unstable IPv6 helper methods (like `is_documentation()`), requiring manual segment validation when strict prefix checks are necessary for security.
+**Prevention:** When evaluating SSRF risks, manually check the `Ipv6Addr::segments()` to block specialized IPv6 prefixes not naturally handled by standard helper methods, being mindful of prefix lengths (e.g. `/48` requires checking exactly 3 segments).
