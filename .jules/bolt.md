@@ -1,3 +1,0 @@
-## 2026-07-16 - Prevent Intermediate Allocations During Serialization
-**Learning:** Collecting iterators into intermediate collections (like `Vec`) before serialization introduces unnecessary heap allocations, degrading performance, especially in memory-constrained WebAssembly environments.
-**Action:** When serializing a list of items mapped from another structure, create a wrapper struct containing a slice and implement `serde::Serialize` manually. Inside the implementation, use `serializer.collect_seq()` or `serializer.serialize_seq()` to stream the mapped items directly, eliminating the need to allocate an intermediate `Vec`.
