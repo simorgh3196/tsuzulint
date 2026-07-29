@@ -1,0 +1,45 @@
+{
+  "name": "tzlint",
+  "version": "0.0.0",
+  "description": "TsuzuLint — a fast, embeddable Japanese textlint replacement. Thin wrapper that installs the native `tzlint` binary.",
+  "keywords": [
+    "textlint",
+    "linter",
+    "japanese",
+    "prose",
+    "tzlint",
+    "tsuzulint"
+  ],
+  "homepage": "https://github.com/simorgh3196/tsuzulint",
+  "bugs": "https://github.com/simorgh3196/tsuzulint/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simorgh3196/tsuzulint.git",
+    "directory": "npm"
+  },
+  "license": "Apache-2.0",
+  "author": "simorgh3196 <simorgh3196@gmail.com>",
+  "bin": {
+    "tzlint": "bin/tzlint.js"
+  },
+  "files": [
+    "bin/tzlint.js",
+    "install.js",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node ./install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

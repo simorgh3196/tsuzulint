@@ -20,7 +20,7 @@ accumulate as the release is built.
   transform over the frozen `AstCoreV1` (rkyv) layout, a single-traversal lint engine
   with a stable `(span.start, span.end, rule_id, message)` diagnostic order, a
   document-level in-memory cache keyed by every input that can change a result, a
-  multi-format configuration loader (TOML / JSON / YAML) with presets, a byte-offset →
+  multi-format configuration loader (JSON / JSONC / YAML) with presets, a byte-offset →
   line/column position mapper, and an `io` / `Host` boundary that routes all filesystem
   and network access through a single abstraction.
 - **Diagnostic and fix model.** A `Diagnostic` / `Fix` model with a convergent
@@ -79,6 +79,10 @@ accumulate as the release is built.
   which has no upstream counterpart.
 - **Command-line interface (`tzlint`).** `lint`, `fix`, `init`, and `rules`
   subcommands with `text`, `json`, and `sarif` output formats.
+- **Distribution.** Prebuilt `tzlint` binaries per platform (Linux x64 / arm64, macOS
+  x64 / arm64, Windows x64) attached to each tagged GitHub Release with a `SHA256SUMS`
+  manifest, plus a thin [`tzlint` npm wrapper](https://github.com/simorgh3196/tsuzulint/tree/main/npm)
+  that downloads and verifies the matching binary on install.
 - **Japanese morphology.** A language-neutral `MorphologyProvider` seam over the
   frozen `MorphologyV1` token table, a Japanese backend (native, feature-gated), and a
   dynamic, non-embedded dictionary pipeline — hash-pinned provisioning, verification,

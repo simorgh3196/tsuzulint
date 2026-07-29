@@ -1,0 +1,4 @@
+# The native binary is downloaded at install time, never committed or published.
+node_modules/
+bin/tzlint-bin
+bin/tzlint-bin.exe
