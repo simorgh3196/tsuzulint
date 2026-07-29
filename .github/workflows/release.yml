@@ -35,7 +35,7 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -80,7 +80,7 @@ jobs:
           [ "${{ github.event_name }}" = "push" ] || version="0.0.0-${GITHUB_SHA::8}"
           base="tzlint-${version}-${{ matrix.target }}"
           mkdir -p dist
-          7z a "dist/${base}.zip" "./target/${{ matrix.target }}/release/tzlint.exe" >/dev/null
+          (cd "target/${{ matrix.target }}/release" && 7z a "../../../dist/${base}.zip" "tzlint.exe" >/dev/null)
           certutil -hashfile "dist/${base}.zip" SHA256 | sed -n 2p | tr -d ' \r' > "dist/${base}.zip.sha256"
 
       - uses: actions/upload-artifact@v4
@@ -97,7 +97,7 @@ jobs:
     permissions:
       contents: write # create the release and upload assets
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -131,8 +131,11 @@ jobs:
     needs: release
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
