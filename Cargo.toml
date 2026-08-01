@@ -65,7 +65,7 @@ blake3 = { version = "1.8.5", default-features = false, features = ["pure"] }
 # pure Rust, builds for `wasm32` and keeps the uniform/reproducible build (same rationale as
 # blake3's `pure`). MIT-licensed. `default-features = false` drops the encoder-side `dict_builder`;
 # `std` provides the `std::io::Read` streaming decoder; `hash` keeps zstd's frame-checksum check.
-ruzstd = { version = "0.8.3", default-features = false, features = ["std", "hash"] }
+ruzstd = { version = "0.9.0", default-features = false, features = ["std", "hash"] }
 
 # WHATWG-URL parser (servo) for the dictionary-fetch SSRF guard (`tzlint_core::net`). A robust,
 # spec-conformant parser is mandatory here: hand-rolling scheme/authority/host parsing is exactly
