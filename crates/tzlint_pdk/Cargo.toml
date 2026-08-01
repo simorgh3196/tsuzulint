@@ -12,4 +12,4 @@ description = "TsuzuLint rule-author SDK: macros, types, and a rule test harness
 workspace = true
 
 [dependencies]
-tzlint_ast = { path = "../tzlint_ast", version = "0.0.0" }
+tzlint_ast = { path = "../tzlint_ast", version = "0.1.0" }
