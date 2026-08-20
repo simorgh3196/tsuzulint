@@ -85,7 +85,7 @@ jobs:
           (cd "target/${{ matrix.target }}/release" && 7z a "../../../dist/${base}.zip" "tzlint.exe" >/dev/null)
           certutil -hashfile "dist/${base}.zip" SHA256 | sed -n 2p | tr -d ' \r' > "dist/${base}.zip.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: dist/*
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: dist-*
@@ -142,7 +142,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
